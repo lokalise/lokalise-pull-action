@@ -1,6 +1,6 @@
 name: 'Pull from Lokalise'
-description: 'Pull translation files from Lokalise'
-author: 'Lokalise Team'
+description: GitHub action to download translation files from Lokalise TMS to your GitHub repository in the form of a pull request.
+author: 'Lokalise Group, Ilya Krukowski'
 inputs:
   api_token:
     description: 'API token for Lokalise with read/write permissions'
