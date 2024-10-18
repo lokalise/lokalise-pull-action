@@ -1,0 +1,150 @@
+name: 'Pull from Lokalise'
+description: 'Pull translation files from Lokalise'
+author: 'Lokalise Team'
+inputs:
+  api_token:
+    description: 'API token for Lokalise with read/write permissions'
+    required: true
+    secret: true
+  project_id:
+    description: 'Project ID for Lokalise'
+    required: true
+  base_lang:
+    description: 'Base language (e.g., en, fr_FR)'
+    required: true
+    default: 'en'
+  translations_path:
+    description: 'Path to translation files'
+    required: true
+    default: 'locales'
+  file_format:
+    description: 'Format of the translation files (e.g., json). Find all supported file formats at https://developers.lokalise.com/reference/api-file-formats'
+    required: true
+    default: 'json'
+  additional_params:
+    description: 'Additional parameters for Lokalise CLI on pull. Find all supported options at https://github.com/lokalise/lokalise-cli-2-go/blob/main/docs/lokalise2_file_download.md'
+    required: false
+    default: ''
+  temp_branch_prefix:
+    description: 'Prefix for the temp branch to create pull request'
+    required: false
+    default: 'lok'
+  always_pull_base:
+    description: 'By default, changes in the base language translation files are ignored. Set this to true to include base language translations in the PR.'
+    required: false
+    default: false
+  max_retries:
+    description: 'Maximum number of retries on rate limit errors'
+    required: false
+    default: 3
+  sleep_on_retry:
+    description: 'Number of seconds to sleep before retrying'
+    required: false
+    default: 1
+
+branding:
+  icon: 'download-cloud'
+  color: 'orange'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Lokalise CLI
+      shell: bash
+      run: |
+        chmod +x "${{ github.action_path }}/src/scripts/install_lokalise_cli.sh"
+        "${{ github.action_path }}/src/scripts/install_lokalise_cli.sh"
+
+    - name: Pull translation files from Lokalise
+      id: pull-files
+      shell: bash
+      env:
+        CLI_ADD_PARAMS: ${{ inputs.additional_params }}
+        MAX_RETRIES: ${{ inputs.max_retries }}
+        SLEEP_TIME: ${{ inputs.sleep_on_retry }}
+        FILE_FORMAT: ${{ inputs.file_format }}
+      run: |
+        chmod +x "${{ github.action_path }}/src/scripts/lokalise_download.sh"
+
+        . "${{ github.action_path }}/src/scripts/lokalise_download.sh"
+        
+        download_files "${{ inputs.project_id }}" "${{ inputs.api_token }}"
+              
+        if [ $? -ne 0 ]; then
+          echo "Error during file download"
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+        if [[ "${{ inputs.always_pull_base }}" == "true" ]]; then
+          STATUS_CMD=$(git status "${{ inputs.translations_path }}/**/*.${{ inputs.file_format }}" --untracked-files=no --porcelain)
+          UNTRACKED_FILES=$(git ls-files --others --exclude-standard "${{ inputs.translations_path }}/**/*.${{ inputs.file_format }}")
+        else
+          STATUS_CMD=$(git status "${{ inputs.translations_path }}/**/*.${{ inputs.file_format }}" --untracked-files=no --porcelain | grep -v "${{ inputs.translations_path }}/${{ inputs.base_lang }}" || true)
+          UNTRACKED_FILES=$(git ls-files --others --exclude-standard "${{ inputs.translations_path }}/**/*.${{ inputs.file_format }}" | grep -v "${{ inputs.translations_path }}/${{ inputs.base_lang }}" || true)
+        fi
+
+        if [[ -z "$STATUS_CMD" && -z "$UNTRACKED_FILES" ]]; then
+          echo "No translation file changes detected after pulling from Lokalise"
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+        else
+          echo "Translation file changes detected after pulling from Lokalise"
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Commit and push changes
+      id: commit-and-push
+      if: steps.pull-files.outputs.has_changes == 'true'
+      shell: bash
+      run: |
+        git config --global user.name "${GITHUB_ACTOR}"
+        git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+
+        TIMESTAMP=$(date +%s)
+        SHORT_SHA=${GITHUB_SHA::6}
+        BRANCH_NAME="${{ inputs.temp_branch_prefix }}_${GITHUB_REF_NAME}_${SHORT_SHA}_${TIMESTAMP}"
+        BRANCH_NAME=$(echo "$BRANCH_NAME" | tr -cd '[:alnum:]_-' | cut -c1-255)
+
+        echo "branch_name=$BRANCH_NAME" >> $GITHUB_ENV
+
+        git checkout -b "$BRANCH_NAME" || git checkout "$BRANCH_NAME"
+      
+        if [[ "${{ inputs.always_pull_base }}" == "true" ]]; then
+          git add "${{ inputs.translations_path }}/**/*.${{ inputs.file_format }}" --force
+        else
+          git add "${{ inputs.translations_path }}/**/*.${{ inputs.file_format }}" --force ":!${{ inputs.translations_path }}/${{ inputs.base_lang }}"
+        fi
+        git commit -m 'Translations update'
+        git push origin "$BRANCH_NAME"
+
+    - name: Create or Update Pull Request
+      if: steps.pull-files.outputs.has_changes == 'true'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ github.token }}
+        script: |
+          try {
+            const { data: pullRequests } = await github.rest.pulls.list({
+              owner: "${{ github.repository_owner }}",
+              repo: "${{ github.event.repository.name }}",
+              head: "${{ github.repository_owner }}:${{ env.branch_name }}",
+              base: "${{ github.ref_name }}",
+              state: 'open'
+            });
+
+            if (pullRequests.length > 0) {
+              console.log(`PR already exists: ${pullRequests[0].html_url}`);
+            } else {
+              const { data: newPr } = await github.rest.pulls.create({
+                owner: "${{ github.repository_owner }}",
+                repo: "${{ github.event.repository.name }}",
+                title: "Lokalise translations update",
+                head: "${{ env.branch_name }}",
+                base: "${{ github.ref_name }}",
+                body: "This PR updates translations from Lokalise.",
+              });
+              console.log(`Created new PR: ${newPr.html_url}`);
+            }
+          } catch (error) {
+            core.setFailed(`Failed to create or update pull request: ${error.message}`);
+          }
