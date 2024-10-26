@@ -105,14 +105,11 @@ runs:
           status_args+=("$path/**/*.${file_format}")
         done
     
-        STATUS_CMD=$(git status "${status_args[@]}" --untracked-files=no --porcelain)
-        UNTRACKED_FILES=$(git ls-files --others --exclude-standard "${status_args[@]}")
+        STATUS_FILES=$(git diff --name-only HEAD -- "${status_args[@]}")
+        # Get untracked files
+        UNTRACKED_FILES=$(git ls-files --others --exclude-standard -- "${status_args[@]}")
     
-        # Remove the status codes to get only the file paths
-        STATUS_FILES=$(echo "$STATUS_CMD" | cut -c4-)
-    
-        # Combine the file paths from both commands
-        ALL_CHANGED_FILES=$(echo -e "$STATUS_FILES\n$UNTRACKED_FILES")
+        ALL_CHANGED_FILES=$(echo -e "$STATUS_FILES\n$UNTRACKED_FILES" | sort | uniq)
     
         if [[ "$always_pull_base" != "true" ]]; then
           exclude_patterns=()
