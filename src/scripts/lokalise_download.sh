@@ -2,7 +2,7 @@
 
 return_with_error() {
     echo "Error: $1" >&2
-    return 1
+    exit 1
 }
 
 download_files() {
