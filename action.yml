@@ -14,7 +14,7 @@ inputs:
     required: true
     default: 'en'
   translations_path:
-    description: 'Path to translation files'
+    description: 'Paths to translation files'
     required: true
     default: |
       locales

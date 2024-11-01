@@ -25,11 +25,12 @@ jobs:
           fetch-depth: 0
 
       - name: Pull from Lokalise
-        uses: lokalise/lokalise-pull-action@v1.0.0
+        uses: lokalise/lokalise-pull-action@v2.0.0
         with:
           api_token: ${{ secrets.LOKALISE_API_TOKEN }}
           project_id: LOKALISE_PROJECT_ID
-          translations_path: TRANSLATIONS_PATH
+          translations_path: |
+            TRANSLATIONS_PATH1
           file_format: FILE_FORMAT
           additional_params: ADDITIONAL_CLI_PARAMS
 ```
@@ -44,7 +45,7 @@ The following parameters are **mandatory**:
 
 - `api_token` — Lokalise API token.
 - `project_id` — Your Lokalise project ID.
-- `translations_path` — Path to your translation files.
+- `translations_path` — One or more paths to your translation files.
 - `file_format` — The format of your translation files.
 - `base_lang` — Your project base language.
 
