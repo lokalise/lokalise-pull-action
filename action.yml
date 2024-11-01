@@ -16,7 +16,8 @@ inputs:
   translations_path:
     description: 'Path to translation files'
     required: true
-    default: 'locales'
+    default: |
+      locales
   file_format:
     description: 'Format of the translation files (e.g., json). Find all supported file formats at https://developers.lokalise.com/reference/api-file-formats'
     required: true
@@ -41,7 +42,9 @@ inputs:
     description: 'Number of seconds to sleep before retrying'
     required: false
     default: 1
-
+permissions:
+  contents: write
+  pull-requests: write
 branding:
   icon: 'download-cloud'
   color: 'orange'
@@ -52,6 +55,7 @@ runs:
     - name: Install Lokalise CLI
       shell: bash
       run: |
+        set -e
         chmod +x "${{ github.action_path }}/src/scripts/install_lokalise_cli.sh"
         "${{ github.action_path }}/src/scripts/install_lokalise_cli.sh"
 
@@ -64,27 +68,62 @@ runs:
         SLEEP_TIME: ${{ inputs.sleep_on_retry }}
         FILE_FORMAT: ${{ inputs.file_format }}
       run: |
+        set -e
         chmod +x "${{ github.action_path }}/src/scripts/lokalise_download.sh"
 
         . "${{ github.action_path }}/src/scripts/lokalise_download.sh"
-        
+
         download_files "${{ inputs.project_id }}" "${{ inputs.api_token }}"
-              
+
         if [ $? -ne 0 ]; then
           echo "Error during file download"
           echo "has_changes=false" >> $GITHUB_OUTPUT
           exit 1
         fi
 
-        if [[ "${{ inputs.always_pull_base }}" == "true" ]]; then
-          STATUS_CMD=$(git status "${{ inputs.translations_path }}/**/*.${{ inputs.file_format }}" --untracked-files=no --porcelain)
-          UNTRACKED_FILES=$(git ls-files --others --exclude-standard "${{ inputs.translations_path }}/**/*.${{ inputs.file_format }}")
-        else
-          STATUS_CMD=$(git status "${{ inputs.translations_path }}/**/*.${{ inputs.file_format }}" --untracked-files=no --porcelain | grep -v "${{ inputs.translations_path }}/${{ inputs.base_lang }}" || true)
-          UNTRACKED_FILES=$(git ls-files --others --exclude-standard "${{ inputs.translations_path }}/**/*.${{ inputs.file_format }}" | grep -v "${{ inputs.translations_path }}/${{ inputs.base_lang }}" || true)
-        fi
+        translations_path="${{ inputs.translations_path }}"
+        file_format="${{ inputs.file_format }}"
+        base_lang="${{ inputs.base_lang }}"
+        always_pull_base="${{ inputs.always_pull_base }}"
 
-        if [[ -z "$STATUS_CMD" && -z "$UNTRACKED_FILES" ]]; then
+        paths=()
+        while IFS= read -r path; do
+          path=$(echo "$path" | xargs)  # Trim whitespace
+          if [ -n "$path" ]; then
+            paths+=("$path")
+          fi
+        done <<< "$translations_path"
+    
+        if [ ${#paths[@]} -eq 0 ]; then
+          echo "No translation paths provided."
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+    
+        status_args=()
+        for path in "${paths[@]}"; do
+          status_args+=("$path/**/*.${file_format}")
+        done
+    
+        STATUS_FILES=$(git diff --name-only HEAD -- "${status_args[@]}")
+        # Get untracked files
+        UNTRACKED_FILES=$(git ls-files --others --exclude-standard -- "${status_args[@]}")
+    
+        ALL_CHANGED_FILES=$(echo -e "$STATUS_FILES\n$UNTRACKED_FILES" | sort | uniq)
+    
+        if [[ "$always_pull_base" != "true" ]]; then
+          exclude_patterns=()
+          for path in "${paths[@]}"; do
+            exclude_patterns+=("^${path}/${base_lang}/")
+          done
+          exclude_pattern=$(printf '%s\n' "${exclude_patterns[@]}" | paste -sd'|' -)
+    
+          if [ -n "$exclude_pattern" ]; then
+            ALL_CHANGED_FILES=$(echo "$ALL_CHANGED_FILES" | grep -Ev "$exclude_pattern" || true)
+          fi
+        fi
+    
+        if [[ -z "$ALL_CHANGED_FILES" ]]; then
           echo "No translation file changes detected after pulling from Lokalise"
           echo "has_changes=false" >> $GITHUB_OUTPUT
         else
@@ -97,25 +136,49 @@ runs:
       if: steps.pull-files.outputs.has_changes == 'true'
       shell: bash
       run: |
+        set -e
         git config --global user.name "${GITHUB_ACTOR}"
         git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
 
         TIMESTAMP=$(date +%s)
         SHORT_SHA=${GITHUB_SHA::6}
-        BRANCH_NAME="${{ inputs.temp_branch_prefix }}_${GITHUB_REF_NAME}_${SHORT_SHA}_${TIMESTAMP}"
+        SAFE_REF_NAME=$(echo "${GITHUB_REF_NAME}" | tr -cd '[:alnum:]_-' | cut -c1-50)
+        BRANCH_NAME="${{ inputs.temp_branch_prefix }}_${SAFE_REF_NAME}_${SHORT_SHA}_${TIMESTAMP}"
         BRANCH_NAME=$(echo "$BRANCH_NAME" | tr -cd '[:alnum:]_-' | cut -c1-255)
-
         echo "branch_name=$BRANCH_NAME" >> $GITHUB_ENV
 
         git checkout -b "$BRANCH_NAME" || git checkout "$BRANCH_NAME"
-      
-        if [[ "${{ inputs.always_pull_base }}" == "true" ]]; then
-          git add "${{ inputs.translations_path }}/**/*.${{ inputs.file_format }}" --force
+
+        translations_path="${{ inputs.translations_path }}"
+        file_format="${{ inputs.file_format }}"
+        base_lang="${{ inputs.base_lang }}"
+        always_pull_base="${{ inputs.always_pull_base }}"
+
+        paths=()
+        while IFS= read -r path; do
+          path=$(echo "$path" | xargs)  # Trim whitespace
+          if [ -n "$path" ]; then
+            paths+=("$path")
+          fi
+        done <<< "$translations_path"
+
+        add_args=()
+        for path in "${paths[@]}"; do
+          if [[ "$always_pull_base" == "true" ]]; then
+            add_args+=("$path/**/*.${file_format}")
+          else
+            add_args+=("$path/**/*.${file_format}")
+            add_args+=(":!$path/$base_lang/**")
+          fi
+        done
+
+        git add "${add_args[@]}" --force
+
+        if git commit -m 'Translations update'; then
+          git push origin "$BRANCH_NAME"
         else
-          git add "${{ inputs.translations_path }}/**/*.${{ inputs.file_format }}" --force ":!${{ inputs.translations_path }}/${{ inputs.base_lang }}"
+          echo "No changes to commit"
         fi
-        git commit -m 'Translations update'
-        git push origin "$BRANCH_NAME"
 
     - name: Create or Update Pull Request
       if: steps.pull-files.outputs.has_changes == 'true'

@@ -2,7 +2,7 @@
 
 return_with_error() {
     echo "Error: $1" >&2
-    return 1
+    exit 1
 }
 
 download_files() {
@@ -66,10 +66,7 @@ download_files() {
             fi
             echo "Attempt $attempt failed with API request error 429. Retrying in $sleep_time seconds..."
             sleep $sleep_time
-            sleep_time=$((sleep_time * 2))
-            if [ $sleep_time -gt $max_sleep_time ]; then
-                sleep_time=$max_sleep_time
-            fi
+            sleep_time=$((sleep_time * 2 > max_sleep_time ? max_sleep_time : sleep_time * 2))
         elif echo "$output" | grep -q 'API request error 406'; then
             echo "API request error 406: No keys for export with current export settings. Exiting..."
             return 0
