@@ -105,6 +105,8 @@ runs:
           exit 0
         fi
     
+        echo "DEBUG: Paths to check: ${paths[@]}"
+
         status_args=()
         for path in "${paths[@]}"; do
           if [[ "$flat_naming" == "true" ]]; then
@@ -115,12 +117,20 @@ runs:
             status_args+=("$path/**/*.${file_format}")
           fi
         done
-    
+
+        echo "DEBUG: Git status arguments: ${status_args[@]}"
+
+        # Get modified files
         STATUS_FILES=$(git diff --name-only HEAD -- "${status_args[@]}")
+        echo "DEBUG: Modified files detected: $STATUS_FILES"
+        
         # Get untracked files
         UNTRACKED_FILES=$(git ls-files --others --exclude-standard -- "${status_args[@]}")
+        echo "DEBUG: Untracked files detected: $UNTRACKED_FILES"
     
+        # Combine modified and untracked files
         ALL_CHANGED_FILES=$(echo -e "$STATUS_FILES\n$UNTRACKED_FILES" | sort | uniq)
+        echo "DEBUG: All changed files before exclusion: $ALL_CHANGED_FILES"
     
         if [[ "$always_pull_base" != "true" ]]; then
           exclude_patterns=()
@@ -134,9 +144,11 @@ runs:
             fi
           done
           exclude_pattern=$(printf '%s\n' "${exclude_patterns[@]}" | paste -sd'|' -)
+          echo "DEBUG: Exclude pattern: $exclude_pattern"
     
           if [ -n "$exclude_pattern" ]; then
             ALL_CHANGED_FILES=$(echo "$ALL_CHANGED_FILES" | grep -Ev "$exclude_pattern" || true)
+            echo "DEBUG: All changed files after exclusion: $ALL_CHANGED_FILES"
           fi
         fi
     
@@ -189,6 +201,7 @@ runs:
             else
               add_args+=("$path/*.${file_format}")
               add_args+=(":!$path/$base_lang.${file_format}")
+              echo "Excluding base language file: $path/$base_lang.${file_format}"
             fi
           else
             # Folder structure: add files in base_lang folders
@@ -197,12 +210,16 @@ runs:
             else
               add_args+=("$path/**/*.${file_format}")
               add_args+=(":!$path/$base_lang/**")
+              echo "Excluding base language directory: $path/$base_lang/**"
             fi
           fi
         done
 
+        # Debug output to show which files are about to be added
+        echo "Staging files with arguments: ${add_args[@]}"
         git add "${add_args[@]}" --force
 
+        # Commit and push
         if git commit -m 'Translations update'; then
           git push origin "$BRANCH_NAME"
         else
