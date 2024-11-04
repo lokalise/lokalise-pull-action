@@ -77,3 +77,67 @@ download_files() {
 
     return_with_error "Failed to download files after $max_retries attempts"
 }
+
+detect_changed_files() {
+    local paths=()
+    while IFS= read -r path; do
+        path=$(echo "$path" | xargs)
+        if [ -n "$path" ]; then
+            paths+=("$path")
+        fi
+    done <<< "$TRANSLATIONS_PATH"
+
+    if [ ${#paths[@]} -eq 0 ]; then
+        return 1
+    fi
+
+    local status_args=()
+    for path in "${paths[@]}"; do
+        if [[ "$FLAT_NAMING" == "true" ]]; then
+            status_args+=("$path/*.${FILE_FORMAT}")
+        else
+            status_args+=("$path/**/*.${FILE_FORMAT}")
+        fi
+    done
+
+    STATUS_FILES=$(git diff --name-only HEAD -- "${status_args[@]}")
+    UNTRACKED_FILES=$(git ls-files --others --exclude-standard -- "${status_args[@]}")
+
+    ALL_CHANGED_FILES=$(echo -e "$STATUS_FILES\n$UNTRACKED_FILES" | sort | uniq)
+
+    if [[ "$FLAT_NAMING" == "true" ]]; then
+        exclude_patterns=()
+
+        for path in "${paths[@]}"; do
+            if [[ "$ALWAYS_PULL_BASE" != "true" ]]; then
+                exclude_patterns+=("^${path}/${BASE_LANG}\.${FILE_FORMAT}$")
+            fi
+
+            exclude_patterns+=("^${path}/.*/.*$")
+        done
+
+        exclude_pattern=$(printf '%s\n' "${exclude_patterns[@]}" | paste -sd'|' -)
+
+        if [ -n "$exclude_pattern" ]; then
+            ALL_CHANGED_FILES=$(echo "$ALL_CHANGED_FILES" | grep -Ev "$exclude_pattern" || true)
+        fi
+    elif [[ "$ALWAYS_PULL_BASE" != "true" ]]; then
+        exclude_patterns=()
+
+        for path in "${paths[@]}"; do
+            exclude_patterns+=("^${path}/${BASE_LANG}/")
+        done
+
+        exclude_pattern=$(printf '%s\n' "${exclude_patterns[@]}" | paste -sd'|' -)
+
+        if [ -n "$exclude_pattern" ]; then
+            ALL_CHANGED_FILES=$(echo "$ALL_CHANGED_FILES" | grep -Ev "$exclude_pattern" || true)
+        fi
+    fi
+
+    if [[ -z "$ALL_CHANGED_FILES" ]]; then
+        return 1
+    else
+        return 0
+    fi
+}
