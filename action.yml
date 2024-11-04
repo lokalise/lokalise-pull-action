@@ -42,6 +42,10 @@ inputs:
     description: 'Number of seconds to sleep before retrying'
     required: false
     default: 1
+  flat_naming:
+    description: 'Use flat naming convention (true/false). If true, expects files like locales/en.json instead of locales/en/file.json'
+    required: false
+    default: 'false'
 permissions:
   contents: write
   pull-requests: write
@@ -85,6 +89,7 @@ runs:
         file_format="${{ inputs.file_format }}"
         base_lang="${{ inputs.base_lang }}"
         always_pull_base="${{ inputs.always_pull_base }}"
+        flat_naming="${{ inputs.flat_naming }}"
 
         paths=()
         while IFS= read -r path; do
@@ -102,7 +107,13 @@ runs:
     
         status_args=()
         for path in "${paths[@]}"; do
-          status_args+=("$path/**/*.${file_format}")
+          if [[ "$flat_naming" == "true" ]]; then
+            # Flat structure: each file is named directly with the base language
+            status_args+=("$path/*.${file_format}")
+          else
+            # Folder structure: files are inside folders named after each language
+            status_args+=("$path/**/*.${file_format}")
+          fi
         done
     
         STATUS_FILES=$(git diff --name-only HEAD -- "${status_args[@]}")
@@ -114,7 +125,13 @@ runs:
         if [[ "$always_pull_base" != "true" ]]; then
           exclude_patterns=()
           for path in "${paths[@]}"; do
-            exclude_patterns+=("^${path}/${base_lang}/")
+            if [[ "$flat_naming" == "true" ]]; then
+              # Flat structure: exclude the base language file directly
+              exclude_patterns+=("^${path}/${base_lang}.${file_format}$")
+            else
+              # Folder structure: exclude the base language folder
+              exclude_patterns+=("^${path}/${base_lang}/")
+            fi
           done
           exclude_pattern=$(printf '%s\n' "${exclude_patterns[@]}" | paste -sd'|' -)
     
@@ -153,6 +170,7 @@ runs:
         file_format="${{ inputs.file_format }}"
         base_lang="${{ inputs.base_lang }}"
         always_pull_base="${{ inputs.always_pull_base }}"
+        flat_naming="${{ inputs.flat_naming }}"
 
         paths=()
         while IFS= read -r path; do
@@ -164,11 +182,22 @@ runs:
 
         add_args=()
         for path in "${paths[@]}"; do
-          if [[ "$always_pull_base" == "true" ]]; then
-            add_args+=("$path/**/*.${file_format}")
+          if [[ "$flat_naming" == "true" ]]; then
+            # Flat structure: add files directly
+            if [[ "$always_pull_base" == "true" ]]; then
+              add_args+=("$path/*.${file_format}")
+            else
+              add_args+=("$path/*.${file_format}")
+              add_args+=(":!$path/$base_lang.${file_format}")
+            fi
           else
-            add_args+=("$path/**/*.${file_format}")
-            add_args+=(":!$path/$base_lang/**")
+            # Folder structure: add files in base_lang folders
+            if [[ "$always_pull_base" == "true" ]]; then
+              add_args+=("$path/**/*.${file_format}")
+            else
+              add_args+=("$path/**/*.${file_format}")
+              add_args+=(":!$path/$base_lang/**")
+            fi
           fi
         done
 
