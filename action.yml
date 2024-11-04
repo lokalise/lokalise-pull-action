@@ -55,15 +55,6 @@ branding:
 
 runs:
   using: "composite"
-  env:
-    CLI_ADD_PARAMS: ${{ inputs.additional_params }}
-    MAX_RETRIES: ${{ inputs.max_retries }}
-    SLEEP_TIME: ${{ inputs.sleep_on_retry }}
-    FILE_FORMAT: ${{ inputs.file_format }}
-    TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
-    BASE_LANG: "${{ inputs.base_lang }}"
-    ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
-    FLAT_NAMING: "${{ inputs.flat_naming }}"
   steps:
     - name: Install Lokalise CLI
       shell: bash
@@ -75,6 +66,15 @@ runs:
     - name: Pull translation files from Lokalise
       id: pull-files
       shell: bash
+      env:
+        CLI_ADD_PARAMS: ${{ inputs.additional_params }}
+        MAX_RETRIES: ${{ inputs.max_retries }}
+        SLEEP_TIME: ${{ inputs.sleep_on_retry }}
+        FILE_FORMAT: ${{ inputs.file_format }}
+        TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
+        BASE_LANG: "${{ inputs.base_lang }}"
+        ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
+        FLAT_NAMING: "${{ inputs.flat_naming }}"
       run: |
         set -e
         chmod +x "${{ github.action_path }}/src/scripts/lokalise_download.sh"
@@ -100,6 +100,12 @@ runs:
     - name: Commit changes
       id: create-commit
       if: steps.pull-files.outputs.has_changes == 'true'
+      env:
+        FILE_FORMAT: ${{ inputs.file_format }}
+        TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
+        BASE_LANG: "${{ inputs.base_lang }}"
+        ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
+        FLAT_NAMING: "${{ inputs.flat_naming }}"
       shell: bash
       run: |
         set -e
