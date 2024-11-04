@@ -106,6 +106,7 @@ runs:
         BASE_LANG: "${{ inputs.base_lang }}"
         ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
+        TEMP_BRANCH_PREFIX: "${{ inputs.temp_branch_prefix }}"
       shell: bash
       run: |
         set -e
