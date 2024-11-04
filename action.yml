@@ -63,102 +63,114 @@ runs:
         chmod +x "${{ github.action_path }}/src/scripts/install_lokalise_cli.sh"
         "${{ github.action_path }}/src/scripts/install_lokalise_cli.sh"
 
-    - name: Pull translation files from Lokalise
-      id: pull-files
-      shell: bash
-      env:
-        CLI_ADD_PARAMS: ${{ inputs.additional_params }}
-        MAX_RETRIES: ${{ inputs.max_retries }}
-        SLEEP_TIME: ${{ inputs.sleep_on_retry }}
-        FILE_FORMAT: ${{ inputs.file_format }}
-      run: |
-        set -e
-        chmod +x "${{ github.action_path }}/src/scripts/lokalise_download.sh"
-
-        . "${{ github.action_path }}/src/scripts/lokalise_download.sh"
-
-        download_files "${{ inputs.project_id }}" "${{ inputs.api_token }}"
-
-        if [ $? -ne 0 ]; then
-          echo "Error during file download"
-          echo "has_changes=false" >> $GITHUB_OUTPUT
-          exit 1
-        fi
-
-        translations_path="${{ inputs.translations_path }}"
-        file_format="${{ inputs.file_format }}"
-        base_lang="${{ inputs.base_lang }}"
-        always_pull_base="${{ inputs.always_pull_base }}"
-        flat_naming="${{ inputs.flat_naming }}"
-
-        paths=()
-        while IFS= read -r path; do
-          path=$(echo "$path" | xargs)  # Trim whitespace
-          if [ -n "$path" ]; then
-            paths+=("$path")
+        - name: Pull translation files from Lokalise
+        id: pull-files
+        shell: bash
+        env:
+          CLI_ADD_PARAMS: ${{ inputs.additional_params }}
+          MAX_RETRIES: ${{ inputs.max_retries }}
+          SLEEP_TIME: ${{ inputs.sleep_on_retry }}
+          FILE_FORMAT: ${{ inputs.file_format }}
+        run: |
+          set -e
+          chmod +x "${{ github.action_path }}/src/scripts/lokalise_download.sh"
+  
+          . "${{ github.action_path }}/src/scripts/lokalise_download.sh"
+  
+          download_files "${{ inputs.project_id }}" "${{ inputs.api_token }}"
+  
+          if [ $? -ne 0 ]; then
+            echo "Error during file download"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            exit 1
           fi
-        done <<< "$translations_path"
-    
-        if [ ${#paths[@]} -eq 0 ]; then
-          echo "No translation paths provided."
-          echo "has_changes=false" >> $GITHUB_OUTPUT
-          exit 0
-        fi
-    
-        echo "DEBUG: Paths to check: ${paths[@]}"
-
-        status_args=()
-        for path in "${paths[@]}"; do
-          if [[ "$flat_naming" == "true" ]]; then
-            # Flat structure: each file is named directly with the base language
-            status_args+=("$path/*.${file_format}")
-          else
-            # Folder structure: files are inside folders named after each language
-            status_args+=("$path/**/*.${file_format}")
+  
+          translations_path="${{ inputs.translations_path }}"
+          file_format="${{ inputs.file_format }}"
+          base_lang="${{ inputs.base_lang }}"
+          always_pull_base="${{ inputs.always_pull_base }}"
+          flat_naming="${{ inputs.flat_naming }}"
+  
+          paths=()
+          while IFS= read -r path; do
+            path=$(echo "$path" | xargs)  # Trim whitespace
+            if [ -n "$path" ]; then
+              paths+=("$path")
+            fi
+          done <<< "$translations_path"
+      
+          if [ ${#paths[@]} -eq 0 ]; then
+            echo "No translation paths provided."
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
-        done
-
-        echo "DEBUG: Git status arguments: ${status_args[@]}"
-
-        # Get modified files
-        STATUS_FILES=$(git diff --name-only HEAD -- "${status_args[@]}")
-        echo "DEBUG: Modified files detected: $STATUS_FILES"
-        
-        # Get untracked files
-        UNTRACKED_FILES=$(git ls-files --others --exclude-standard -- "${status_args[@]}")
-        echo "DEBUG: Untracked files detected: $UNTRACKED_FILES"
-    
-        # Combine modified and untracked files
-        ALL_CHANGED_FILES=$(echo -e "$STATUS_FILES\n$UNTRACKED_FILES" | sort | uniq)
-        echo "DEBUG: All changed files before exclusion: $ALL_CHANGED_FILES"
-    
-        if [[ "$always_pull_base" != "true" ]]; then
-          exclude_patterns=()
+      
+          echo "DEBUG: Paths to check: ${paths[@]}"
+  
+          status_args=()
           for path in "${paths[@]}"; do
             if [[ "$flat_naming" == "true" ]]; then
-              # Flat structure: exclude the base language file directly
-              exclude_patterns+=("^${path}/${base_lang}.${file_format}$")
+              # Flat structure: only add files directly in translations path, exclude subdirectories
+              status_args+=("$path/*.${file_format}")
             else
-              # Folder structure: exclude the base language folder
-              exclude_patterns+=("^${path}/${base_lang}/")
+              # Folder structure: include files in folders named after each language
+              status_args+=("$path/**/*.${file_format}")
             fi
           done
-          exclude_pattern=$(printf '%s\n' "${exclude_patterns[@]}" | paste -sd'|' -)
-          echo "DEBUG: Exclude pattern: $exclude_pattern"
-    
-          if [ -n "$exclude_pattern" ]; then
-            ALL_CHANGED_FILES=$(echo "$ALL_CHANGED_FILES" | grep -Ev "$exclude_pattern" || true)
-            echo "DEBUG: All changed files after exclusion: $ALL_CHANGED_FILES"
+  
+          echo "DEBUG: Git status arguments: ${status_args[@]}"
+  
+          # Get modified files
+          STATUS_FILES=$(git diff --name-only HEAD -- "${status_args[@]}")
+          echo "DEBUG: Modified files detected: $STATUS_FILES"
+          
+          # Get untracked files
+          UNTRACKED_FILES=$(git ls-files --others --exclude-standard -- "${status_args[@]}")
+          echo "DEBUG: Untracked files detected: $UNTRACKED_FILES"
+      
+          # Combine modified and untracked files
+          ALL_CHANGED_FILES=$(echo -e "$STATUS_FILES\n$UNTRACKED_FILES" | sort | uniq)
+          echo "DEBUG: All changed files before exclusion: $ALL_CHANGED_FILES"
+      
+          if [[ "$flat_naming" == "true" ]]; then
+            exclude_patterns=()
+            for path in "${paths[@]}"; do
+              if [[ "$always_pull_base" != "true" ]]; then
+                # Exclude base language file in flat structure if always_pull_base is false
+                exclude_patterns+=("^${path}/${base_lang}\.${file_format}$")
+              fi
+              # Exclude all files within subdirectories in flat structure, regardless of always_pull_base
+              exclude_patterns+=("^${path}/.*/.*$")
+            done
+            exclude_pattern=$(printf '%s\n' "${exclude_patterns[@]}" | paste -sd'|' -)
+            echo "DEBUG: Exclude pattern for flat naming: $exclude_pattern"
+  
+            if [ -n "$exclude_pattern" ]; then
+              ALL_CHANGED_FILES=$(echo "$ALL_CHANGED_FILES" | grep -Ev "$exclude_pattern" || true)
+              echo "DEBUG: All changed files after exclusion: $ALL_CHANGED_FILES"
+            fi
+          elif [[ "$always_pull_base" != "true" ]]; then
+            # Folder structure: exclude base language folder if always_pull_base is false
+            exclude_patterns=()
+            for path in "${paths[@]}"; do
+              exclude_patterns+=("^${path}/${base_lang}/")
+            done
+            exclude_pattern=$(printf '%s\n' "${exclude_patterns[@]}" | paste -sd'|' -)
+            echo "DEBUG: Exclude pattern for folder structure: $exclude_pattern"
+  
+            if [ -n "$exclude_pattern" ]; then
+              ALL_CHANGED_FILES=$(echo "$ALL_CHANGED_FILES" | grep -Ev "$exclude_pattern" || true)
+              echo "DEBUG: All changed files after exclusion: $ALL_CHANGED_FILES"
+            fi
           fi
-        fi
-    
-        if [[ -z "$ALL_CHANGED_FILES" ]]; then
-          echo "No translation file changes detected after pulling from Lokalise"
-          echo "has_changes=false" >> $GITHUB_OUTPUT
-        else
-          echo "Translation file changes detected after pulling from Lokalise"
-          echo "has_changes=true" >> $GITHUB_OUTPUT
-        fi
+      
+          if [[ -z "$ALL_CHANGED_FILES" ]]; then
+            echo "No translation file changes detected after pulling from Lokalise"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Translation file changes detected after pulling from Lokalise"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
 
     - name: Commit and push changes
       id: commit-and-push
@@ -195,7 +207,7 @@ runs:
         add_args=()
         for path in "${paths[@]}"; do
           if [[ "$flat_naming" == "true" ]]; then
-            # Flat structure: add files directly
+            # Flat structure: add only top-level files, exclude subdirectories
             if [[ "$always_pull_base" == "true" ]]; then
               add_args+=("$path/*.${file_format}")
             else
@@ -203,8 +215,10 @@ runs:
               add_args+=(":!$path/$base_lang.${file_format}")
               echo "Excluding base language file: $path/$base_lang.${file_format}"
             fi
+            # Exclude any files in subdirectories when flat_naming is true
+            add_args+=(":!$path/*/")
           else
-            # Folder structure: add files in base_lang folders
+            # Folder structure: include all files in language-named subdirectories
             if [[ "$always_pull_base" == "true" ]]; then
               add_args+=("$path/**/*.${file_format}")
             else
@@ -225,7 +239,7 @@ runs:
         else
           echo "No changes to commit"
         fi
-
+        
     - name: Create or Update Pull Request
       if: steps.pull-files.outputs.has_changes == 'true'
       uses: actions/github-script@v7
