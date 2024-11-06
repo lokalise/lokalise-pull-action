@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"io"
+	// "io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -68,7 +68,7 @@ func downloadFiles(projectID, token string) error {
 		}
 
 		cmd := exec.Command("./bin/lokalise2", cmdArgs...)
-		cmd.Stdout = io.Discard
+		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
 
 		outputBytes, err := cmd.CombinedOutput()
