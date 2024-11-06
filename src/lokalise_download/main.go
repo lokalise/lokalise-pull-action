@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	// "io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -47,6 +46,14 @@ func downloadFiles(projectID, token string) error {
 	fileFormat := os.Getenv("FILE_FORMAT")
 	githubRefName := os.Getenv("GITHUB_REF_NAME")
 
+	// Validate environment variables early
+	if fileFormat == "" {
+		return fmt.Errorf("FILE_FORMAT environment variable is required")
+	}
+	if githubRefName == "" {
+		fmt.Println("Warning: GITHUB_REF_NAME is empty; tags might not be included in download")
+	}
+
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		fmt.Printf("Attempt %d of %d\n", attempt, maxRetries)
 
@@ -57,7 +64,10 @@ func downloadFiles(projectID, token string) error {
 			"--format=" + fileFormat,
 			"--original-filenames=true",
 			"--directory-prefix=/",
-			"--include-tags=" + githubRefName,
+		}
+
+		if githubRefName != "" {
+			cmdArgs = append(cmdArgs, "--include-tags="+githubRefName)
 		}
 
 		if cliAddParams != "" {
@@ -73,25 +83,23 @@ func downloadFiles(projectID, token string) error {
 			return nil
 		}
 
-		// Handle specific API errors based on output content
 		if strings.Contains(output, "API request error 429") {
-			if handleRateLimitError(attempt, currentSleepTime, startTime) {
-				currentSleepTime = min(currentSleepTime*2, maxSleepTime)
-				time.Sleep(time.Duration(currentSleepTime) * time.Second)
-				continue
+			if !handleRateLimitError(attempt, currentSleepTime, startTime) {
+				return fmt.Errorf("max retry time exceeded; exiting")
 			}
-			return fmt.Errorf("max retry time exceeded; exiting")
+			currentSleepTime = min(currentSleepTime*2, maxSleepTime)
+			time.Sleep(time.Duration(currentSleepTime) * time.Second)
+			continue
 		}
 
 		if strings.Contains(output, "API request error 406") {
-			return fmt.Errorf("No keys for export with current settings. Exiting...")
+			return fmt.Errorf("no keys for export with current settings; exiting")
 		}
 
-		return fmt.Errorf("unexpected error during download: %s", output)
-
+		fmt.Printf("Unexpected error during download on attempt %d: %s\n", attempt, output)
 	}
 
-	return fmt.Errorf("Failed to download files after %d attempts", maxRetries)
+	return fmt.Errorf("failed to download files after %d attempts", maxRetries)
 }
 
 func handleRateLimitError(attempt, currentSleepTime int, startTime time.Time) bool {

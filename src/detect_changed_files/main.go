@@ -15,7 +15,7 @@ import (
 func main() {
 	changed, err := detectChangedFiles()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, "Error detecting changes:", err)
 		os.Exit(1)
 	}
 
@@ -23,7 +23,9 @@ func main() {
 	if changed {
 		outputValue = "true"
 	}
+
 	if !githuboutput.WriteToGitHubOutput("has_changes", outputValue) {
+		fmt.Fprintln(os.Stderr, "Failed to write to GitHub output.")
 		os.Exit(1)
 	}
 }
@@ -33,7 +35,7 @@ func detectChangedFiles() (bool, error) {
 	// Load environment variables
 	paths, err := parsePaths(os.Getenv("TRANSLATIONS_PATH"))
 	if err != nil || len(paths) == 0 {
-		return false, fmt.Errorf("no valid paths found: %v", err)
+		return false, fmt.Errorf("no valid paths found or error parsing paths: %v", err)
 	}
 
 	fileFormat := os.Getenv("FILE_FORMAT")
@@ -72,7 +74,10 @@ func parsePaths(translationsPath string) ([]string, error) {
 			paths = append(paths, path)
 		}
 	}
-	return paths, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading paths: %v", err)
+	}
+	return paths, nil
 }
 
 // Runs `git diff --name-only` to detect modified files
@@ -91,11 +96,11 @@ func gitLsFiles(paths []string, fileFormat string, flatNaming bool) ([]string, e
 func buildGitStatusArgs(paths []string, fileFormat string, flatNaming bool, gitCmd ...string) []string {
 	var patterns []string
 	for _, path := range paths {
-		pattern := fmt.Sprintf("%s/*.%s", path, fileFormat)
-		if !flatNaming {
-			pattern = fmt.Sprintf("%s/**/*.%s", path, fileFormat)
+		if flatNaming {
+			patterns = append(patterns, fmt.Sprintf("%s/*.%s", path, fileFormat))
+		} else {
+			patterns = append(patterns, fmt.Sprintf("%s/**/*.%s", path, fileFormat))
 		}
-		patterns = append(patterns, pattern)
 	}
 	return append(gitCmd, append([]string{"--"}, patterns...)...)
 }
@@ -107,7 +112,15 @@ func runGitCommand(args []string) ([]string, error) {
 	if err != nil && err.Error() != "exit status 1" {
 		return nil, err
 	}
-	return strings.Split(strings.TrimSpace(string(outputBytes)), "\n"), nil
+	// Split the output into lines and remove any empty strings
+	output := strings.Split(strings.TrimSpace(string(outputBytes)), "\n")
+	var results []string
+	for _, line := range output {
+		if line != "" {
+			results = append(results, line)
+		}
+	}
+	return results, nil
 }
 
 // Deduplicates and combines two slices of files

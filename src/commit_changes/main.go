@@ -19,6 +19,7 @@ func main() {
 	err := commitAndPushChanges()
 	if err != nil {
 		if err == ErrNoChanges {
+			fmt.Println("No changes detected, exiting with status 1")
 			os.Exit(1)
 		} else {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
@@ -27,6 +28,7 @@ func main() {
 	}
 
 	if !githuboutput.WriteToGitHubOutput("commit_created", "true") {
+		fmt.Fprintln(os.Stderr, "Failed to write to GitHub output, exiting")
 		os.Exit(1)
 	}
 }
@@ -51,7 +53,7 @@ func commitAndPushChanges() error {
 	}
 
 	if !githuboutput.WriteToGitHubOutput("branch_name", branchName) {
-		return fmt.Errorf("failed to write to GITHUB_OUTPUT")
+		return fmt.Errorf("failed to write branch name to GITHUB_OUTPUT")
 	}
 
 	// Checkout the branch
@@ -61,6 +63,10 @@ func commitAndPushChanges() error {
 
 	// Prepare and add files for commit
 	addArgs := buildGitAddArgs()
+	if len(addArgs) == 0 {
+		return fmt.Errorf("no files to add, check your configuration")
+	}
+
 	if err := runCommand("git", append([]string{"add"}, addArgs...)...); err != nil {
 		return fmt.Errorf("failed to add files: %v", err)
 	}
@@ -87,6 +93,7 @@ func setGitUser(username, email string) error {
 	if err := runCommand("git", "config", "--global", "user.email", email); err != nil {
 		return fmt.Errorf("failed to set git user.email: %v", err)
 	}
+	fmt.Println("Configured Git user")
 	return nil
 }
 
@@ -100,9 +107,15 @@ func generateBranchName() (string, error) {
 }
 
 func checkoutBranch(branchName string) error {
-	if err := runCommand("git", "checkout", "-b", branchName); err != nil {
-		return runCommand("git", "checkout", branchName)
+	if err := runCommand("git", "checkout", "-b", branchName); err == nil {
+		fmt.Printf("Created and checked out new branch: %s\n", branchName)
+		return nil
 	}
+	// Branch exists; attempting checkout
+	if err := runCommand("git", "checkout", branchName); err != nil {
+		return fmt.Errorf("failed to checkout branch %s: %v", branchName, err)
+	}
+	fmt.Printf("Switched to existing branch: %s\n", branchName)
 	return nil
 }
 
@@ -134,6 +147,7 @@ func buildGitAddArgs() []string {
 func commitAndPush(branchName string) error {
 	output, err := captureCommandOutput("git", "commit", "-m", "Translations update")
 	if err == nil {
+		fmt.Println("Commit created, pushing to remote...")
 		return runCommand("git", "push", "origin", branchName)
 	}
 	if strings.Contains(output, "nothing to commit") {
@@ -145,6 +159,8 @@ func commitAndPush(branchName string) error {
 
 func runCommand(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
 	return cmd.Run()
 }
 
