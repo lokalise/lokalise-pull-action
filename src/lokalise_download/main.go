@@ -46,12 +46,11 @@ func downloadFiles(projectID, token string) error {
 	fileFormat := os.Getenv("FILE_FORMAT")
 	githubRefName := os.Getenv("GITHUB_REF_NAME")
 
-	// Validate environment variables early
 	if fileFormat == "" {
 		return fmt.Errorf("FILE_FORMAT environment variable is required")
 	}
 	if githubRefName == "" {
-		fmt.Println("Warning: GITHUB_REF_NAME is empty; tags might not be included in download")
+		return fmt.Errorf("GITHUB_REF_NAME is required")
 	}
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
@@ -64,10 +63,7 @@ func downloadFiles(projectID, token string) error {
 			"--format=" + fileFormat,
 			"--original-filenames=true",
 			"--directory-prefix=/",
-		}
-
-		if githubRefName != "" {
-			cmdArgs = append(cmdArgs, "--include-tags="+githubRefName)
+			"--include-tags=" + githubRefName,
 		}
 
 		if cliAddParams != "" {
