@@ -46,7 +46,7 @@ commit_and_push_changes() {
       fi
     done
 
-    git add "${add_args[@]}" --force
+    git add "${add_args[@]}"
 
     if git commit -m 'Translations update'; then
       git push origin "$BRANCH_NAME"
