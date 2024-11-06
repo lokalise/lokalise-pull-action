@@ -64,8 +64,6 @@ func downloadFiles(projectID, token string) error {
 			cmdArgs = append(cmdArgs, strings.Fields(cliAddParams)...)
 		}
 
-		fmt.Printf("Running command: ./bin/lokalise2 %s\n", strings.Join(cmdArgs, " "))
-
 		cmd := exec.Command("./bin/lokalise2", cmdArgs...)
 		outputBytes, err := cmd.CombinedOutput()
 		output := string(outputBytes)

@@ -135,7 +135,7 @@ runs:
                 owner: "${{ github.repository_owner }}",
                 repo: "${{ github.event.repository.name }}",
                 title: "Lokalise translations update",
-                head: "${{ env.branch_name }}",
+                head: "${{ steps.create-commit.outputs.branch_name }}",
                 base: "${{ github.ref_name }}",
                 body: "This PR updates translations from Lokalise.",
               });
