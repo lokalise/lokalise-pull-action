@@ -27,17 +27,14 @@ func main() {
 	token := os.Args[2]
 
 	if err := downloadFiles(projectID, token); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 }
 
 func downloadFiles(projectID, token string) error {
-	if projectID == "" {
-		return fmt.Errorf("project_id is required and cannot be empty")
-	}
-	if token == "" {
-		return fmt.Errorf("token is required and cannot be empty")
+	if projectID == "" || token == "" {
+		return fmt.Errorf("project_id and token are required and cannot be empty")
 	}
 
 	fmt.Printf("Starting download for project: %s\n", projectID)
@@ -67,31 +64,33 @@ func downloadFiles(projectID, token string) error {
 			cmdArgs = append(cmdArgs, strings.Fields(cliAddParams)...)
 		}
 
-		cmd := exec.Command("./bin/lokalise2", cmdArgs...)
-		cmd.Stdout = os.Stderr
-		cmd.Stderr = os.Stderr
+		fmt.Printf("Running command: ./bin/lokalise2 %s\n", strings.Join(cmdArgs, " "))
 
+		cmd := exec.Command("./bin/lokalise2", cmdArgs...)
 		outputBytes, err := cmd.CombinedOutput()
 		output := string(outputBytes)
 
 		if err == nil {
+			fmt.Println("Successfully downloaded files.")
 			return nil
 		}
 
+		// Handle specific API errors based on output content
 		if strings.Contains(output, "API request error 429") {
 			if handleRateLimitError(attempt, currentSleepTime, startTime) {
 				currentSleepTime = min(currentSleepTime*2, maxSleepTime)
 				time.Sleep(time.Duration(currentSleepTime) * time.Second)
 				continue
 			}
-			return fmt.Errorf("Max retry time exceeded; exiting")
+			return fmt.Errorf("max retry time exceeded; exiting")
 		}
 
 		if strings.Contains(output, "API request error 406") {
 			return fmt.Errorf("No keys for export with current settings. Exiting...")
 		}
 
-		return fmt.Errorf("Error during download: %s", output)
+		return fmt.Errorf("unexpected error during download: %s", output)
+
 	}
 
 	return fmt.Errorf("Failed to download files after %d attempts", maxRetries)
