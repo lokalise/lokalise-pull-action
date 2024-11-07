@@ -87,7 +87,7 @@ runs:
 
         CMD_PATH="${{ github.action_path }}/bin/detect_changed_files"
         chmod +x "$CMD_PATH"
-        $("$CMD_PATH") || {
+        "$CMD_PATH" || {
           echo "Error: detect_changed_files script failed with exit code $?"
           exit 1
         }
