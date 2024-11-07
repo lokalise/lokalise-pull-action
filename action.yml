@@ -105,6 +105,7 @@ runs:
       shell: bash
       run: |
         set -e
+
         CMD_PATH="${{ github.action_path }}/bin/commit_changes"
         chmod +x "$CMD_PATH"
         $("$CMD_PATH") || {
