@@ -71,28 +71,19 @@ func detectChangedFiles() (bool, error) {
 		return false, fmt.Errorf("error detecting changed files: %v", err)
 	}
 
-	fmt.Println(statusFiles)
-
 	untrackedFiles, err := gitLsFiles(paths, fileFormat, flatNaming)
 	if err != nil {
 		return false, fmt.Errorf("error detecting untracked files: %v", err)
 	}
 
-	fmt.Println(untrackedFiles)
-
 	// Combine and deduplicate files
 	allChangedFiles := deduplicateFiles(statusFiles, untrackedFiles)
-
-	fmt.Println(allChangedFiles)
 
 	// Build exclusion patterns
 	excludePatterns := buildExcludePatterns(paths, baseLang, fileFormat, flatNaming, alwaysPullBase)
 
-	fmt.Println(excludePatterns)
-
 	// Filter the files based on the exclusion patterns
 	filteredFiles := filterFiles(allChangedFiles, excludePatterns)
-	fmt.Println(filteredFiles)
 
 	// Return true if any files remain after filtering
 	return len(filteredFiles) > 0, nil
