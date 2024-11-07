@@ -19,5 +19,10 @@ func ParsePaths(envVar string) []string {
 			paths = append(paths, path)
 		}
 	}
+
+	if paths == nil {
+		return []string{}
+	}
+
 	return paths
 }
