@@ -197,7 +197,8 @@ func buildExcludePatterns(paths []string, baseLang, fileFormat string, flatNamin
 				excludePatterns = append(excludePatterns, pattern)
 			}
 			// Exclude any files in subdirectories under the path
-			pattern := fmt.Sprintf("^%s%s.*", regexp.QuoteMeta(path+string(os.PathSeparator)), ".*")
+			// Pattern matches files under at least one subdirectory: "^path/.+/.+"
+			pattern := fmt.Sprintf("^%s%s.+%s.+", regexp.QuoteMeta(path), regexp.QuoteMeta(string(os.PathSeparator)), regexp.QuoteMeta(string(os.PathSeparator)))
 			excludePatterns = append(excludePatterns, pattern)
 		} else {
 			if !alwaysPullBase {
