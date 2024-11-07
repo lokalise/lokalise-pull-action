@@ -1,17 +1,21 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"githuboutput"
 	"os"
 	"os/exec"
+	"parsepaths"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
-// Main function to detect changes and write to GitHub output
+// This program checks for changes in translation files and writes the result to GitHub Actions output.
+// It supports both flat and nested naming conventions and applies exclusion rules based on environment variables.
+
 func main() {
 	changed, err := detectChangedFiles()
 	if err != nil {
@@ -24,30 +28,49 @@ func main() {
 		outputValue = "true"
 	}
 
+	// Write the result to GitHub Actions output
 	if !githuboutput.WriteToGitHubOutput("has_changes", outputValue) {
 		fmt.Fprintln(os.Stderr, "Failed to write to GitHub output.")
 		os.Exit(1)
 	}
 }
 
-// Detects changed files in specified paths and applies exclusion rules
+// detectChangedFiles checks for changes in translation files and applies exclusion rules.
+// It returns true if any files have changed after applying the exclusion patterns.
 func detectChangedFiles() (bool, error) {
-	// Load environment variables
-	paths, err := parsePaths(os.Getenv("TRANSLATIONS_PATH"))
-	if err != nil || len(paths) == 0 {
-		return false, fmt.Errorf("no valid paths found or error parsing paths: %v", err)
+	// Load and parse environment variables
+	translationsPath := os.Getenv("TRANSLATIONS_PATH")
+	paths := parsepaths.ParsePaths(translationsPath)
+	if len(paths) == 0 {
+		return false, fmt.Errorf("no valid paths found in TRANSLATIONS_PATH")
 	}
 
 	fileFormat := os.Getenv("FILE_FORMAT")
-	flatNaming := os.Getenv("FLAT_NAMING") == "true"
-	alwaysPullBase := os.Getenv("ALWAYS_PULL_BASE") == "true"
+	if fileFormat == "" {
+		return false, fmt.Errorf("FILE_FORMAT environment variable is required")
+	}
+
+	flatNaming, err := parseBoolEnv("FLAT_NAMING")
+	if err != nil {
+		return false, fmt.Errorf("invalid FLAT_NAMING value: %v", err)
+	}
+
+	alwaysPullBase, err := parseBoolEnv("ALWAYS_PULL_BASE")
+	if err != nil {
+		return false, fmt.Errorf("invalid ALWAYS_PULL_BASE value: %v", err)
+	}
+
 	baseLang := os.Getenv("BASE_LANG")
+	if baseLang == "" {
+		return false, fmt.Errorf("BASE_LANG environment variable is required")
+	}
 
 	// Get changed and untracked files
 	statusFiles, err := gitDiff(paths, fileFormat, flatNaming)
 	if err != nil {
 		return false, fmt.Errorf("error detecting changed files: %v", err)
 	}
+
 	untrackedFiles, err := gitLsFiles(paths, fileFormat, flatNaming)
 	if err != nil {
 		return false, fmt.Errorf("error detecting untracked files: %v", err)
@@ -58,64 +81,75 @@ func detectChangedFiles() (bool, error) {
 
 	// Build exclusion patterns
 	excludePatterns := buildExcludePatterns(paths, baseLang, fileFormat, flatNaming, alwaysPullBase)
+
+	// Filter the files based on the exclusion patterns
 	filteredFiles := filterFiles(allChangedFiles, excludePatterns)
 
 	// Return true if any files remain after filtering
 	return len(filteredFiles) > 0, nil
 }
 
-// Parses paths from TRANSLATIONS_PATH environment variable
-func parsePaths(translationsPath string) ([]string, error) {
-	var paths []string
-	scanner := bufio.NewScanner(strings.NewReader(translationsPath))
-	for scanner.Scan() {
-		path := strings.TrimSpace(scanner.Text())
-		if path != "" {
-			paths = append(paths, path)
-		}
+// parseBoolEnv parses a boolean environment variable.
+// Returns false if the variable is not set or empty.
+// Returns an error if the value cannot be parsed as a boolean.
+func parseBoolEnv(envVar string) (bool, error) {
+	val := os.Getenv(envVar)
+	if val == "" {
+		return false, nil // Default to false if not set
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading paths: %v", err)
-	}
-	return paths, nil
+	return strconv.ParseBool(val)
 }
 
-// Runs `git diff --name-only` to detect modified files
+// gitDiff runs `git diff --name-only HEAD -- <patterns>` to detect modified files.
 func gitDiff(paths []string, fileFormat string, flatNaming bool) ([]string, error) {
 	args := buildGitStatusArgs(paths, fileFormat, flatNaming, "diff", "--name-only", "HEAD")
 	return runGitCommand(args)
 }
 
-// Runs `git ls-files` to detect untracked files
+// gitLsFiles runs `git ls-files --others --exclude-standard -- <patterns>` to detect untracked files.
 func gitLsFiles(paths []string, fileFormat string, flatNaming bool) ([]string, error) {
 	args := buildGitStatusArgs(paths, fileFormat, flatNaming, "ls-files", "--others", "--exclude-standard")
 	return runGitCommand(args)
 }
 
-// Builds git command arguments based on naming convention
+// buildGitStatusArgs constructs git command arguments based on the naming convention and paths.
+// It builds glob patterns to match translation files.
 func buildGitStatusArgs(paths []string, fileFormat string, flatNaming bool, gitCmd ...string) []string {
 	var patterns []string
 	for _, path := range paths {
+		var pattern string
 		if flatNaming {
-			patterns = append(patterns, fmt.Sprintf("%s/*.%s", path, fileFormat))
+			// For flat naming, match files like "path/*.fileFormat"
+			pattern = filepath.Join(path, fmt.Sprintf("*.%s", fileFormat))
 		} else {
-			patterns = append(patterns, fmt.Sprintf("%s/**/*.%s", path, fileFormat))
+			// For nested directories, match files like "path/**/*.fileFormat"
+			pattern = filepath.Join(path, "**", fmt.Sprintf("*.%s", fileFormat))
 		}
+		patterns = append(patterns, pattern)
 	}
-	return append(gitCmd, append([]string{"--"}, patterns...)...)
+	args := append(gitCmd, "--")
+	args = append(args, patterns...)
+	return args
 }
 
-// Executes a git command and returns the output as a slice of strings
+// runGitCommand executes a git command and returns the output lines.
+// If the command exits with a non-zero status, it returns an error.
 func runGitCommand(args []string) ([]string, error) {
 	cmd := exec.Command("git", args...)
 	outputBytes, err := cmd.Output()
-	if err != nil && err.Error() != "exit status 1" {
-		return nil, err
+	if err != nil {
+		return nil, err // Return error if git command fails
 	}
-	// Split the output into lines and remove any empty strings
-	output := strings.Split(strings.TrimSpace(string(outputBytes)), "\n")
+
+	outputStr := strings.TrimSpace(string(outputBytes))
+	if outputStr == "" {
+		return nil, nil // No output means no files changed
+	}
+
+	lines := strings.Split(outputStr, "\n")
 	var results []string
-	for _, line := range output {
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
 		if line != "" {
 			results = append(results, line)
 		}
@@ -123,15 +157,17 @@ func runGitCommand(args []string) ([]string, error) {
 	return results, nil
 }
 
-// Deduplicates and combines two slices of files
+// deduplicateFiles combines and deduplicates two slices of files.
 func deduplicateFiles(statusFiles, untrackedFiles []string) []string {
 	fileSet := make(map[string]struct{})
-	for _, file := range append(statusFiles, untrackedFiles...) {
-		if file != "" {
-			fileSet[file] = struct{}{}
-		}
+	for _, file := range statusFiles {
+		fileSet[file] = struct{}{}
 	}
-	var allFiles []string
+	for _, file := range untrackedFiles {
+		fileSet[file] = struct{}{}
+	}
+	// Collect the keys from the map to get the deduplicated list
+	allFiles := make([]string, 0, len(fileSet))
 	for file := range fileSet {
 		allFiles = append(allFiles, file)
 	}
@@ -139,35 +175,44 @@ func deduplicateFiles(statusFiles, untrackedFiles []string) []string {
 	return allFiles
 }
 
-// Builds exclusion patterns based on settings
+// buildExcludePatterns builds exclusion patterns based on settings.
+// Returns a slice of regular expression strings.
 func buildExcludePatterns(paths []string, baseLang, fileFormat string, flatNaming, alwaysPullBase bool) []string {
 	var excludePatterns []string
 	for _, path := range paths {
 		if flatNaming {
 			if !alwaysPullBase {
-				pattern := fmt.Sprintf("^%s/%s\\.%s$", regexp.QuoteMeta(path), regexp.QuoteMeta(baseLang), regexp.QuoteMeta(fileFormat))
+				// Exclude the base language file, e.g., "path/baseLang.fileFormat"
+				baseLangFile := filepath.Join(path, fmt.Sprintf("%s.%s", baseLang, fileFormat))
+				pattern := fmt.Sprintf("^%s$", regexp.QuoteMeta(baseLangFile))
 				excludePatterns = append(excludePatterns, pattern)
 			}
-			pattern := fmt.Sprintf("^%s/.+/.*$", regexp.QuoteMeta(path))
+			// Exclude any files in subdirectories under the path
+			pattern := fmt.Sprintf("^%s%s.*", regexp.QuoteMeta(path+string(os.PathSeparator)), ".*")
 			excludePatterns = append(excludePatterns, pattern)
-		} else if !alwaysPullBase {
-			pattern := fmt.Sprintf("^%s/%s/", regexp.QuoteMeta(path), regexp.QuoteMeta(baseLang))
-			excludePatterns = append(excludePatterns, pattern)
+		} else {
+			if !alwaysPullBase {
+				// Exclude any files under "path/baseLang/"
+				baseLangDir := filepath.Join(path, baseLang) + string(os.PathSeparator)
+				pattern := fmt.Sprintf("^%s.*", regexp.QuoteMeta(baseLangDir))
+				excludePatterns = append(excludePatterns, pattern)
+			}
 		}
 	}
 	return excludePatterns
 }
 
-// Filters files based on exclusion patterns
+// filterFiles filters the list of files based on exclusion patterns.
 func filterFiles(files, excludePatterns []string) []string {
 	if len(excludePatterns) == 0 {
-		return files
+		return files // No exclusion patterns; return all files
 	}
+	// Combine all exclusion patterns into a single regular expression
 	excludeRegex := regexp.MustCompile(strings.Join(excludePatterns, "|"))
 	var filtered []string
 	for _, file := range files {
 		if !excludeRegex.MatchString(file) {
-			filtered = append(filtered, file)
+			filtered = append(filtered, file) // Include files that do not match exclusion patterns
 		}
 	}
 	return filtered

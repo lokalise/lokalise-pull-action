@@ -6,35 +6,51 @@ import (
 	"githuboutput"
 	"os"
 	"os/exec"
+	"parsepaths"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
 
+// This program commits and pushes changes to GitHub if changes were detected.
+// It constructs the commit and branch names based on environment variables
+// and handles both flat and nested translation file naming conventions.
+
 var (
 	ErrNoChanges    = fmt.Errorf("no changes to commit")
-	requiredEnvVars = []string{"GITHUB_ACTOR", "GITHUB_SHA", "GITHUB_REF_NAME", "TEMP_BRANCH_PREFIX", "TRANSLATIONS_PATH", "FILE_FORMAT", "BASE_LANG"}
+	requiredEnvVars = []string{
+		"GITHUB_ACTOR",
+		"GITHUB_SHA",
+		"GITHUB_REF_NAME",
+		"TEMP_BRANCH_PREFIX",
+		"TRANSLATIONS_PATH",
+		"FILE_FORMAT",
+		"BASE_LANG",
+	}
 )
 
 func main() {
-	err := commitAndPushChanges()
-	if err != nil {
+	if err := commitAndPushChanges(); err != nil {
 		if err == ErrNoChanges {
-			fmt.Fprintf(os.Stderr, "No changes detected, exiting")
-			os.Exit(1)
+			fmt.Fprintln(os.Stderr, "No changes detected, exiting")
+			os.Exit(0) // Exit with code 0 when there are no changes
 		} else {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 			os.Exit(1)
 		}
 	}
 
+	// Indicate that a commit was created
 	if !githuboutput.WriteToGitHubOutput("commit_created", "true") {
 		fmt.Fprintln(os.Stderr, "Failed to write to GitHub output, exiting")
 		os.Exit(1)
 	}
 }
 
-// Commits and pushes changes to GitHub
+// commitAndPushChanges commits and pushes changes to GitHub
 func commitAndPushChanges() error {
+	// Check that all required environment variables are set
 	if err := checkRequiredEnvVars(); err != nil {
 		return err
 	}
@@ -46,17 +62,18 @@ func commitAndPushChanges() error {
 		return err
 	}
 
-	// Generate branch name
+	// Generate a sanitized branch name
 	branchName, err := generateBranchName()
 	if err != nil {
 		return err
 	}
 
+	// Write the branch name to GitHub Actions output
 	if !githuboutput.WriteToGitHubOutput("branch_name", branchName) {
 		return fmt.Errorf("failed to write branch name to GITHUB_OUTPUT")
 	}
 
-	// Checkout the branch
+	// Checkout a new branch or switch to it if it already exists
 	if err := checkoutBranch(branchName); err != nil {
 		return err
 	}
@@ -67,6 +84,7 @@ func commitAndPushChanges() error {
 		return fmt.Errorf("no files to add, check your configuration")
 	}
 
+	// Run 'git add' with the constructed arguments
 	if err := runCommand("git", append([]string{"add"}, addArgs...)...); err != nil {
 		return fmt.Errorf("failed to add files: %v", err)
 	}
@@ -75,17 +93,17 @@ func commitAndPushChanges() error {
 	return commitAndPush(branchName)
 }
 
-// Helper Functions
-
+// checkRequiredEnvVars ensures that all required environment variables are set
 func checkRequiredEnvVars() error {
 	for _, key := range requiredEnvVars {
 		if os.Getenv(key) == "" {
-			return fmt.Errorf("%s is required", key)
+			return fmt.Errorf("environment variable %s is required", key)
 		}
 	}
 	return nil
 }
 
+// setGitUser configures git user.name and user.email
 func setGitUser(username, email string) error {
 	if err := runCommand("git", "config", "--global", "user.name", username); err != nil {
 		return fmt.Errorf("failed to set git user.name: %v", err)
@@ -93,74 +111,95 @@ func setGitUser(username, email string) error {
 	if err := runCommand("git", "config", "--global", "user.email", email); err != nil {
 		return fmt.Errorf("failed to set git user.email: %v", err)
 	}
-
 	return nil
 }
 
+// generateBranchName creates a sanitized branch name based on environment variables
 func generateBranchName() (string, error) {
 	timestamp := time.Now().Unix()
-	shortSHA := os.Getenv("GITHUB_SHA")[:6]
-	safeRefName := sanitizeString(os.Getenv("GITHUB_REF_NAME"), 50)
+	githubSHA := os.Getenv("GITHUB_SHA")
+	if len(githubSHA) < 6 {
+		return "", fmt.Errorf("GITHUB_SHA is too short")
+	}
+	shortSHA := githubSHA[:6]
+
+	githubRefName := os.Getenv("GITHUB_REF_NAME")
+	safeRefName := sanitizeString(githubRefName, 50)
+
 	tempBranchPrefix := os.Getenv("TEMP_BRANCH_PREFIX")
 	branchName := fmt.Sprintf("%s_%s_%s_%d", tempBranchPrefix, safeRefName, shortSHA, timestamp)
+
 	return sanitizeString(branchName, 255), nil
 }
 
+// checkoutBranch creates and checks out the branch, or switches to it if it already exists
 func checkoutBranch(branchName string) error {
+	// Try to create a new branch
 	if err := runCommand("git", "checkout", "-b", branchName); err == nil {
 		return nil
 	}
-	// Branch exists; attempting checkout
+	// If branch already exists, switch to it
 	if err := runCommand("git", "checkout", branchName); err != nil {
 		return fmt.Errorf("failed to checkout branch %s: %v", branchName, err)
 	}
-
 	return nil
 }
 
+// buildGitAddArgs constructs the arguments for 'git add' based on the naming convention
 func buildGitAddArgs() []string {
-	translationsPath := parsePaths()
-	flatNaming := os.Getenv("FLAT_NAMING") == "true"
-	alwaysPullBase := os.Getenv("ALWAYS_PULL_BASE") == "true"
+	translationsPaths := parsepaths.ParsePaths(os.Getenv("TRANSLATIONS_PATH"))
+	flatNaming, _ := strconv.ParseBool(os.Getenv("FLAT_NAMING"))
+	alwaysPullBase, _ := strconv.ParseBool(os.Getenv("ALWAYS_PULL_BASE"))
 	fileFormat := os.Getenv("FILE_FORMAT")
 	baseLang := os.Getenv("BASE_LANG")
 
 	var addArgs []string
-	for _, path := range translationsPath {
+	for _, path := range translationsPaths {
 		if flatNaming {
-			addArgs = append(addArgs, fmt.Sprintf("%s/*.%s", path, fileFormat))
+			// Add files matching 'path/*.fileFormat'
+			addArgs = append(addArgs, filepath.Join(path, fmt.Sprintf("*.%s", fileFormat)))
 			if !alwaysPullBase {
-				addArgs = append(addArgs, fmt.Sprintf(":!%s/%s.%s", path, baseLang, fileFormat))
+				// Exclude base language file
+				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, fmt.Sprintf("%s.%s", baseLang, fileFormat))))
 			}
-			addArgs = append(addArgs, fmt.Sprintf(":!%s/**/*.%s", path, fileFormat))
+			// Exclude files in subdirectories
+			addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, "**", fmt.Sprintf("*.%s", fileFormat))))
 		} else {
-			addArgs = append(addArgs, fmt.Sprintf("%s/**/*.%s", path, fileFormat))
+			// Add files matching 'path/**/*.fileFormat'
+			addArgs = append(addArgs, filepath.Join(path, "**", fmt.Sprintf("*.%s", fileFormat)))
 			if !alwaysPullBase {
-				addArgs = append(addArgs, fmt.Sprintf(":!%s/%s/**", path, baseLang))
+				// Exclude files under 'path/baseLang/**'
+				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, baseLang, "**")))
 			}
 		}
 	}
 	return addArgs
 }
 
+// commitAndPush commits the changes and pushes the branch to origin
 func commitAndPush(branchName string) error {
+	// Attempt to commit the changes
 	output, err := captureCommandOutput("git", "commit", "-m", "Translations update")
 	if err == nil {
+		// Commit succeeded, push the branch
 		return runCommand("git", "push", "origin", branchName)
 	}
 	if strings.Contains(output, "nothing to commit") {
+		// No changes to commit
 		return ErrNoChanges
 	}
 	return fmt.Errorf("failed to commit changes: %v\nOutput: %s", err, output)
 }
 
+// runCommand executes a command and connects stdout and stderr to the respective outputs
 func runCommand(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
-	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
+// captureCommandOutput executes a command and captures both stdout and stderr
 func captureCommandOutput(name string, args ...string) (string, error) {
 	var out bytes.Buffer
 	cmd := exec.Command(name, args...)
@@ -170,27 +209,26 @@ func captureCommandOutput(name string, args ...string) (string, error) {
 	return out.String(), err
 }
 
+// sanitizeString removes unwanted characters from a string and truncates it to maxLength
 func sanitizeString(input string, maxLength int) string {
+	// Only allow letters, numbers, underscores, and hyphens
+	allowed := func(r rune) bool {
+		return (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '_' || r == '-'
+	}
+
 	var sanitized strings.Builder
 	for _, r := range input {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+		if allowed(r) {
 			sanitized.WriteRune(r)
 		}
 	}
-	if sanitized.Len() > maxLength {
-		return sanitized.String()[:maxLength]
-	}
-	return sanitized.String()
-}
 
-func parsePaths() []string {
-	translationsPath := os.Getenv("TRANSLATIONS_PATH")
-	var paths []string
-	for _, line := range strings.Split(translationsPath, "\n") {
-		path := strings.TrimSpace(line)
-		if path != "" {
-			paths = append(paths, path)
-		}
+	result := sanitized.String()
+	if len(result) > maxLength {
+		return result[:maxLength]
 	}
-	return paths
+	return result
 }
