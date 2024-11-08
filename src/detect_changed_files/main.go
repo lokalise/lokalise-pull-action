@@ -2,15 +2,17 @@ package main
 
 import (
 	"fmt"
-	"githuboutput"
 	"os"
 	"os/exec"
-	"parsepaths"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/bodrovis/lokalise-actions-common/githuboutput"
+
+	"github.com/bodrovis/lokalise-actions-common/parsepaths"
 )
 
 // This program checks for changes in translation files and writes the result to GitHub Actions output.

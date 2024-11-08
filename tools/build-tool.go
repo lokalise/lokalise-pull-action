@@ -121,11 +121,6 @@ func buildBinary(srcDir, outputPath string) error {
 func compressWithUPX(binaryPath string) error {
 	fmt.Println("Compressing binary with UPX...")
 	return runCommand("upx", []string{"--best", "--lzma", binaryPath})
-
-	// cmd := exec.Command("upx", "--best", "--lzma", binaryPath)
-	// cmd.Stdout = os.Stdout
-	// cmd.Stderr = os.Stderr
-	// return cmd.Run()
 }
 
 // checkCommand checks if a command is available on the system

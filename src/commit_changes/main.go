@@ -3,14 +3,16 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"githuboutput"
 	"os"
 	"os/exec"
-	"parsepaths"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bodrovis/lokalise-actions-common/githuboutput"
+
+	"github.com/bodrovis/lokalise-actions-common/parsepaths"
 )
 
 // This program commits and pushes changes to GitHub if changes were detected.
