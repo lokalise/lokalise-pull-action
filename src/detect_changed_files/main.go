@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -173,7 +173,7 @@ func deduplicateFiles(statusFiles, untrackedFiles []string) []string {
 	for file := range fileSet {
 		allFiles = append(allFiles, file)
 	}
-	sort.Strings(allFiles)
+	slices.Sort(allFiles)
 	return allFiles
 }
 

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,123 +11,152 @@ import (
 	"time"
 )
 
+// exitFunc is a function variable that defaults to os.Exit.
+// This can be overridden in tests to capture exit behavior.
+var exitFunc = os.Exit
+
 const (
-	defaultMaxRetries = 5   // Default number of retries for rate-limited requests
-	defaultSleepTime  = 1   // Default initial sleep time in seconds between retries
-	maxSleepTime      = 60  // Maximum sleep time in seconds between retries
-	maxTotalTime      = 300 // Maximum total time in seconds for all retries
+	defaultMaxRetries      = 5   // Default number of retries for rate-limited requests
+	defaultSleepTime       = 1   // Default initial sleep time in seconds between retries
+	maxSleepTime           = 60  // Maximum sleep time in seconds between retries
+	maxTotalTime           = 300 // Maximum total time in seconds for all retries
+	defaultDownloadTimeout = 120 // Timeout for the download script
 )
+
+// DownloadConfig holds all the necessary configuration for downloading files
+type DownloadConfig struct {
+	ProjectID        string
+	Token            string
+	FileFormat       string
+	GitHubRefName    string
+	AdditionalParams string
+	MaxRetries       int
+	SleepTime        int
+	DownloadTimeout  int
+}
 
 func main() {
 	// Ensure the required command-line arguments are provided
 	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "Usage: lokalise_download <project_id> <token>")
-		os.Exit(1)
+		returnWithError("Usage: lokalise_download <project_id> <token>")
 	}
 
-	projectID := os.Args[1]
-	token := os.Args[2]
+	// Create the download configuration
+	config := DownloadConfig{
+		ProjectID:        os.Args[1],
+		Token:            os.Args[2],
+		FileFormat:       os.Getenv("FILE_FORMAT"),
+		GitHubRefName:    os.Getenv("GITHUB_REF_NAME"),
+		AdditionalParams: os.Getenv("CLI_ADD_PARAMS"),
+		MaxRetries:       getEnvAsInt("MAX_RETRIES", defaultMaxRetries),
+		SleepTime:        getEnvAsInt("SLEEP_TIME", defaultSleepTime),
+		DownloadTimeout:  defaultDownloadTimeout,
+	}
+
+	// Validate the configuration
+	validateDownloadConfig(config)
 
 	// Start the download process
-	if err := downloadFiles(projectID, token); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
-		os.Exit(1)
+	downloadFiles(config, executeDownload)
+}
+
+// validateDownloadConfig ensures the configuration has all necessary fields
+func validateDownloadConfig(config DownloadConfig) {
+	if config.ProjectID == "" {
+		returnWithError("Project ID is required and cannot be empty.")
 	}
+	if config.Token == "" {
+		returnWithError("API token is required and cannot be empty.")
+	}
+	if config.FileFormat == "" {
+		returnWithError("FILE_FORMAT environment variable is required.")
+	}
+	if config.GitHubRefName == "" {
+		returnWithError("GITHUB_REF_NAME environment variable is required.")
+	}
+}
+
+// executeDownload runs the lokalise2 CLI to download files with a timeout
+func executeDownload(cmdPath string, args []string, downloadTimeout int) ([]byte, error) {
+	timeout := time.Duration(downloadTimeout) * time.Second
+
+	// Create a context with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, cmdPath, args...)
+
+	outputBytes, err := cmd.CombinedOutput()
+
+	// Check if the context timed out
+	if ctx.Err() == context.DeadlineExceeded {
+		return outputBytes, errors.New("command timed out")
+	}
+
+	return outputBytes, err
+}
+
+// constructDownloadArgs builds the arguments for the lokalise2 CLI tool
+func constructDownloadArgs(config DownloadConfig) []string {
+	args := []string{
+		fmt.Sprintf("--token=%s", config.Token),
+		fmt.Sprintf("--project-id=%s", config.ProjectID),
+		"file", "download",
+		fmt.Sprintf("--format=%s", config.FileFormat),
+		"--original-filenames=true",
+		"--directory-prefix=/",
+		fmt.Sprintf("--include-tags=%s", config.GitHubRefName),
+	}
+
+	if config.AdditionalParams != "" {
+		args = append(args, strings.Fields(config.AdditionalParams)...)
+	}
+
+	return args
 }
 
 // downloadFiles attempts to download files from Lokalise using the lokalise2 CLI tool.
 // It handles rate limiting by retrying with exponential backoff and checks for specific API errors.
-func downloadFiles(projectID, token string) error {
-	// Validate required inputs
-	if projectID == "" || token == "" {
-		return fmt.Errorf("project_id and token are required and cannot be empty")
-	}
-
+func downloadFiles(config DownloadConfig, downloadExecutor func(cmdPath string, args []string, timeout int) ([]byte, error)) {
 	fmt.Println("Starting download from Lokalise")
+
+	args := constructDownloadArgs(config)
 	startTime := time.Now()
+	sleepTime := config.SleepTime
+	maxRetries := config.MaxRetries
 
-	// Retrieve retry configurations from environment variables
-	maxRetries := getEnvAsInt("MAX_RETRIES", defaultMaxRetries)
-	sleepTime := getEnvAsInt("SLEEP_TIME", defaultSleepTime)
-	currentSleepTime := sleepTime
-
-	// Retrieve additional configurations from environment variables
-	cliAddParams := os.Getenv("CLI_ADD_PARAMS")
-	fileFormat := os.Getenv("FILE_FORMAT")
-	githubRefName := os.Getenv("GITHUB_REF_NAME")
-
-	// Validate that required environment variables are set
-	if fileFormat == "" {
-		return fmt.Errorf("FILE_FORMAT environment variable is required")
-	}
-	if githubRefName == "" {
-		return fmt.Errorf("GITHUB_REF_NAME environment variable is required")
-	}
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
+	for attempt := 1; attempt <= config.MaxRetries; attempt++ {
 		fmt.Printf("Attempt %d of %d\n", attempt, maxRetries)
 
-		// Construct command arguments for the lokalise2 CLI tool
-		cmdArgs := []string{
-			fmt.Sprintf("--token=%s", token),
-			fmt.Sprintf("--project-id=%s", projectID),
-			"file", "download",
-			fmt.Sprintf("--format=%s", fileFormat),
-			"--original-filenames=true",
-			"--directory-prefix=/",
-			fmt.Sprintf("--include-tags=%s", githubRefName),
-		}
-
-		// Append any additional parameters specified in the environment variable
-		if cliAddParams != "" {
-			cmdArgs = append(cmdArgs, strings.Fields(cliAddParams)...)
-		}
-
-		// Execute the command and capture combined output (stdout and stderr)
-		cmd := exec.Command("./bin/lokalise2", cmdArgs...)
-		outputBytes, err := cmd.CombinedOutput()
-		output := string(outputBytes)
-
+		outputBytes, err := downloadExecutor("./bin/lokalise2", args, config.DownloadTimeout)
 		if err == nil {
-			// Download succeeded
 			fmt.Println("Successfully downloaded files.")
-			return nil
+			return
 		}
+
+		output := string(outputBytes)
 
 		// Check for rate limit error (HTTP status code 429)
 		if isRateLimitError(output) {
-			// Handle rate limit error with exponential backoff
-			if !handleRateLimitError(attempt, currentSleepTime, startTime) {
-				return fmt.Errorf("max retry time exceeded; exiting")
+			if time.Since(startTime).Seconds() >= maxTotalTime {
+				returnWithError(fmt.Sprintf("Max retry time exceeded; exiting after %d attempts.", attempt))
 			}
-			// Increase sleep time exponentially, capped at maxSleepTime
-			currentSleepTime = min(currentSleepTime*2, maxSleepTime)
-			time.Sleep(time.Duration(currentSleepTime) * time.Second)
-			continue // Retry the download
+			fmt.Printf("Rate limit error on attempt %d; retrying in %d seconds...\n", attempt, sleepTime)
+			time.Sleep(time.Duration(sleepTime) * time.Second)
+			sleepTime = min(sleepTime*2, maxSleepTime)
+			continue
 		}
 
 		// Check for "no keys" error (HTTP status code 406)
 		if isNoKeysError(output) {
-			return fmt.Errorf("no keys for export with current settings; exiting")
+			returnWithError("no keys for export with current settings; exiting")
 		}
 
 		// For any other errors, log the output and continue to the next attempt
-		fmt.Printf("Unexpected error during download on attempt %d: %s\n", attempt, output)
+		fmt.Fprintf(os.Stderr, "Unexpected error during download on attempt %d: %s\n", attempt, output)
 	}
 
-	return fmt.Errorf("failed to download files after %d attempts", maxRetries)
-}
-
-// handleRateLimitError handles rate limit errors by checking if the total retry time has exceeded the maximum allowed time.
-// Returns true if the download should be retried, or false if the max total time has been exceeded.
-func handleRateLimitError(attempt, currentSleepTime int, startTime time.Time) bool {
-	elapsedTime := time.Since(startTime).Seconds()
-	if elapsedTime >= maxTotalTime {
-		fmt.Printf("Max retry time exceeded after %d attempts\n", attempt)
-		return false
-	}
-	fmt.Printf("Rate limit error on attempt %d; retrying in %d seconds...\n", attempt, currentSleepTime)
-	return true
+	returnWithError(fmt.Sprintf("Failed to download files after %d attempts.", config.MaxRetries))
 }
 
 // getEnvAsInt retrieves an environment variable as an integer.
@@ -159,4 +190,10 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// returnWithError prints an error message to stderr and exits the program with a non-zero status code.
+func returnWithError(message string) {
+	fmt.Fprintf(os.Stderr, "Error: %s\n", message)
+	exitFunc(1)
 }

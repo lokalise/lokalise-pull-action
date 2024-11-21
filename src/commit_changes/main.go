@@ -20,20 +20,49 @@ import (
 // and handles both flat and nested translation file naming conventions.
 
 var (
-	ErrNoChanges    = fmt.Errorf("no changes to commit")
-	requiredEnvVars = []string{
-		"GITHUB_ACTOR",
-		"GITHUB_SHA",
-		"GITHUB_REF_NAME",
-		"TEMP_BRANCH_PREFIX",
-		"TRANSLATIONS_PATH",
-		"FILE_FORMAT",
-		"BASE_LANG",
-	}
+	ErrNoChanges   = fmt.Errorf("no changes to commit")
+	parsePathsFunc = parsepaths.ParsePaths
 )
 
+type CommandRunner interface {
+	Run(name string, args ...string) error
+	Capture(name string, args ...string) (string, error)
+}
+
+type DefaultCommandRunner struct{}
+
+func (d DefaultCommandRunner) Run(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func (d DefaultCommandRunner) Capture(name string, args ...string) (string, error) {
+	var out bytes.Buffer
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+	return out.String(), err
+}
+
+// Config holds the environment variables required for the script
+type Config struct {
+	GitHubActor      string
+	GitHubSHA        string
+	GitHubRefName    string
+	TempBranchPrefix string
+	TranslationsPath string
+	FileFormat       string
+	BaseLang         string
+	FlatNaming       bool
+	AlwaysPullBase   bool
+}
+
 func main() {
-	if err := commitAndPushChanges(); err != nil {
+	branchName, err := commitAndPushChanges(DefaultCommandRunner{})
+	if err != nil {
 		if err == ErrNoChanges {
 			fmt.Fprintln(os.Stderr, "No changes detected, exiting")
 			os.Exit(0) // Exit with code 0 when there are no changes
@@ -44,116 +73,151 @@ func main() {
 	}
 
 	// Indicate that a commit was created
-	if !githuboutput.WriteToGitHubOutput("commit_created", "true") {
+	if !githuboutput.WriteToGitHubOutput("branch_name", branchName) || !githuboutput.WriteToGitHubOutput("commit_created", "true") {
 		fmt.Fprintln(os.Stderr, "Failed to write to GitHub output, exiting")
 		os.Exit(1)
 	}
 }
 
 // commitAndPushChanges commits and pushes changes to GitHub
-func commitAndPushChanges() error {
-	// Check that all required environment variables are set
-	if err := checkRequiredEnvVars(); err != nil {
-		return err
+func commitAndPushChanges(runner CommandRunner) (string, error) {
+	config, err := envVarsToConfig()
+	if err != nil {
+		return "", err
 	}
 
-	// Configure git user
-	githubActor := os.Getenv("GITHUB_ACTOR")
-	userEmail := fmt.Sprintf("%s@users.noreply.github.com", githubActor)
-	if err := setGitUser(githubActor, userEmail); err != nil {
-		return err
+	if err := setGitUser(config, runner); err != nil {
+		return "", err
 	}
 
 	// Generate a sanitized branch name
-	branchName, err := generateBranchName()
+	branchName, err := generateBranchName(config)
 	if err != nil {
-		return err
-	}
-
-	// Write the branch name to GitHub Actions output
-	if !githuboutput.WriteToGitHubOutput("branch_name", branchName) {
-		return fmt.Errorf("failed to write branch name to GITHUB_OUTPUT")
+		return "", err
 	}
 
 	// Checkout a new branch or switch to it if it already exists
-	if err := checkoutBranch(branchName); err != nil {
-		return err
+	if err := checkoutBranch(branchName, runner); err != nil {
+		return "", err
 	}
 
 	// Prepare and add files for commit
-	addArgs := buildGitAddArgs()
+	addArgs := buildGitAddArgs(config)
 	if len(addArgs) == 0 {
-		return fmt.Errorf("no files to add, check your configuration")
+		return "", fmt.Errorf("no files to add, check your configuration")
 	}
 
 	// Run 'git add' with the constructed arguments
-	if err := runCommand("git", append([]string{"add"}, addArgs...)...); err != nil {
-		return fmt.Errorf("failed to add files: %v", err)
+	if err := runner.Run("git", append([]string{"add"}, addArgs...)...); err != nil {
+		return "", fmt.Errorf("failed to add files: %v", err)
 	}
 
 	// Commit and push changes
-	return commitAndPush(branchName)
+	return branchName, commitAndPush(branchName, runner)
 }
 
-// checkRequiredEnvVars ensures that all required environment variables are set
-func checkRequiredEnvVars() error {
-	for _, key := range requiredEnvVars {
-		if os.Getenv(key) == "" {
-			return fmt.Errorf("environment variable %s is required", key)
-		}
+// envVarsToConfig constructs a Config object from required environment variables
+func envVarsToConfig() (*Config, error) {
+	requiredEnvVars := []string{
+		"GITHUB_ACTOR",
+		"GITHUB_SHA",
+		"GITHUB_REF_NAME",
+		"TEMP_BRANCH_PREFIX",
+		"TRANSLATIONS_PATH",
+		"FILE_FORMAT",
+		"BASE_LANG",
 	}
-	return nil
+
+	requiredEnvBoolVars := []string{
+		"FLAT_NAMING",
+		"ALWAYS_PULL_BASE",
+	}
+
+	envValues := make(map[string]string)
+	envBoolValues := make(map[string]bool)
+
+	// Validate and collect required environment variables
+	for _, key := range requiredEnvVars {
+		value := os.Getenv(key)
+		if value == "" {
+			return nil, fmt.Errorf("environment variable %s is required", key)
+		}
+		envValues[key] = value
+	}
+
+	for _, key := range requiredEnvBoolVars {
+		value, err := parseBoolEnv(key)
+		if err != nil {
+			return nil, fmt.Errorf("environment variable %s has incorrect value, expected true or false", key)
+		}
+		envBoolValues[key] = value
+	}
+
+	// Construct and return the Config object
+	return &Config{
+		GitHubActor:      envValues["GITHUB_ACTOR"],
+		GitHubSHA:        envValues["GITHUB_SHA"],
+		GitHubRefName:    envValues["GITHUB_REF_NAME"],
+		TempBranchPrefix: envValues["TEMP_BRANCH_PREFIX"],
+		TranslationsPath: envValues["TRANSLATIONS_PATH"],
+		FileFormat:       envValues["FILE_FORMAT"],
+		BaseLang:         envValues["BASE_LANG"],
+		FlatNaming:       envBoolValues["FLAT_NAMING"],
+		AlwaysPullBase:   envBoolValues["ALWAYS_PULL_BASE"],
+	}, nil
 }
 
 // setGitUser configures git user.name and user.email
-func setGitUser(username, email string) error {
-	if err := runCommand("git", "config", "--global", "user.name", username); err != nil {
+func setGitUser(config *Config, runner CommandRunner) error {
+	email := fmt.Sprintf("%s@users.noreply.github.com", config.GitHubActor)
+
+	if err := runner.Run("git", "config", "--global", "user.name", config.GitHubActor); err != nil {
 		return fmt.Errorf("failed to set git user.name: %v", err)
 	}
-	if err := runCommand("git", "config", "--global", "user.email", email); err != nil {
+	if err := runner.Run("git", "config", "--global", "user.email", email); err != nil {
 		return fmt.Errorf("failed to set git user.email: %v", err)
 	}
 	return nil
 }
 
 // generateBranchName creates a sanitized branch name based on environment variables
-func generateBranchName() (string, error) {
+func generateBranchName(config *Config) (string, error) {
 	timestamp := time.Now().Unix()
-	githubSHA := os.Getenv("GITHUB_SHA")
+	githubSHA := config.GitHubSHA
 	if len(githubSHA) < 6 {
 		return "", fmt.Errorf("GITHUB_SHA is too short")
 	}
 	shortSHA := githubSHA[:6]
 
-	githubRefName := os.Getenv("GITHUB_REF_NAME")
+	githubRefName := config.GitHubRefName
 	safeRefName := sanitizeString(githubRefName, 50)
 
-	tempBranchPrefix := os.Getenv("TEMP_BRANCH_PREFIX")
+	tempBranchPrefix := config.TempBranchPrefix
 	branchName := fmt.Sprintf("%s_%s_%s_%d", tempBranchPrefix, safeRefName, shortSHA, timestamp)
 
 	return sanitizeString(branchName, 255), nil
 }
 
 // checkoutBranch creates and checks out the branch, or switches to it if it already exists
-func checkoutBranch(branchName string) error {
+func checkoutBranch(branchName string, runner CommandRunner) error {
 	// Try to create a new branch
-	if err := runCommand("git", "checkout", "-b", branchName); err == nil {
+	if err := runner.Run("git", "checkout", "-b", branchName); err == nil {
 		return nil
 	}
 	// If branch already exists, switch to it
-	if err := runCommand("git", "checkout", branchName); err != nil {
+	if err := runner.Run("git", "checkout", branchName); err != nil {
 		return fmt.Errorf("failed to checkout branch %s: %v", branchName, err)
 	}
 	return nil
 }
 
 // buildGitAddArgs constructs the arguments for 'git add' based on the naming convention
-func buildGitAddArgs() []string {
-	translationsPaths := parsepaths.ParsePaths(os.Getenv("TRANSLATIONS_PATH"))
-	flatNaming, _ := strconv.ParseBool(os.Getenv("FLAT_NAMING"))
-	alwaysPullBase, _ := strconv.ParseBool(os.Getenv("ALWAYS_PULL_BASE"))
-	fileFormat := os.Getenv("FILE_FORMAT")
-	baseLang := os.Getenv("BASE_LANG")
+func buildGitAddArgs(config *Config) []string {
+	translationsPaths := parsePathsFunc(config.TranslationsPath)
+	flatNaming := config.FlatNaming
+	alwaysPullBase := config.AlwaysPullBase
+	fileFormat := config.FileFormat
+	baseLang := config.BaseLang
 
 	var addArgs []string
 	for _, path := range translationsPaths {
@@ -178,37 +242,18 @@ func buildGitAddArgs() []string {
 	return addArgs
 }
 
-// commitAndPush commits the changes and pushes the branch to origin
-func commitAndPush(branchName string) error {
+func commitAndPush(branchName string, runner CommandRunner) error {
 	// Attempt to commit the changes
-	output, err := captureCommandOutput("git", "commit", "-m", "Translations update")
+	output, err := runner.Capture("git", "commit", "-m", "Translations update")
 	if err == nil {
 		// Commit succeeded, push the branch
-		return runCommand("git", "push", "origin", branchName)
+		return runner.Run("git", "push", "origin", branchName)
 	}
 	if strings.Contains(output, "nothing to commit") {
 		// No changes to commit
 		return ErrNoChanges
 	}
 	return fmt.Errorf("failed to commit changes: %v\nOutput: %s", err, output)
-}
-
-// runCommand executes a command and connects stdout and stderr to the respective outputs
-func runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-// captureCommandOutput executes a command and captures both stdout and stderr
-func captureCommandOutput(name string, args ...string) (string, error) {
-	var out bytes.Buffer
-	cmd := exec.Command(name, args...)
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	err := cmd.Run()
-	return out.String(), err
 }
 
 // sanitizeString removes unwanted characters from a string and truncates it to maxLength
@@ -233,4 +278,15 @@ func sanitizeString(input string, maxLength int) string {
 		return result[:maxLength]
 	}
 	return result
+}
+
+// parseBoolEnv parses a boolean environment variable.
+// Returns false if the variable is not set or empty.
+// Returns an error if the value cannot be parsed as a boolean.
+func parseBoolEnv(envVar string) (bool, error) {
+	val := os.Getenv(envVar)
+	if val == "" {
+		return false, nil // Default to false if not set
+	}
+	return strconv.ParseBool(val)
 }
