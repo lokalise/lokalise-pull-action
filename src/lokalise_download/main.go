@@ -50,7 +50,7 @@ func main() {
 		AdditionalParams: os.Getenv("CLI_ADD_PARAMS"),
 		MaxRetries:       getEnvAsInt("MAX_RETRIES", defaultMaxRetries),
 		SleepTime:        getEnvAsInt("SLEEP_TIME", defaultSleepTime),
-		DownloadTimeout:  defaultDownloadTimeout,
+		DownloadTimeout:  getEnvAsInt("DOWNLOAD_TIMEOUT", defaultDownloadTimeout),
 	}
 
 	// Validate the configuration

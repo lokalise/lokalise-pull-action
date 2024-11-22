@@ -34,6 +34,10 @@ inputs:
     description: 'By default, changes in the base language translation files are ignored. Set this to true to include base language translations in the PR.'
     required: false
     default: false
+  flat_naming:
+    description: 'Use flat naming convention (true/false). If true, expects files like locales/en.json instead of locales/en/file.json'
+    required: false
+    default: false
   max_retries:
     description: 'Maximum number of retries on rate limit errors'
     required: false
@@ -42,10 +46,10 @@ inputs:
     description: 'Number of seconds to sleep before retrying'
     required: false
     default: 1
-  flat_naming:
-    description: 'Use flat naming convention (true/false). If true, expects files like locales/en.json instead of locales/en/file.json'
+  download_timeout:
+    description: 'Timeout for the download operation (in seconds)'
+    default: 120
     required: false
-    default: false
 permissions:
   contents: write
   pull-requests: write
@@ -75,6 +79,7 @@ runs:
         BASE_LANG: "${{ inputs.base_lang }}"
         ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
+        DOWNLOAD_TIMEOUT: "${{ inputs.download_timeout }}"
       run: |
         set -e
         
