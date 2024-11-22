@@ -300,7 +300,7 @@ func TestBuildGitAddArgs(t *testing.T) {
 		expectedArgs []string
 	}{
 		{
-			name: "Flat naming with AlwaysPullBase = true",
+			name: "Flat naming with AlwaysPullBase = true, single path",
 			config: &Config{
 				TranslationsPath: filepath.Join("path", "to", "translations"),
 				FileFormat:       "json",
@@ -315,48 +315,83 @@ func TestBuildGitAddArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "Flat naming with AlwaysPullBase = false",
+			name: "Flat naming with AlwaysPullBase = true, multiple paths",
 			config: &Config{
-				TranslationsPath: filepath.Join("path", "to", "translations"),
+				TranslationsPath: filepath.Join("path1,path2"),
+				FileFormat:       "json",
+				BaseLang:         "en",
+				FlatNaming:       true,
+				AlwaysPullBase:   true,
+			},
+			mockPaths: []string{
+				filepath.Join("path1"),
+				filepath.Join("path2"),
+			},
+			expectedArgs: []string{
+				filepath.Join("path1", "*.json"),
+				":!" + filepath.Join("path1", "**", "*.json"),
+				filepath.Join("path2", "*.json"),
+				":!" + filepath.Join("path2", "**", "*.json"),
+			},
+		},
+		{
+			name: "Flat naming with AlwaysPullBase = false, multiple paths",
+			config: &Config{
+				TranslationsPath: filepath.Join("path1,path2"),
 				FileFormat:       "json",
 				BaseLang:         "en",
 				FlatNaming:       true,
 				AlwaysPullBase:   false,
 			},
-			mockPaths: []string{filepath.Join("path", "to", "translations")},
+			mockPaths: []string{
+				filepath.Join("path1"),
+				filepath.Join("path2"),
+			},
 			expectedArgs: []string{
-				filepath.Join("path", "to", "translations", "*.json"),
-				":!" + filepath.Join("path", "to", "translations", "en.json"),
-				":!" + filepath.Join("path", "to", "translations", "**", "*.json"),
+				filepath.Join("path1", "*.json"),
+				":!" + filepath.Join("path1", "en.json"),
+				":!" + filepath.Join("path1", "**", "*.json"),
+				filepath.Join("path2", "*.json"),
+				":!" + filepath.Join("path2", "en.json"),
+				":!" + filepath.Join("path2", "**", "*.json"),
 			},
 		},
 		{
-			name: "Nested naming with AlwaysPullBase = true",
+			name: "Nested naming with AlwaysPullBase = true, multiple paths",
 			config: &Config{
-				TranslationsPath: filepath.Join("path", "to", "translations"),
+				TranslationsPath: filepath.Join("path1,path2"),
 				FileFormat:       "json",
 				BaseLang:         "en",
 				FlatNaming:       false,
 				AlwaysPullBase:   true,
 			},
-			mockPaths: []string{filepath.Join("path", "to", "translations")},
+			mockPaths: []string{
+				filepath.Join("path1"),
+				filepath.Join("path2"),
+			},
 			expectedArgs: []string{
-				filepath.Join("path", "to", "translations", "**", "*.json"),
+				filepath.Join("path1", "**", "*.json"),
+				filepath.Join("path2", "**", "*.json"),
 			},
 		},
 		{
-			name: "Nested naming with AlwaysPullBase = false",
+			name: "Nested naming with AlwaysPullBase = false, multiple paths",
 			config: &Config{
-				TranslationsPath: filepath.Join("path", "to", "translations"),
+				TranslationsPath: filepath.Join("path1,path2"),
 				FileFormat:       "json",
 				BaseLang:         "en",
 				FlatNaming:       false,
 				AlwaysPullBase:   false,
 			},
-			mockPaths: []string{filepath.Join("path", "to", "translations")},
+			mockPaths: []string{
+				filepath.Join("path1"),
+				filepath.Join("path2"),
+			},
 			expectedArgs: []string{
-				filepath.Join("path", "to", "translations", "**", "*.json"),
-				":!" + filepath.Join("path", "to", "translations", "en", "**"),
+				filepath.Join("path1", "**", "*.json"),
+				":!" + filepath.Join("path1", "en", "**"),
+				filepath.Join("path2", "**", "*.json"),
+				":!" + filepath.Join("path2", "en", "**"),
 			},
 		},
 		{
