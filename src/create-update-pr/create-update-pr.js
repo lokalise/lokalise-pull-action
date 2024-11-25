@@ -4,9 +4,8 @@ module.exports = async ({ github, context }) => {
   try {
     const branchName = process.env.BRANCH_NAME;
     const baseRef = process.env.BASE_REF;
-    const token = process.env.GITHUB_TOKEN;
 
-    if (!branchName || !baseRef || !token) {
+    if (!branchName || !baseRef) {
       throw new Error("Required environment variables are missing");
     }
 
