@@ -115,18 +115,19 @@ runs:
           exit 1
         }
 
-      - name: Create or Update Pull Request
-        if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const createOrUpdatePR = require('./src/create-update-pr/create-update-pr.js');
-            const result = await createOrUpdatePR({ github, context });
-            console.log(result.prUrl);
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BRANCH_NAME: ${{ env.branch_name }}
-          BASE_REF: ${{ github.ref_name }}  
+    - name: Create or Update Pull Request
+      if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        BRANCH_NAME: ${{ env.branch_name }}
+        BASE_REF: ${{ github.ref_name }}  
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const createOrUpdatePR = require('./src/create-update-pr/create-update-pr.js');
+          const result = await createOrUpdatePR({ github, context });
+          console.log(result.prUrl);
+
     # - name: Create or Update Pull Request
     #   if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'
     #   uses: actions/github-script@v7
