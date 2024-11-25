@@ -118,7 +118,7 @@ runs:
     - name: Create or Update Pull Request
       if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'
       env:
-        BRANCH_NAME: ${{ env.branch_name }}
+        BRANCH_NAME: ${{ steps.create-commit.outputs.branch_name }}
         BASE_REF: ${{ github.ref_name }}  
       uses: actions/github-script@v7
       with:
