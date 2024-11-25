@@ -1,10 +1,7 @@
 module.exports = async ({ github, context }) => {
-  const { repo, payload } = context;
+  const { repo, _payload } = context;
 
   try {
-    console.log(repo)
-    console.log('===')
-    console.log(payload)
     const branchName = process.env.BRANCH_NAME;
     const baseRef = process.env.BASE_REF;
 
