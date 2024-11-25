@@ -1,5 +1,5 @@
 module.exports = async ({ github, context }) => {
-  const { repo, payload } = context;
+  const { repo, _payload } = context;
 
   try {
     const branchName = process.env.BRANCH_NAME;
@@ -37,7 +37,6 @@ module.exports = async ({ github, context }) => {
     });
 
     console.log(`Created new PR: ${newPr.html_url}`);
-    return { prUrl: newPr.html_url };
   } catch (error) {
     throw new Error(`Failed to create or update pull request: ${error.message}`);
   }

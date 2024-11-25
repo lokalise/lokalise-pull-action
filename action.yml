@@ -124,9 +124,9 @@ runs:
       with:
         github-token: ${{ github.token }}
         script: |
-          const createOrUpdatePR = require('./src/create-update-pr/create-update-pr.js');
-          const result = await createOrUpdatePR({ github, context });
-          console.log(result.prUrl);
+          const path = require('path');
+          const createOrUpdatePR = require(path.join(process.env.GITHUB_ACTION_PATH, 'src/create-update-pr/create-update-pr.js'));
+          await createOrUpdatePR({ github, context });
 
     # - name: Create or Update Pull Request
     #   if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'

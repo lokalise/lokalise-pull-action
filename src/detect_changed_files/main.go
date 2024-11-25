@@ -72,9 +72,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	outputValue := "false"
+	var outputValue string
 	if changed {
 		outputValue = "true"
+		fmt.Println("Detected changes in translation files.")
+	} else {
+		outputValue = "false"
+		fmt.Println("No changes detected in translation files.")
 	}
 
 	// Write the result to GitHub Actions output
