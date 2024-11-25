@@ -1,18 +1,19 @@
 module.exports = async ({ github, context }) => {
-  const { repo, _payload } = context;
+  const { repo, payload } = context;
 
   try {
+    console.log(repo)
+    console.log('===')
+    console.log(payload)
     const branchName = process.env.BRANCH_NAME;
     const baseRef = process.env.BASE_REF;
 
     if (!branchName || !baseRef) {
       throw new Error("Required environment variables are missing");
     }
-
-    const octokit = github.getOctokit(token);
-
+    
     // List existing PRs
-    const { data: pullRequests } = await octokit.rest.pulls.list({
+    const { data: pullRequests } = await github.rest.pulls.list({
       owner: repo.owner,
       repo: repo.repo,
       head: `${repo.owner}:${branchName}`,
@@ -26,7 +27,7 @@ module.exports = async ({ github, context }) => {
     }
 
     // Create a new PR
-    const { data: newPr } = await octokit.rest.pulls.create({
+    const { data: newPr } = await github.rest.pulls.create({
       owner: repo.owner,
       repo: repo.repo,
       title: "Lokalise translations update",
