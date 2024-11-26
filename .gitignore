@@ -1,0 +1,4 @@
+tools/build-tool.exe
+tools/build-tool
+src/lokalise_upload/fixtures/mock_sleep
+src/lokalise_upload/fixtures/mock_sleep.exe
