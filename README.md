@@ -25,12 +25,13 @@ jobs:
           fetch-depth: 0
 
       - name: Pull from Lokalise
-        uses: lokalise/lokalise-pull-action@v2.0.0
+        uses: lokalise/lokalise-pull-action@v3.0.0
         with:
           api_token: ${{ secrets.LOKALISE_API_TOKEN }}
           project_id: LOKALISE_PROJECT_ID
           translations_path: |
             TRANSLATIONS_PATH1
+            TRANSLATIONS_PATH2
           file_format: FILE_FORMAT
           additional_params: ADDITIONAL_CLI_PARAMS
 ```
@@ -41,21 +42,23 @@ jobs:
 
 You'll need to provide some parameters for the action. These can be set as environment variables, secrets, or passed directly. Refer to the [General setup](https://developers.lokalise.com/docs/github-actions#general-setup-overview) section for detailed instructions.
 
-The following parameters are **mandatory**:
+The following parameters are mandatory:
 
-- `api_token` — Lokalise API token.
+- `api_token` — Lokalise API token with read/write permissions.
 - `project_id` — Your Lokalise project ID.
-- `translations_path` — One or more paths to your translation files.
-- `file_format` — The format of your translation files.
-- `base_lang` — Your project base language.
+- `translations_path` — One or more paths to your translation files. For example, if your translations are stored in the `locales` folder at the project root, use `locales`. Defaults to `locales`.
+- `file_format` — The format of your translation files, such as `json` for JSON files. Defaults to `json`.
+- `base_lang` — Your project base language, such as `en` for English. Defaults to `en`.
 
-**Optional** parameters include:
+Optional parameters include:
 
-- `additional_params` — Extra parameters to pass to the [Lokalise CLI when pulling files](https://github.com/lokalise/lokalise-cli-2-go/blob/main/docs/lokalise2_file_download.md). For example, you can use `--indentation 2sp` to manage indentation. Multiple CLI arguments can be added, like: `--indentation 2sp --placeholder-format icu`.
-- `temp_branch_prefix` — A prefix for the temporary branch used to create the pull request. This value will be part of the branch name. For example, using `lok` will result in a branch name starting with `lok`. The default value is `lok`.
-- `always_pull_base` — By default, changes in the base language translation files (defined by the `base_lang` option) are ignored when checking for updates. Set this option to `true` to include changes in the base language translations in the pull request. The default value is `false`.
-* `max_retries` — Maximum number of retries on rate limit errors (HTTP 429). The default value is `3`.
-* `sleep_on_retry` — Number of seconds to sleep before retrying on rate limit errors. The default value is `1`.
+- `additional_params` — Extra parameters to pass to the [Lokalise CLI when pulling files](https://github.com/lokalise/lokalise-cli-2-go/blob/main/docs/lokalise2_file_download.md). For example, you can use `--indentation 2sp` to manage indentation. Multiple CLI arguments can be added, such as `--indentation 2sp --placeholder-format icu`. Defaults to an empty string.
+- `temp_branch_prefix` — A prefix for the temporary branch used to create the pull request. For example, using `lok` will result in a branch name starting with `lok`. Defaults to `lok`.
+- `always_pull_base` — By default, changes in the base language translation files (defined by the `base_lang` option) are ignored when checking for updates. Set this option to `true` to include changes in the base language translations in the pull request. Defaults to `false`.
+- `flat_naming` — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`. Defaults to `false`.
+- `max_retries` — Maximum number of retries on rate limit errors (HTTP 429). Defaults to `3`.
+- `sleep_on_retry` — Number of seconds to sleep before retrying on rate limit errors. Defaults to `1`.
+- `download_timeout` — Timeout for the download operation, in seconds. Defaults to `120`.
 
 ### Permissions
 
@@ -68,11 +71,21 @@ The following parameters are **mandatory**:
 
 ### How this action works
 
-When triggered, this action performs the following steps:
+When triggered, this action follows these steps:
 
-1. Installs Lokalise CLIv2.
-2. Downloads translation files for all languages from the specified Lokalise project. The keys included in the download bundle are filtered by the tag named after the triggering branch. For example, if the branch is called `lokalise-hub`, only the keys with this tag will be downloaded.
-3. If any changes in the translation files are detected, a pull request will be created for the triggering branch. This pull request will be sent from a temporary branch.
+1. **Install Lokalise CLIv2**:
+   - Ensures that the required Lokalise CLI is available for subsequent operations.
+
+2. **Download translation files**:
+   - Retrieves translation files for all languages from the specified Lokalise project.
+   - The downloaded keys are filtered by the tag corresponding to the triggering branch. For example, if the branch is named `lokalise-hub`, only keys tagged with `lokalise-hub` in Lokalise will be included in the download bundle.
+
+3. **Detect changes**:
+   - Compares the downloaded translation files against the repository’s existing files to detect any updates or modifications.
+
+4. **Create a pull request**:
+   - If changes are detected, the action creates a pull request from a temporary branch to the triggering branch.
+   - The temporary branch name is constructed using the prefix specified in the `temp_branch_prefix` parameter.
 
 For more information on assumptions, refer to the [Assumptions and defaults](https://developers.lokalise.com/docs/github-actions#assumptions-and-defaults) section.
 
