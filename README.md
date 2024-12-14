@@ -42,7 +42,7 @@ jobs:
 
 You'll need to provide some parameters for the action. These can be set as environment variables, secrets, or passed directly. Refer to the [General setup](https://developers.lokalise.com/docs/github-actions#general-setup-overview) section for detailed instructions.
 
-The following parameters are mandatory:
+#### Mandatory parameters
 
 - `api_token` — Lokalise API token with read/write permissions.
 - `project_id` — Your Lokalise project ID.
@@ -50,7 +50,7 @@ The following parameters are mandatory:
 - `file_format` — The format of your translation files, such as `json` for JSON files. Defaults to `json`.
 - `base_lang` — Your project base language, such as `en` for English. Defaults to `en`.
 
-Optional parameters include:
+#### Optional parameters
 
 - `additional_params` — Extra parameters to pass to the [Lokalise CLI when pulling files](https://github.com/lokalise/lokalise-cli-2-go/blob/main/docs/lokalise2_file_download.md). For example, you can use `--indentation 2sp` to manage indentation. Multiple CLI arguments can be added, such as `--indentation 2sp --placeholder-format icu`. Defaults to an empty string.
 - `temp_branch_prefix` — A prefix for the temporary branch used to create the pull request. For example, using `lok` will result in a branch name starting with `lok`. Defaults to `lok`.
