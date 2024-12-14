@@ -86,3 +86,7 @@ By default, the following command-line parameters are set when downloading files
 - `--original-filenames` — Set to `true`.
 - `--directory-prefix` — Set to `/`.
 - `--include-tags` — Set to the branch name that triggered the workflow.
+
+## License
+
+Apache license version 2

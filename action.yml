@@ -34,6 +34,10 @@ inputs:
     description: 'By default, changes in the base language translation files are ignored. Set this to true to include base language translations in the PR.'
     required: false
     default: false
+  flat_naming:
+    description: 'Use flat naming convention (true/false). If true, expects files like locales/en.json instead of locales/en/file.json'
+    required: false
+    default: false
   max_retries:
     description: 'Maximum number of retries on rate limit errors'
     required: false
@@ -42,10 +46,10 @@ inputs:
     description: 'Number of seconds to sleep before retrying'
     required: false
     default: 1
-  flat_naming:
-    description: 'Use flat naming convention (true/false). If true, expects files like locales/en.json instead of locales/en/file.json'
+  download_timeout:
+    description: 'Timeout for the download operation (in seconds)'
+    default: 120
     required: false
-    default: false
 permissions:
   contents: write
   pull-requests: write
@@ -56,12 +60,8 @@ branding:
 runs:
   using: "composite"
   steps:
-    - name: Install Lokalise CLI
-      shell: bash
-      run: |
-        set -e
-        chmod +x "${{ github.action_path }}/src/scripts/install_lokalise_cli.sh"
-        "${{ github.action_path }}/src/scripts/install_lokalise_cli.sh"
+    - name: Install Lokalise CLIv2
+      uses: bodrovis/install-lokalise-cli-v2@v1.0.2
 
     - name: Pull translation files from Lokalise
       id: pull-files
@@ -75,27 +75,23 @@ runs:
         BASE_LANG: "${{ inputs.base_lang }}"
         ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
+        DOWNLOAD_TIMEOUT: "${{ inputs.download_timeout }}"
       run: |
         set -e
-        chmod +x "${{ github.action_path }}/src/scripts/lokalise_download.sh"
-
-        . "${{ github.action_path }}/src/scripts/lokalise_download.sh"
-
-        download_files "${{ inputs.project_id }}" "${{ inputs.api_token }}"
-
-        if [ $? -ne 0 ]; then
-          echo "Error during file download"
-          echo "has_changes=false" >> $GITHUB_OUTPUT
+        
+        CMD_PATH="${{ github.action_path }}/bin/lokalise_download"
+        chmod +x "$CMD_PATH"
+        "$CMD_PATH" "${{ inputs.project_id }}" "${{ inputs.api_token }}" || {
+          echo "Error: lokalise_download script failed with exit code $?"
           exit 1
-        fi
+        }
 
-        if detect_changed_files; then
-          echo "Translation file changes detected after pulling from Lokalise"
-          echo "has_changes=true" >> $GITHUB_OUTPUT
-        else
-          echo "No translation file changes detected after pulling from Lokalise"
-          echo "has_changes=false" >> $GITHUB_OUTPUT
-        fi
+        CMD_PATH="${{ github.action_path }}/bin/detect_changed_files"
+        chmod +x "$CMD_PATH"
+        "$CMD_PATH" || {
+          echo "Error: detect_changed_files script failed with exit code $?"
+          exit 1
+        }
 
     - name: Commit changes
       id: create-commit
@@ -110,44 +106,24 @@ runs:
       shell: bash
       run: |
         set -e
-        chmod +x "${{ github.action_path }}/src/scripts/commit_changes.sh"
-        
-        . "${{ github.action_path }}/src/scripts/commit_changes.sh"
-        
-        if commit_and_push_changes; then
-          echo "commit_created=true" >> $GITHUB_OUTPUT
-        else
-          echo "commit_created=true" >> $GITHUB_OUTPUT
-        fi
-        
+
+        CMD_PATH="${{ github.action_path }}/bin/commit_changes"
+        chmod +x "$CMD_PATH"
+        $("$CMD_PATH") || {
+          echo "Error: commit_changes script failed with exit code $?"
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+          exit 1
+        }
+
     - name: Create or Update Pull Request
       if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'
+      env:
+        BRANCH_NAME: ${{ steps.create-commit.outputs.branch_name }}
+        BASE_REF: ${{ github.ref_name }}  
       uses: actions/github-script@v7
       with:
         github-token: ${{ github.token }}
         script: |
-          try {
-            const { data: pullRequests } = await github.rest.pulls.list({
-              owner: "${{ github.repository_owner }}",
-              repo: "${{ github.event.repository.name }}",
-              head: "${{ github.repository_owner }}:${{ env.branch_name }}",
-              base: "${{ github.ref_name }}",
-              state: 'open'
-            });
-
-            if (pullRequests.length > 0) {
-              console.log(`PR already exists: ${pullRequests[0].html_url}`);
-            } else {
-              const { data: newPr } = await github.rest.pulls.create({
-                owner: "${{ github.repository_owner }}",
-                repo: "${{ github.event.repository.name }}",
-                title: "Lokalise translations update",
-                head: "${{ env.branch_name }}",
-                base: "${{ github.ref_name }}",
-                body: "This PR updates translations from Lokalise.",
-              });
-              console.log(`Created new PR: ${newPr.html_url}`);
-            }
-          } catch (error) {
-            core.setFailed(`Failed to create or update pull request: ${error.message}`);
-          }
+          const path = require('path');
+          const createOrUpdatePR = require(path.join(process.env.GITHUB_ACTION_PATH, 'js/create-update-pr.js'));
+          await createOrUpdatePR({ github, context });
