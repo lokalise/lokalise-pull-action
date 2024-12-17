@@ -129,10 +129,6 @@ func downloadFiles(config DownloadConfig, downloadExecutor func(cmdPath string, 
 		fmt.Printf("Attempt %d of %d\n", attempt, maxRetries)
 
 		outputBytes, err := downloadExecutor("./bin/lokalise2", args, config.DownloadTimeout)
-		if err == nil {
-			fmt.Println("Successfully downloaded files.")
-			return
-		}
 
 		output := string(outputBytes)
 
@@ -150,6 +146,11 @@ func downloadFiles(config DownloadConfig, downloadExecutor func(cmdPath string, 
 		// Check for "no keys" error (HTTP status code 406)
 		if isNoKeysError(output) {
 			returnWithError("no keys for export with current settings; exiting")
+		}
+
+		if err == nil {
+			fmt.Println("Successfully downloaded files.")
+			return
 		}
 
 		// For any other errors, log the output and continue to the next attempt

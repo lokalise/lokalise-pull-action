@@ -322,6 +322,23 @@ func TestDownloadFiles(t *testing.T) {
 			},
 			shouldError: true,
 		},
+		{
+			name: "Execution error with ambiguous output",
+			config: DownloadConfig{
+				ProjectID:       "test_project",
+				Token:           "test_token",
+				FileFormat:      "json",
+				GitHubRefName:   "main",
+				MaxRetries:      3,
+				SleepTime:       1,
+				DownloadTimeout: 120,
+			},
+			mockExecutor: func(cmdPath string, args []string, timeout int) ([]byte, error) {
+				// Simulate an error but with no clear error message in output
+				return []byte("Some unexpected CLI output with no errors"), errors.New("command failed")
+			},
+			shouldError: true,
+		},
 	}
 
 	for _, tt := range tests {
