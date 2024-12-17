@@ -36,6 +36,29 @@ jobs:
           additional_params: ADDITIONAL_CLI_PARAMS
 ```
 
+### Important note on Lokalise filenames and tags
+
+Before running this action, ensure that your translation keys on Lokalise are correctly assigned with appropriate [filenames](https://docs.lokalise.com/en/articles/2281317-filenames) and [tags](https://docs.lokalise.com/en/articles/1475552-tags).
+
+#### Tags and branch context
+
+If you are running this action from the `hub` branch on GitHub, the action will download only the keys that have the `hub` tag assigned. If no such keys are found, the action will halt execution.
+
+#### Filenames and directory structure
+
+If you specify `locales` as the `translations_path`, your keys must include filenames that align with this structure, such as:
+
+- `locales/%LANG_ISO%.json`
+- `locales/%LANG_ISO%/main.xml`
+
+Here:
+
+- `%LANG_ISO%` will be replaced with the language code (e.g., `en`, `fr`, etc.).
+
+If the filenames do not include the correct directory prefix (like `locales/`), the action will fail to compare the downloaded files with the existing files in your `translations_path`. In this case, the workflow logs will show the message: "No changes detected in translation files.".
+
+To avoid this, double-check that your Lokalise filenames match the expected directory structure.
+
 ## Configuration
 
 ### Parameters
