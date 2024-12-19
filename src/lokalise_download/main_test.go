@@ -149,99 +149,142 @@ func TestValidateDownloadConfig(t *testing.T) {
 }
 
 func TestConstructDownloadArgs(t *testing.T) {
-	config := DownloadConfig{
-		ProjectID:        "test_project",
-		Token:            "test_token",
-		FileFormat:       "json",
-		GitHubRefName:    "main",
-		AdditionalParams: "--custom-flag=true",
-	}
-
-	expectedArgs := []string{
-		"--token=test_token",
-		"--project-id=test_project",
-		"file", "download",
-		"--format=json",
-		"--original-filenames=true",
-		"--directory-prefix=/",
-		"--include-tags=main",
-		"--custom-flag=true",
-	}
-
-	args := constructDownloadArgs(config)
-	if len(args) != len(expectedArgs) {
-		t.Errorf("Expected %d arguments, got %d", len(expectedArgs), len(args))
-	}
-
-	for i, arg := range args {
-		if arg != expectedArgs[i] {
-			t.Errorf("Expected argument '%s' at position %d, got '%s'", expectedArgs[i], i, arg)
+	t.Run("Include Tags", func(t *testing.T) {
+		config := DownloadConfig{
+			ProjectID:        "test_project",
+			Token:            "test_token",
+			FileFormat:       "json",
+			GitHubRefName:    "main",
+			AdditionalParams: "--custom-flag=true",
+			SkipIncludeTags:  false,
 		}
-	}
+
+		expectedArgs := []string{
+			"--token=test_token",
+			"--project-id=test_project",
+			"file", "download",
+			"--format=json",
+			"--original-filenames=true",
+			"--directory-prefix=/",
+			"--include-tags=main",
+			"--custom-flag=true",
+		}
+
+		args := constructDownloadArgs(config)
+		if len(args) != len(expectedArgs) {
+			t.Errorf("Expected %d arguments, got %d", len(expectedArgs), len(args))
+		}
+
+		for i, arg := range args {
+			if arg != expectedArgs[i] {
+				t.Errorf("Expected argument '%s' at position %d, got '%s'", expectedArgs[i], i, arg)
+			}
+		}
+	})
+}
+
+func TestConstructDownloadArgsWithoutIncludeTags(t *testing.T) {
+	t.Run("Skip Tags", func(t *testing.T) {
+		config := DownloadConfig{
+			ProjectID:        "test_project",
+			Token:            "test_token",
+			FileFormat:       "json",
+			GitHubRefName:    "main",
+			AdditionalParams: "--custom-flag=true",
+			SkipIncludeTags:  true,
+		}
+
+		expectedArgs := []string{
+			"--token=test_token",
+			"--project-id=test_project",
+			"file", "download",
+			"--format=json",
+			"--original-filenames=true",
+			"--directory-prefix=/",
+			"--custom-flag=true",
+		}
+
+		args := constructDownloadArgs(config)
+		if len(args) != len(expectedArgs) {
+			t.Errorf("Expected %d arguments, got %d", len(expectedArgs), len(args))
+		}
+
+		for i, arg := range args {
+			if arg != expectedArgs[i] {
+				t.Errorf("Expected argument '%s' at position %d, got '%s'", expectedArgs[i], i, arg)
+			}
+		}
+	})
 }
 
 func TestConstructDownloadArgsWithEmptyAdditionalParams(t *testing.T) {
-	config := DownloadConfig{
-		ProjectID:        "test_project",
-		Token:            "test_token",
-		FileFormat:       "json",
-		GitHubRefName:    "main",
-		AdditionalParams: "",
-	}
-
-	expectedArgs := []string{
-		"--token=test_token",
-		"--project-id=test_project",
-		"file", "download",
-		"--format=json",
-		"--original-filenames=true",
-		"--directory-prefix=/",
-		"--include-tags=main",
-	}
-
-	args := constructDownloadArgs(config)
-	if len(args) != len(expectedArgs) {
-		t.Errorf("Expected %d arguments, got %d", len(expectedArgs), len(args))
-	}
-
-	for i, arg := range args {
-		if arg != expectedArgs[i] {
-			t.Errorf("Expected argument '%s' at position %d, got '%s'", expectedArgs[i], i, arg)
+	t.Run("Empty Additional Params", func(t *testing.T) {
+		config := DownloadConfig{
+			ProjectID:        "test_project",
+			Token:            "test_token",
+			FileFormat:       "json",
+			GitHubRefName:    "main",
+			AdditionalParams: "",
+			SkipIncludeTags:  false,
 		}
-	}
+
+		expectedArgs := []string{
+			"--token=test_token",
+			"--project-id=test_project",
+			"file", "download",
+			"--format=json",
+			"--original-filenames=true",
+			"--directory-prefix=/",
+			"--include-tags=main",
+		}
+
+		args := constructDownloadArgs(config)
+		if len(args) != len(expectedArgs) {
+			t.Errorf("Expected %d arguments, got %d", len(expectedArgs), len(args))
+		}
+
+		for i, arg := range args {
+			if arg != expectedArgs[i] {
+				t.Errorf("Expected argument '%s' at position %d, got '%s'", expectedArgs[i], i, arg)
+			}
+		}
+	})
 }
 
 func TestConstructDownloadArgsWithMultipleAdditionalParams(t *testing.T) {
-	config := DownloadConfig{
-		ProjectID:        "test_project",
-		Token:            "test_token",
-		FileFormat:       "json",
-		GitHubRefName:    "main",
-		AdditionalParams: "--custom-flag=true --another-flag=false",
-	}
-
-	expectedArgs := []string{
-		"--token=test_token",
-		"--project-id=test_project",
-		"file", "download",
-		"--format=json",
-		"--original-filenames=true",
-		"--directory-prefix=/",
-		"--include-tags=main",
-		"--custom-flag=true",
-		"--another-flag=false",
-	}
-
-	args := constructDownloadArgs(config)
-	if len(args) != len(expectedArgs) {
-		t.Errorf("Expected %d arguments, got %d", len(expectedArgs), len(args))
-	}
-
-	for i, arg := range args {
-		if arg != expectedArgs[i] {
-			t.Errorf("Expected argument '%s' at position %d, got '%s'", expectedArgs[i], i, arg)
+	t.Run("Multiple Additional Params", func(t *testing.T) {
+		config := DownloadConfig{
+			ProjectID:        "test_project",
+			Token:            "test_token",
+			FileFormat:       "json",
+			GitHubRefName:    "main",
+			AdditionalParams: "--custom-flag=true --another-flag=false",
+			SkipIncludeTags:  false,
 		}
-	}
+
+		expectedArgs := []string{
+			"--token=test_token",
+			"--project-id=test_project",
+			"file", "download",
+			"--format=json",
+			"--original-filenames=true",
+			"--directory-prefix=/",
+			"--include-tags=main",
+			"--custom-flag=true",
+			"--another-flag=false",
+		}
+
+		args := constructDownloadArgs(config)
+		if len(args) != len(expectedArgs) {
+			t.Errorf("Expected %d arguments, got %d", len(expectedArgs), len(args))
+		}
+
+		for i, arg := range args {
+			if arg != expectedArgs[i] {
+				t.Errorf("Expected argument '%s' at position %d, got '%s'", expectedArgs[i], i, arg)
+			}
+		}
+	})
 }
 
 func TestDownloadFiles(t *testing.T) {

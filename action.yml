@@ -38,6 +38,10 @@ inputs:
     description: 'Use flat naming convention (true/false). If true, expects files like locales/en.json instead of locales/en/file.json'
     required: false
     default: false
+  skip_include_tags:
+    description: 'Do not set include-tags argument when downloading. This will result in downloading all the translation keys for the given format.'
+    required: false
+    default: false
   max_retries:
     description: 'Maximum number of retries on rate limit errors'
     required: false
@@ -76,6 +80,7 @@ runs:
         ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
         DOWNLOAD_TIMEOUT: "${{ inputs.download_timeout }}"
+        SKIP_INCLUDE_TAGS: "${{ inputs.skip_include_tags }}"
       run: |
         set -e
         

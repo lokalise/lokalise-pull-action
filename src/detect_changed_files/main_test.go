@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 )
 
 type MockCommandRunner struct {
@@ -44,12 +46,11 @@ func TestPrepareConfig(t *testing.T) {
 				"ALWAYS_PULL_BASE":  "false",
 			},
 			expectedConfig: &Config{
-				TranslationsPath: "path/to/translations",
-				FileFormat:       "json",
-				FlatNaming:       true,
-				AlwaysPullBase:   false,
-				BaseLang:         "en",
-				Paths:            []string{"path/to/translations"},
+				FileFormat:     "json",
+				FlatNaming:     true,
+				AlwaysPullBase: false,
+				BaseLang:       "en",
+				Paths:          []string{"path/to/translations"},
 			},
 		},
 		{
@@ -60,7 +61,7 @@ func TestPrepareConfig(t *testing.T) {
 				"FLAT_NAMING":      "true",
 				"ALWAYS_PULL_BASE": "false",
 			},
-			expectedError: "TRANSLATIONS_PATH environment variable is required",
+			expectedError: "no valid paths found in TRANSLATIONS_PATH",
 		},
 		{
 			name: "Invalid FLAT_NAMING",
@@ -488,7 +489,7 @@ func TestParseBoolEnv(t *testing.T) {
 			}
 			defer os.Unsetenv(tt.envVar)
 
-			result, err := parseBoolEnv(tt.envVar)
+			result, err := parsers.ParseBoolEnv(tt.envVar)
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("Expected error but got nil")

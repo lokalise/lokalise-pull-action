@@ -6,13 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/bodrovis/lokalise-actions-common/githuboutput"
+	"github.com/bodrovis/lokalise-actions-common/v2/githuboutput"
 
-	"github.com/bodrovis/lokalise-actions-common/parsepaths"
+	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 )
 
 // This program commits and pushes changes to GitHub if changes were detected.
@@ -21,7 +20,7 @@ import (
 
 var (
 	ErrNoChanges   = fmt.Errorf("no changes to commit")
-	parsePathsFunc = parsepaths.ParsePaths
+	parsePathsFunc = parsers.ParseStringArrayEnv
 )
 
 type CommandRunner interface {
@@ -146,7 +145,7 @@ func envVarsToConfig() (*Config, error) {
 	}
 
 	for _, key := range requiredEnvBoolVars {
-		value, err := parseBoolEnv(key)
+		value, err := parsers.ParseBoolEnv(key)
 		if err != nil {
 			return nil, fmt.Errorf("environment variable %s has incorrect value, expected true or false", key)
 		}
@@ -278,15 +277,4 @@ func sanitizeString(input string, maxLength int) string {
 		return result[:maxLength]
 	}
 	return result
-}
-
-// parseBoolEnv parses a boolean environment variable.
-// Returns false if the variable is not set or empty.
-// Returns an error if the value cannot be parsed as a boolean.
-func parseBoolEnv(envVar string) (bool, error) {
-	val := os.Getenv(envVar)
-	if val == "" {
-		return false, nil // Default to false if not set
-	}
-	return strconv.ParseBool(val)
 }

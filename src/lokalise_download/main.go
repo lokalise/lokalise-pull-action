@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 )
 
 // exitFunc is a function variable that defaults to os.Exit.
@@ -30,6 +31,7 @@ type DownloadConfig struct {
 	FileFormat       string
 	GitHubRefName    string
 	AdditionalParams string
+	SkipIncludeTags  bool
 	MaxRetries       int
 	SleepTime        int
 	DownloadTimeout  int
@@ -41,6 +43,11 @@ func main() {
 		returnWithError("Usage: lokalise_download <project_id> <token>")
 	}
 
+	skipIncludeTags, err := parsers.ParseBoolEnv("SKIP_INCLUDE_TAGS")
+	if err != nil {
+		skipIncludeTags = false
+	}
+
 	// Create the download configuration
 	config := DownloadConfig{
 		ProjectID:        os.Args[1],
@@ -48,9 +55,10 @@ func main() {
 		FileFormat:       os.Getenv("FILE_FORMAT"),
 		GitHubRefName:    os.Getenv("GITHUB_REF_NAME"),
 		AdditionalParams: os.Getenv("CLI_ADD_PARAMS"),
-		MaxRetries:       getEnvAsInt("MAX_RETRIES", defaultMaxRetries),
-		SleepTime:        getEnvAsInt("SLEEP_TIME", defaultSleepTime),
-		DownloadTimeout:  getEnvAsInt("DOWNLOAD_TIMEOUT", defaultDownloadTimeout),
+		SkipIncludeTags:  skipIncludeTags,
+		MaxRetries:       parsers.ParseUintEnv("MAX_RETRIES", defaultMaxRetries),
+		SleepTime:        parsers.ParseUintEnv("SLEEP_TIME", defaultSleepTime),
+		DownloadTimeout:  parsers.ParseUintEnv("DOWNLOAD_TIMEOUT", defaultDownloadTimeout),
 	}
 
 	// Validate the configuration
@@ -105,7 +113,10 @@ func constructDownloadArgs(config DownloadConfig) []string {
 		fmt.Sprintf("--format=%s", config.FileFormat),
 		"--original-filenames=true",
 		"--directory-prefix=/",
-		fmt.Sprintf("--include-tags=%s", config.GitHubRefName),
+	}
+
+	if !config.SkipIncludeTags {
+		args = append(args, fmt.Sprintf("--include-tags=%s", config.GitHubRefName))
 	}
 
 	if config.AdditionalParams != "" {
@@ -158,21 +169,6 @@ func downloadFiles(config DownloadConfig, downloadExecutor func(cmdPath string, 
 	}
 
 	returnWithError(fmt.Sprintf("Failed to download files after %d attempts.", config.MaxRetries))
-}
-
-// getEnvAsInt retrieves an environment variable as an integer.
-// Returns the default value if the variable is not set or invalid.
-func getEnvAsInt(envVar string, defaultVal int) int {
-	valStr := os.Getenv(envVar)
-	if valStr == "" {
-		return defaultVal
-	}
-	val, err := strconv.Atoi(valStr)
-	if err != nil || val < 1 {
-		fmt.Printf("Invalid %s; using default of %d\n", envVar, defaultVal)
-		return defaultVal
-	}
-	return val
 }
 
 // isRateLimitError checks if the output contains a rate limit error (HTTP status code 429).

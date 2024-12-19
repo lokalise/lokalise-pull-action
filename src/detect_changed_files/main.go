@@ -7,12 +7,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
-	"github.com/bodrovis/lokalise-actions-common/githuboutput"
+	"github.com/bodrovis/lokalise-actions-common/v2/githuboutput"
 
-	"github.com/bodrovis/lokalise-actions-common/parsepaths"
+	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 )
 
 // This program checks for changes in translation files and writes the result to GitHub Actions output.
@@ -230,33 +229,22 @@ func filterFiles(files []string, excludePatterns []*regexp.Regexp) []string {
 	return filtered
 }
 
-// parseBoolEnv parses a boolean environment variable.
-// Returns false if the variable is not set or empty.
-// Returns an error if the value cannot be parsed as a boolean.
-func parseBoolEnv(envVar string) (bool, error) {
-	val := os.Getenv(envVar)
-	if val == "" {
-		return false, nil // Default to false if not set
-	}
-	return strconv.ParseBool(val)
-}
-
 func prepareConfig() (*Config, error) {
 	// Parse boolean environment variables
-	flatNaming, err := parseBoolEnv("FLAT_NAMING")
+	flatNaming, err := parsers.ParseBoolEnv("FLAT_NAMING")
 	if err != nil {
 		return nil, fmt.Errorf("invalid FLAT_NAMING value: %v", err)
 	}
 
-	alwaysPullBase, err := parseBoolEnv("ALWAYS_PULL_BASE")
+	alwaysPullBase, err := parsers.ParseBoolEnv("ALWAYS_PULL_BASE")
 	if err != nil {
 		return nil, fmt.Errorf("invalid ALWAYS_PULL_BASE value: %v", err)
 	}
 
-	// Validate required environment variables
-	translationsPath := os.Getenv("TRANSLATIONS_PATH")
-	if translationsPath == "" {
-		return nil, fmt.Errorf("TRANSLATIONS_PATH environment variable is required")
+	// Parse paths from TRANSLATIONS_PATH
+	paths := parsers.ParseStringArrayEnv("TRANSLATIONS_PATH")
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("no valid paths found in TRANSLATIONS_PATH")
 	}
 
 	fileFormat := os.Getenv("FILE_FORMAT")
@@ -269,18 +257,11 @@ func prepareConfig() (*Config, error) {
 		return nil, fmt.Errorf("BASE_LANG environment variable is required")
 	}
 
-	// Parse paths from TRANSLATIONS_PATH
-	paths := parsepaths.ParsePaths(translationsPath)
-	if len(paths) == 0 {
-		return nil, fmt.Errorf("no valid paths found in TRANSLATIONS_PATH")
-	}
-
 	return &Config{
-		TranslationsPath: translationsPath,
-		FileFormat:       fileFormat,
-		FlatNaming:       flatNaming,
-		AlwaysPullBase:   alwaysPullBase,
-		BaseLang:         baseLang,
-		Paths:            paths,
+		FileFormat:     fileFormat,
+		FlatNaming:     flatNaming,
+		AlwaysPullBase: alwaysPullBase,
+		BaseLang:       baseLang,
+		Paths:          paths,
 	}, nil
 }
