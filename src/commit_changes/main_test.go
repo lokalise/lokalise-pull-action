@@ -54,7 +54,6 @@ func TestEnvVarsToConfig(t *testing.T) {
 				GitHubSHA:        "123456",
 				GitHubRefName:    "main",
 				TempBranchPrefix: "temp",
-				TranslationsPath: "translations/",
 				FileFormat:       "json",
 				BaseLang:         "en",
 				FlatNaming:       true,
@@ -302,11 +301,10 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Flat naming with AlwaysPullBase = true, single path",
 			config: &Config{
-				TranslationsPath: filepath.Join("path", "to", "translations"),
-				FileFormat:       "json",
-				BaseLang:         "en",
-				FlatNaming:       true,
-				AlwaysPullBase:   true,
+				FileFormat:     "json",
+				BaseLang:       "en",
+				FlatNaming:     true,
+				AlwaysPullBase: true,
 			},
 			mockPaths: []string{filepath.Join("path", "to", "translations")},
 			expectedArgs: []string{
@@ -317,11 +315,10 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Flat naming with AlwaysPullBase = true, multiple paths",
 			config: &Config{
-				TranslationsPath: filepath.Join("path1,path2"),
-				FileFormat:       "json",
-				BaseLang:         "en",
-				FlatNaming:       true,
-				AlwaysPullBase:   true,
+				FileFormat:     "json",
+				BaseLang:       "en",
+				FlatNaming:     true,
+				AlwaysPullBase: true,
 			},
 			mockPaths: []string{
 				filepath.Join("path1"),
@@ -337,11 +334,10 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Flat naming with AlwaysPullBase = false, multiple paths",
 			config: &Config{
-				TranslationsPath: filepath.Join("path1,path2"),
-				FileFormat:       "json",
-				BaseLang:         "en",
-				FlatNaming:       true,
-				AlwaysPullBase:   false,
+				FileFormat:     "json",
+				BaseLang:       "en",
+				FlatNaming:     true,
+				AlwaysPullBase: false,
 			},
 			mockPaths: []string{
 				filepath.Join("path1"),
@@ -359,11 +355,10 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Nested naming with AlwaysPullBase = true, multiple paths",
 			config: &Config{
-				TranslationsPath: filepath.Join("path1,path2"),
-				FileFormat:       "json",
-				BaseLang:         "en",
-				FlatNaming:       false,
-				AlwaysPullBase:   true,
+				FileFormat:     "json",
+				BaseLang:       "en",
+				FlatNaming:     false,
+				AlwaysPullBase: true,
 			},
 			mockPaths: []string{
 				filepath.Join("path1"),
@@ -377,11 +372,10 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Nested naming with AlwaysPullBase = false, multiple paths",
 			config: &Config{
-				TranslationsPath: filepath.Join("path1,path2"),
-				FileFormat:       "json",
-				BaseLang:         "en",
-				FlatNaming:       false,
-				AlwaysPullBase:   false,
+				FileFormat:     "json",
+				BaseLang:       "en",
+				FlatNaming:     false,
+				AlwaysPullBase: false,
 			},
 			mockPaths: []string{
 				filepath.Join("path1"),
@@ -397,11 +391,10 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Empty translations path",
 			config: &Config{
-				TranslationsPath: "",
-				FileFormat:       "json",
-				BaseLang:         "en",
-				FlatNaming:       true,
-				AlwaysPullBase:   true,
+				FileFormat:     "json",
+				BaseLang:       "en",
+				FlatNaming:     true,
+				AlwaysPullBase: true,
 			},
 			mockPaths:    []string{},
 			expectedArgs: []string{},
@@ -411,17 +404,19 @@ func TestBuildGitAddArgs(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			// Mock parsePathsFunc for this test
-			originalParsePathsFunc := parsePathsFunc
-			parsePathsFunc = func(path string) []string {
-				return tt.mockPaths
+			// Set TRANSLATIONS_PATH environment variable
+			// Join the mock paths with newline since ParseStringArrayEnv splits by newlines
+			envValue := strings.Join(tt.mockPaths, "\n")
+			if envValue != "" {
+				os.Setenv("TRANSLATIONS_PATH", envValue)
+				defer os.Unsetenv("TRANSLATIONS_PATH")
+			} else {
+				// Ensure env var is unset if empty
+				os.Unsetenv("TRANSLATIONS_PATH")
 			}
-			defer func() { parsePathsFunc = originalParsePathsFunc }() // Restore original
 
 			got := buildGitAddArgs(tt.config)
 
-			// Use the slice equality helper
 			if !equalSlices(got, tt.expectedArgs) {
 				t.Errorf("buildGitAddArgs() = %v, want %v", got, tt.expectedArgs)
 			}

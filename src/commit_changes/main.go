@@ -18,10 +18,7 @@ import (
 // It constructs the commit and branch names based on environment variables
 // and handles both flat and nested translation file naming conventions.
 
-var (
-	ErrNoChanges   = fmt.Errorf("no changes to commit")
-	parsePathsFunc = parsers.ParseStringArrayEnv
-)
+var ErrNoChanges = fmt.Errorf("no changes to commit")
 
 type CommandRunner interface {
 	Run(name string, args ...string) error
@@ -52,7 +49,6 @@ type Config struct {
 	GitHubSHA        string
 	GitHubRefName    string
 	TempBranchPrefix string
-	TranslationsPath string
 	FileFormat       string
 	BaseLang         string
 	FlatNaming       bool
@@ -158,7 +154,6 @@ func envVarsToConfig() (*Config, error) {
 		GitHubSHA:        envValues["GITHUB_SHA"],
 		GitHubRefName:    envValues["GITHUB_REF_NAME"],
 		TempBranchPrefix: envValues["TEMP_BRANCH_PREFIX"],
-		TranslationsPath: envValues["TRANSLATIONS_PATH"],
 		FileFormat:       envValues["FILE_FORMAT"],
 		BaseLang:         envValues["BASE_LANG"],
 		FlatNaming:       envBoolValues["FLAT_NAMING"],
@@ -212,7 +207,7 @@ func checkoutBranch(branchName string, runner CommandRunner) error {
 
 // buildGitAddArgs constructs the arguments for 'git add' based on the naming convention
 func buildGitAddArgs(config *Config) []string {
-	translationsPaths := parsePathsFunc(config.TranslationsPath)
+	translationsPaths := parsers.ParseStringArrayEnv("TRANSLATIONS_PATH")
 	flatNaming := config.FlatNaming
 	alwaysPullBase := config.AlwaysPullBase
 	fileFormat := config.FileFormat
