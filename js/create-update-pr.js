@@ -31,6 +31,7 @@ module.exports = async ({ github, context }) => {
       head: branchName,
       base: baseRef,
       body: "This PR updates translations from Lokalise.",
+      labels: ['automerge'],
     });
 
     console.log(`Created new PR: ${newPr.html_url}`);
