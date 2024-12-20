@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
 
       - name: Pull from Lokalise
-        uses: lokalise/lokalise-pull-action@v3.0.0
+        uses: lokalise/lokalise-pull-action@v3.1.0
         with:
           api_token: ${{ secrets.LOKALISE_API_TOKEN }}
           project_id: LOKALISE_PROJECT_ID
@@ -79,6 +79,7 @@ You'll need to provide some parameters for the action. These can be set as envir
 - `temp_branch_prefix` — A prefix for the temporary branch used to create the pull request. For example, using `lok` will result in a branch name starting with `lok`. Defaults to `lok`.
 - `always_pull_base` — By default, changes in the base language translation files (defined by the `base_lang` option) are ignored when checking for updates. Set this option to `true` to include changes in the base language translations in the pull request. Defaults to `false`.
 - `flat_naming` — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`. Defaults to `false`.
+- `skip_include_tags` — Skip setting the `--include-tags` argument during download. This will download all translation keys for the specified format, regardless of tags. You can also provide custom filtering options via `additional_params`, for example `--include-tags staging,dev`.
 - `max_retries` — Maximum number of retries on rate limit errors (HTTP 429). Defaults to `3`.
 - `sleep_on_retry` — Number of seconds to sleep before retrying on rate limit errors. Defaults to `1`.
 - `download_timeout` — Timeout for the download operation, in seconds. Defaults to `120`.

@@ -39,7 +39,7 @@ inputs:
     required: false
     default: false
   skip_include_tags:
-    description: 'Do not set include-tags argument when downloading. This will result in downloading all the translation keys for the given format.'
+    description: 'Skip setting the include-tags argument during download. This will download all translation keys for the specified format, regardless of tags.'
     required: false
     default: false
   max_retries:
