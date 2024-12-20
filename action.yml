@@ -61,6 +61,11 @@ branding:
   icon: 'download-cloud'
   color: 'orange'
 
+outputs:
+  created_branch:
+    description: 'The branch that was created and used for the pull request'
+    value: ${{ steps.create-commit.outputs.branch_name }}
+    
 runs:
   using: "composite"
   steps:
