@@ -31,6 +31,13 @@ module.exports = async ({ github, context }) => {
       head: branchName,
       base: baseRef,
       body: "This PR updates translations from Lokalise.",
+    });
+    
+    // Add labels to the newly created PR
+    await github.rest.issues.addLabels({
+      owner: repo.owner,
+      repo: repo.repo,
+      issue_number: newPr.number,
       labels: ['automerge'],
     });
 
