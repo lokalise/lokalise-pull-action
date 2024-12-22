@@ -145,7 +145,6 @@ runs:
         result-encoding: string
         script: |
           const path = require('path');
-          const core = require('@actions/core');
           const createOrUpdatePR = require(path.join(process.env.GITHUB_ACTION_PATH, 'js/create-update-pr.js'));
           const result = await createOrUpdatePR({ github, context });
           core.setOutput('pr_created', result);
