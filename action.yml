@@ -154,8 +154,8 @@ runs:
       id: check-pr-created
       shell: bash
       run: |
-        if [ "${{ steps.create-update-pr.outputs.pr_created }}" == "true" ]; then
-          echo "pr_created=true" >> $GITHUB_OUTPUT
-        else
+        if [ "${{ steps.create-update-pr.outputs.pr_created }}" != "true" ]; then
           echo "pr_created=false" >> $GITHUB_OUTPUT
+        else
+          echo "pr_created=true" >> $GITHUB_OUTPUT
         fi
