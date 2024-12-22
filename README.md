@@ -93,6 +93,13 @@ You'll need to provide some parameters for the action. These can be set as envir
 
 ## Technical details
 
+### Outputs
+
+This action has the following outputs:
+
+- `created_branch` — The name of the branch that was created and used for the pull request. Empty if no branch has been created (for example, if no changes have been detected).
+- `pr_created` — A boolean value specifying whether a pull request with translation updates was created. False when there are no changes or something went wrong.
+
 ### How this action works
 
 When triggered, this action follows these steps:
