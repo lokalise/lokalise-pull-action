@@ -99,6 +99,19 @@ This action has the following outputs:
 
 - `created_branch` — The name of the branch that was created and used for the pull request. Empty if no branch has been created (for example, if no changes have been detected).
 - `pr_created` — A boolean value specifying whether a pull request with translation updates was created. False when there are no changes or something went wrong.
+- `pr_number` —  Number of the created pull request.
+- `pr_id` — ID of the created pull request.
+
+For example:
+
+```yaml
+- name: Debug
+  run: |
+    echo "Branch created: ${{ steps.lokalise-pull.outputs.created_branch }}"
+    echo "PR created: ${{ steps.lokalise-pull.outputs.pr_created }}"
+    echo "PR id: ${{ steps.lokalise-pull.outputs.pr_id }}"
+    echo "PR number: ${{ steps.lokalise-pull.outputs.pr_number }}"
+```
 
 ### How this action works
 
