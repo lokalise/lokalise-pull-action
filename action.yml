@@ -147,8 +147,11 @@ runs:
           const path = require('path');
           const createOrUpdatePR = require(path.join(process.env.GITHUB_ACTION_PATH, 'js/create-update-pr.js'));
           const result = await createOrUpdatePR({ github, context });
-          core.setOutput('pr_created', result);
-          return result;
+          core.setOutput('pr_created', result.created);
+          if (result.created) {
+            core.setOutput('pr_number', result.pr.number);
+          }
+          return result.created;
 
     - name: Verify PR created
       id: check-pr-created

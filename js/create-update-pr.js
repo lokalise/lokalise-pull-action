@@ -24,10 +24,14 @@ module.exports = async ({ github, context }) => {
 
     if (pullRequests.length > 0) {
       console.log(`PR already exists: ${pullRequests[0].html_url}`);
-      return true; // Existing PR found
+      return {
+        created: false,
+        pr: {
+          number: pullRequests[0].number,
+        },
+      };
     }
 
-    // Create a new PR
     const { data: newPr } = await github.rest.pulls.create({
       owner: repo.owner,
       repo: repo.repo,
@@ -47,9 +51,17 @@ module.exports = async ({ github, context }) => {
     }
 
     console.log(`Created new PR: ${newPr.html_url}`);
-    return true;
+    console.log(newPr);
+    return {
+      created: true,
+      pr: {
+        number: newPr.number,
+      },
+    };
   } catch (error) {
     console.error(`Failed to create or update pull request: ${error.message}`);
-    return false;
+    return {
+      created: false,
+    };
   }
 };
