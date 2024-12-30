@@ -72,6 +72,12 @@ outputs:
   pr_created:
     description: 'A boolean value specifying whether the pull request with translation updates has been created'
     value: ${{ steps.check-pr-created.outputs.pr_created }}
+  pr_number:
+    description: 'Number of the created pull request'
+    value: ${{ steps.create-update-pr.outputs.pr_number }}
+  pr_id:
+    description: 'ID of the created pull request'
+    value: ${{ steps.create-update-pr.outputs.pr_id }}
 
 runs:
   using: "composite"
@@ -148,9 +154,8 @@ runs:
           const createOrUpdatePR = require(path.join(process.env.GITHUB_ACTION_PATH, 'js/create-update-pr.js'));
           const result = await createOrUpdatePR({ github, context });
           core.setOutput('pr_created', result.created);
-          if (result.created) {
-            core.setOutput('pr_number', result.pr.number);
-          }
+          core.setOutput('pr_number', result.pr.number);
+          core.setOutput('pr_id', result.pr.id);
           return result.created;
 
     - name: Verify PR created

@@ -28,6 +28,7 @@ module.exports = async ({ github, context }) => {
         created: false,
         pr: {
           number: pullRequests[0].number,
+          id: pullRequests[0].id,
         },
       };
     }
@@ -51,11 +52,12 @@ module.exports = async ({ github, context }) => {
     }
 
     console.log(`Created new PR: ${newPr.html_url}`);
-    console.log(newPr);
+
     return {
       created: true,
       pr: {
         number: newPr.number,
+        id: newPr.id,
       },
     };
   } catch (error) {
