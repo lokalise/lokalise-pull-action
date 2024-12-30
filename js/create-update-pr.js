@@ -1,14 +1,18 @@
 module.exports = async ({ github, context }) => {
-  const { repo, _payload } = context;
+  const { repo } = context;
 
   try {
     const branchName = process.env.BRANCH_NAME;
     const baseRef = process.env.BASE_REF;
+    const prLabels = (process.env.PR_LABELS || "")
+      .split(',')
+      .map(label => label.trim())
+      .filter(label => label.length > 0);
 
     if (!branchName || !baseRef) {
       throw new Error("Required environment variables are missing");
     }
-    
+
     // List existing PRs
     const { data: pullRequests } = await github.rest.pulls.list({
       owner: repo.owner,
@@ -20,10 +24,15 @@ module.exports = async ({ github, context }) => {
 
     if (pullRequests.length > 0) {
       console.log(`PR already exists: ${pullRequests[0].html_url}`);
-      return { prUrl: pullRequests[0].html_url };
+      return {
+        created: false,
+        pr: {
+          number: pullRequests[0].number,
+          id: pullRequests[0].id,
+        },
+      };
     }
 
-    // Create a new PR
     const { data: newPr } = await github.rest.pulls.create({
       owner: repo.owner,
       repo: repo.repo,
@@ -33,8 +42,28 @@ module.exports = async ({ github, context }) => {
       body: "This PR updates translations from Lokalise.",
     });
 
+    if (prLabels.length > 0) {
+      await github.rest.issues.addLabels({
+        owner: repo.owner,
+        repo: repo.repo,
+        issue_number: newPr.number,
+        labels: prLabels,
+      });
+    }
+
     console.log(`Created new PR: ${newPr.html_url}`);
+
+    return {
+      created: true,
+      pr: {
+        number: newPr.number,
+        id: newPr.id,
+      },
+    };
   } catch (error) {
-    throw new Error(`Failed to create or update pull request: ${error.message}`);
+    console.error(`Failed to create or update pull request: ${error.message}`);
+    return {
+      created: false,
+    };
   }
 };

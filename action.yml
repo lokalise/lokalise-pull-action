@@ -42,6 +42,10 @@ inputs:
     description: 'Skip setting the include-tags argument during download. This will download all translation keys for the specified format, regardless of tags.'
     required: false
     default: false
+  pr_labels:
+    description: 'Comma-separated list of labels to apply to the created pull request'
+    required: false
+    default: ''
   max_retries:
     description: 'Maximum number of retries on rate limit errors'
     required: false
@@ -60,6 +64,20 @@ permissions:
 branding:
   icon: 'download-cloud'
   color: 'orange'
+
+outputs:
+  created_branch:
+    description: 'The branch that was created and used for the pull request'
+    value: ${{ steps.create-commit.outputs.branch_name }}
+  pr_created:
+    description: 'A boolean value specifying whether the pull request with translation updates has been created'
+    value: ${{ steps.check-pr-created.outputs.pr_created }}
+  pr_number:
+    description: 'Number of the created pull request'
+    value: ${{ steps.create-update-pr.outputs.pr_number }}
+  pr_id:
+    description: 'ID of the created pull request'
+    value: ${{ steps.create-update-pr.outputs.pr_id }}
 
 runs:
   using: "composite"
@@ -124,11 +142,28 @@ runs:
       if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'
       env:
         BRANCH_NAME: ${{ steps.create-commit.outputs.branch_name }}
-        BASE_REF: ${{ github.ref_name }}  
+        BASE_REF: ${{ github.ref_name }}
+        PR_LABELS: ${{ inputs.pr_labels }}
+      id: create-update-pr
       uses: actions/github-script@v7
       with:
         github-token: ${{ github.token }}
+        result-encoding: string
         script: |
           const path = require('path');
           const createOrUpdatePR = require(path.join(process.env.GITHUB_ACTION_PATH, 'js/create-update-pr.js'));
-          await createOrUpdatePR({ github, context });
+          const result = await createOrUpdatePR({ github, context });
+          core.setOutput('pr_created', result.created);
+          core.setOutput('pr_number', result.pr.number);
+          core.setOutput('pr_id', result.pr.id);
+          return result.created;
+
+    - name: Verify PR created
+      id: check-pr-created
+      shell: bash
+      run: |
+        if [ "${{ steps.create-update-pr.outputs.pr_created }}" != "true" ]; then
+          echo "pr_created=false" >> $GITHUB_OUTPUT
+        else
+          echo "pr_created=true" >> $GITHUB_OUTPUT
+        fi
