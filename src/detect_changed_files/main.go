@@ -137,10 +137,10 @@ func buildGitStatusArgs(paths []string, fileFormat string, flatNaming bool, gitC
 		var pattern string
 		if flatNaming {
 			// For flat naming, match files like "path/*.fileFormat"
-			pattern = filepath.Join(path, "*.*")
+			pattern = filepath.Join(path, fmt.Sprintf("*.%s", fileFormat))
 		} else {
 			// For nested directories, match files like "path/**/*.fileFormat"
-			pattern = filepath.Join(path, "**", "*.*")
+			pattern = filepath.Join(path, "**", fmt.Sprintf("*.%s", fileFormat))
 		}
 		patterns = append(patterns, pattern)
 	}
