@@ -213,20 +213,27 @@ func buildGitAddArgs(config *Config) []string {
 	fileFormat := config.FileFormat
 	baseLang := config.BaseLang
 
+	var actualFormat string
+	if fileFormat == "json_structured" {
+		actualFormat = "json"
+	} else {
+		actualFormat = fileFormat
+	}
+
 	var addArgs []string
 	for _, path := range translationsPaths {
 		if flatNaming {
 			// Add files matching 'path/*.fileFormat'
-			addArgs = append(addArgs, filepath.Join(path, fmt.Sprintf("*.%s", fileFormat)))
+			addArgs = append(addArgs, filepath.Join(path, fmt.Sprintf("*.%s", actualFormat)))
 			if !alwaysPullBase {
 				// Exclude base language file
-				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, fmt.Sprintf("%s.%s", baseLang, fileFormat))))
+				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, fmt.Sprintf("%s.%s", baseLang, actualFormat))))
 			}
 			// Exclude files in subdirectories
-			addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, "**", fmt.Sprintf("*.%s", fileFormat))))
+			addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, "**", fmt.Sprintf("*.%s", actualFormat))))
 		} else {
 			// Add files matching 'path/**/*.fileFormat'
-			addArgs = append(addArgs, filepath.Join(path, "**", fmt.Sprintf("*.%s", fileFormat)))
+			addArgs = append(addArgs, filepath.Join(path, "**", fmt.Sprintf("*.%s", actualFormat)))
 			if !alwaysPullBase {
 				// Exclude files under 'path/baseLang/**'
 				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, baseLang, "**")))
