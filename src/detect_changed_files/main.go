@@ -132,15 +132,21 @@ func gitLsFiles(config *Config, runner CommandRunner) ([]string, error) {
 // buildGitStatusArgs constructs git command arguments based on the naming convention and paths.
 // It builds glob patterns to match translation files.
 func buildGitStatusArgs(paths []string, fileFormat string, flatNaming bool, gitCmd ...string) []string {
+	var actualFormat string
+	if fileFormat == "json_structured" {
+		actualFormat = "json"
+	} else {
+		actualFormat = fileFormat
+	}
 	var patterns []string
 	for _, path := range paths {
 		var pattern string
 		if flatNaming {
 			// For flat naming, match files like "path/*.fileFormat"
-			pattern = filepath.Join(path, fmt.Sprintf("*.%s", fileFormat))
+			pattern = filepath.Join(path, fmt.Sprintf("*.%s", actualFormat))
 		} else {
 			// For nested directories, match files like "path/**/*.fileFormat"
-			pattern = filepath.Join(path, "**", fmt.Sprintf("*.%s", fileFormat))
+			pattern = filepath.Join(path, "**", fmt.Sprintf("*.%s", actualFormat))
 		}
 		patterns = append(patterns, pattern)
 	}
