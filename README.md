@@ -146,6 +146,10 @@ By default, the following command-line parameters are set when downloading files
 - `--directory-prefix` — Set to `/`.
 - `--include-tags` — Set to the branch name that triggered the workflow.
 
+## Special notes and known issues
+
+* If you are using Gettext (PO files) and the action opens pull requests when no translations have been changed and the only difference is the "revision date", [refer to the following comment for clarifications](https://github.com/lokalise/lokalise-pull-action/issues/9#issuecomment-2578225342)
+
 ## License
 
 Apache license version 2
