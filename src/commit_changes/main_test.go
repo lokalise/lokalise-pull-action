@@ -598,8 +598,8 @@ func equalSlices(a, b []string) bool {
 	}
 
 	// Sort both slices to normalize their order
-	sortedA := append([]string{}, a...) // Create a copy to avoid modifying the original slices
-	sortedB := append([]string{}, b...)
+	sortedA := slices.Clone(a) // Create a copy to avoid modifying the original slices
+	sortedB := slices.Clone(b)
 	slices.Sort(sortedA)
 	slices.Sort(sortedB)
 
