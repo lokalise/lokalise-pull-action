@@ -49,7 +49,7 @@ func (d DefaultCommandRunner) Run(name string, args ...string) ([]string, error)
 
 type Config struct {
 	TranslationsPath string
-	FileFormat       string
+	FileExt          string
 	FlatNaming       bool
 	AlwaysPullBase   bool
 	BaseLang         string
@@ -119,28 +119,28 @@ func detectChangedFiles(config *Config, runner CommandRunner) (bool, error) {
 
 // gitDiff runs `git diff --name-only HEAD -- <patterns>` to detect modified files.
 func gitDiff(config *Config, runner CommandRunner) ([]string, error) {
-	args := buildGitStatusArgs(config.Paths, config.FileFormat, config.FlatNaming, "diff", "--name-only", "HEAD")
+	args := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only", "HEAD")
 	return runner.Run("git", args...)
 }
 
 // gitLsFiles runs `git ls-files --others --exclude-standard -- <patterns>` to detect untracked files.
 func gitLsFiles(config *Config, runner CommandRunner) ([]string, error) {
-	args := buildGitStatusArgs(config.Paths, config.FileFormat, config.FlatNaming, "ls-files", "--others", "--exclude-standard")
+	args := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "ls-files", "--others", "--exclude-standard")
 	return runner.Run("git", args...)
 }
 
 // buildGitStatusArgs constructs git command arguments based on the naming convention and paths.
 // It builds glob patterns to match translation files.
-func buildGitStatusArgs(paths []string, fileFormat string, flatNaming bool, gitCmd ...string) []string {
+func buildGitStatusArgs(paths []string, fileExt string, flatNaming bool, gitCmd ...string) []string {
 	var patterns []string
 	for _, path := range paths {
 		var pattern string
 		if flatNaming {
-			// For flat naming, match files like "path/*.fileFormat"
-			pattern = filepath.Join(path, fmt.Sprintf("*.%s", fileFormat))
+			// For flat naming, match files like "path/*.fileExt"
+			pattern = filepath.Join(path, fmt.Sprintf("*.%s", fileExt))
 		} else {
-			// For nested directories, match files like "path/**/*.fileFormat"
-			pattern = filepath.Join(path, "**", fmt.Sprintf("*.%s", fileFormat))
+			// For nested directories, match files like "path/**/*.fileExt"
+			pattern = filepath.Join(path, "**", fmt.Sprintf("*.%s", fileExt))
 		}
 		patterns = append(patterns, pattern)
 	}
@@ -177,7 +177,7 @@ func buildExcludePatterns(config *Config) ([]*regexp.Regexp, error) {
 
 		if config.FlatNaming {
 			if !config.AlwaysPullBase {
-				baseLangFile := filepath.ToSlash(filepath.Join(path, fmt.Sprintf("%s.%s", config.BaseLang, config.FileFormat)))
+				baseLangFile := filepath.ToSlash(filepath.Join(path, fmt.Sprintf("%s.%s", config.BaseLang, config.FileExt)))
 				patternStr := fmt.Sprintf("^%s$", regexp.QuoteMeta(baseLangFile))
 				pattern, err := regexp.Compile(patternStr)
 				if err != nil {
@@ -247,9 +247,13 @@ func prepareConfig() (*Config, error) {
 		return nil, fmt.Errorf("no valid paths found in TRANSLATIONS_PATH")
 	}
 
-	fileFormat := os.Getenv("FILE_FORMAT")
-	if fileFormat == "" {
-		return nil, fmt.Errorf("FILE_FORMAT environment variable is required")
+	// File extension is based on the explicitly set value or inferred from the file format
+	fileExt := os.Getenv("FILE_EXT")
+	if fileExt == "" {
+		fileExt = os.Getenv("FILE_FORMAT")
+	}
+	if fileExt == "" {
+		return nil, fmt.Errorf("Cannot infer file extension. Make sure FILE_FORMAT or FILE_EXT environment variables are set")
 	}
 
 	baseLang := os.Getenv("BASE_LANG")
@@ -258,7 +262,7 @@ func prepareConfig() (*Config, error) {
 	}
 
 	return &Config{
-		FileFormat:     fileFormat,
+		FileExt:        fileExt,
 		FlatNaming:     flatNaming,
 		AlwaysPullBase: alwaysPullBase,
 		BaseLang:       baseLang,

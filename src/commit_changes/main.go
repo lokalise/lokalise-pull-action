@@ -49,7 +49,7 @@ type Config struct {
 	GitHubSHA        string
 	GitHubRefName    string
 	TempBranchPrefix string
-	FileFormat       string
+	FileExt          string
 	BaseLang         string
 	FlatNaming       bool
 	AlwaysPullBase   bool
@@ -119,7 +119,6 @@ func envVarsToConfig() (*Config, error) {
 		"GITHUB_REF_NAME",
 		"TEMP_BRANCH_PREFIX",
 		"TRANSLATIONS_PATH",
-		"FILE_FORMAT",
 		"BASE_LANG",
 	}
 
@@ -148,13 +147,21 @@ func envVarsToConfig() (*Config, error) {
 		envBoolValues[key] = value
 	}
 
+	fileExt := os.Getenv("FILE_EXT")
+	if fileExt == "" {
+		fileExt = os.Getenv("FILE_FORMAT")
+	}
+	if fileExt == "" {
+		return nil, fmt.Errorf("Cannot infer file extension. Make sure FILE_FORMAT or FILE_EXT environment variables are set")
+	}
+
 	// Construct and return the Config object
 	return &Config{
 		GitHubActor:      envValues["GITHUB_ACTOR"],
 		GitHubSHA:        envValues["GITHUB_SHA"],
 		GitHubRefName:    envValues["GITHUB_REF_NAME"],
 		TempBranchPrefix: envValues["TEMP_BRANCH_PREFIX"],
-		FileFormat:       envValues["FILE_FORMAT"],
+		FileExt:          fileExt,
 		BaseLang:         envValues["BASE_LANG"],
 		FlatNaming:       envBoolValues["FLAT_NAMING"],
 		AlwaysPullBase:   envBoolValues["ALWAYS_PULL_BASE"],
@@ -210,23 +217,23 @@ func buildGitAddArgs(config *Config) []string {
 	translationsPaths := parsers.ParseStringArrayEnv("TRANSLATIONS_PATH")
 	flatNaming := config.FlatNaming
 	alwaysPullBase := config.AlwaysPullBase
-	fileFormat := config.FileFormat
+	fileExt := config.FileExt
 	baseLang := config.BaseLang
 
 	var addArgs []string
 	for _, path := range translationsPaths {
 		if flatNaming {
-			// Add files matching 'path/*.fileFormat'
-			addArgs = append(addArgs, filepath.Join(path, fmt.Sprintf("*.%s", fileFormat)))
+			// Add files matching 'path/*.fileExt'
+			addArgs = append(addArgs, filepath.Join(path, fmt.Sprintf("*.%s", fileExt)))
 			if !alwaysPullBase {
 				// Exclude base language file
-				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, fmt.Sprintf("%s.%s", baseLang, fileFormat))))
+				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, fmt.Sprintf("%s.%s", baseLang, fileExt))))
 			}
 			// Exclude files in subdirectories
-			addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, "**", fmt.Sprintf("*.%s", fileFormat))))
+			addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, "**", fmt.Sprintf("*.%s", fileExt))))
 		} else {
-			// Add files matching 'path/**/*.fileFormat'
-			addArgs = append(addArgs, filepath.Join(path, "**", fmt.Sprintf("*.%s", fileFormat)))
+			// Add files matching 'path/**/*.fileExt'
+			addArgs = append(addArgs, filepath.Join(path, "**", fmt.Sprintf("*.%s", fileExt)))
 			if !alwaysPullBase {
 				// Exclude files under 'path/baseLang/**'
 				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, baseLang, "**")))

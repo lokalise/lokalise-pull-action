@@ -54,7 +54,33 @@ func TestEnvVarsToConfig(t *testing.T) {
 				GitHubSHA:        "123456",
 				GitHubRefName:    "main",
 				TempBranchPrefix: "temp",
-				FileFormat:       "json",
+				FileExt:          "json",
+				BaseLang:         "en",
+				FlatNaming:       true,
+				AlwaysPullBase:   false,
+			},
+			expectError: false,
+		},
+		{
+			name: "FILE_EXT has precedence over FILE_FORMAT",
+			envVars: map[string]string{
+				"GITHUB_ACTOR":       "test_actor",
+				"GITHUB_SHA":         "123456",
+				"GITHUB_REF_NAME":    "main",
+				"TEMP_BRANCH_PREFIX": "temp",
+				"TRANSLATIONS_PATH":  "translations/",
+				"FILE_FORMAT":        "structured_json",
+				"FILE_EXT":           "json",
+				"BASE_LANG":          "en",
+				"FLAT_NAMING":        "true",
+				"ALWAYS_PULL_BASE":   "false",
+			},
+			expectedConfig: &Config{
+				GitHubActor:      "test_actor",
+				GitHubSHA:        "123456",
+				GitHubRefName:    "main",
+				TempBranchPrefix: "temp",
+				FileExt:          "json",
 				BaseLang:         "en",
 				FlatNaming:       true,
 				AlwaysPullBase:   false,
@@ -301,7 +327,7 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Flat naming with AlwaysPullBase = true, single path",
 			config: &Config{
-				FileFormat:     "json",
+				FileExt:        "json",
 				BaseLang:       "en",
 				FlatNaming:     true,
 				AlwaysPullBase: true,
@@ -315,7 +341,7 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Flat naming with AlwaysPullBase = true, multiple paths",
 			config: &Config{
-				FileFormat:     "json",
+				FileExt:        "json",
 				BaseLang:       "en",
 				FlatNaming:     true,
 				AlwaysPullBase: true,
@@ -334,7 +360,7 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Flat naming with AlwaysPullBase = false, multiple paths",
 			config: &Config{
-				FileFormat:     "json",
+				FileExt:        "json",
 				BaseLang:       "en",
 				FlatNaming:     true,
 				AlwaysPullBase: false,
@@ -355,7 +381,7 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Nested naming with AlwaysPullBase = true, multiple paths",
 			config: &Config{
-				FileFormat:     "json",
+				FileExt:        "json",
 				BaseLang:       "en",
 				FlatNaming:     false,
 				AlwaysPullBase: true,
@@ -372,7 +398,7 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Nested naming with AlwaysPullBase = false, multiple paths",
 			config: &Config{
-				FileFormat:     "json",
+				FileExt:        "json",
 				BaseLang:       "en",
 				FlatNaming:     false,
 				AlwaysPullBase: false,
@@ -391,7 +417,7 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Empty translations path",
 			config: &Config{
-				FileFormat:     "json",
+				FileExt:        "json",
 				BaseLang:       "en",
 				FlatNaming:     true,
 				AlwaysPullBase: true,

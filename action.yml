@@ -22,6 +22,10 @@ inputs:
     description: 'Format of the translation files (e.g., json). Find all supported file formats at https://developers.lokalise.com/reference/api-file-formats'
     required: true
     default: 'json'
+  file_ext:
+    description: 'Custom file extension to use when searching for translation files (without leading dot). By default, the extension is inferred from the file_format value. However, for certain formats (e.g., structured_json), the downloaded files may still have a generic extension (e.g., .json). In such cases, this parameter allows specifying the correct extension manually to ensure proper file matching.'
+    required: false
+    default: ''
   additional_params:
     description: 'Additional parameters for Lokalise CLI on pull. Find all supported options at https://github.com/lokalise/lokalise-cli-2-go/blob/main/docs/lokalise2_file_download.md'
     required: false
@@ -93,6 +97,7 @@ runs:
         MAX_RETRIES: ${{ inputs.max_retries }}
         SLEEP_TIME: ${{ inputs.sleep_on_retry }}
         FILE_FORMAT: ${{ inputs.file_format }}
+        FILE_EXT: ${{ inputs.file_ext }}
         TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
         BASE_LANG: "${{ inputs.base_lang }}"
         ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
@@ -121,6 +126,7 @@ runs:
       if: steps.pull-files.outputs.has_changes == 'true'
       env:
         FILE_FORMAT: ${{ inputs.file_format }}
+        FILE_EXT: ${{ inputs.file_ext }}
         TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
         BASE_LANG: "${{ inputs.base_lang }}"
         ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"

@@ -8,8 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 )
 
 type MockCommandRunner struct {
@@ -46,7 +44,25 @@ func TestPrepareConfig(t *testing.T) {
 				"ALWAYS_PULL_BASE":  "false",
 			},
 			expectedConfig: &Config{
-				FileFormat:     "json",
+				FileExt:        "json",
+				FlatNaming:     true,
+				AlwaysPullBase: false,
+				BaseLang:       "en",
+				Paths:          []string{"path/to/translations"},
+			},
+		},
+		{
+			name: "FILE_EXT and FILE_FORMAT set",
+			envVars: map[string]string{
+				"TRANSLATIONS_PATH": "path/to/translations",
+				"FILE_FORMAT":       "structured_json",
+				"FILE_EXT":          "json",
+				"BASE_LANG":         "en",
+				"FLAT_NAMING":       "true",
+				"ALWAYS_PULL_BASE":  "false",
+			},
+			expectedConfig: &Config{
+				FileExt:        "json",
 				FlatNaming:     true,
 				AlwaysPullBase: false,
 				BaseLang:       "en",
@@ -112,14 +128,14 @@ func TestBuildGitStatusArgs(t *testing.T) {
 	tests := []struct {
 		name       string
 		paths      []string
-		fileFormat string
+		fileExt    string
 		flatNaming bool
 		expected   []string
 	}{
 		{
 			name:       "Flat naming",
 			paths:      []string{"path1", "path2"},
-			fileFormat: "json",
+			fileExt:    "json",
 			flatNaming: true,
 			expected: []string{
 				"diff", "--name-only", "HEAD", "--",
@@ -130,7 +146,7 @@ func TestBuildGitStatusArgs(t *testing.T) {
 		{
 			name:       "Nested naming",
 			paths:      []string{"path1", "path2"},
-			fileFormat: "json",
+			fileExt:    "json",
 			flatNaming: false,
 			expected: []string{
 				"diff", "--name-only", "HEAD", "--",
@@ -144,7 +160,7 @@ func TestBuildGitStatusArgs(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := buildGitStatusArgs(tt.paths, tt.fileFormat, tt.flatNaming, "diff", "--name-only", "HEAD")
+			got := buildGitStatusArgs(tt.paths, tt.fileExt, tt.flatNaming, "diff", "--name-only", "HEAD")
 
 			// Normalize `got` and `expected` paths for comparison
 			normalize := func(paths []string) []string {
@@ -246,7 +262,7 @@ func TestDetectChangedFiles(t *testing.T) {
 
 	config := &Config{
 		Paths:      []string{"path/to/translations"},
-		FileFormat: "json",
+		FileExt:    "json",
 		FlatNaming: true,
 	}
 
@@ -269,7 +285,7 @@ func TestDetectChangedFiles_NoChanges(t *testing.T) {
 
 	config := &Config{
 		Paths:      []string{"path/to/translations"},
-		FileFormat: "json",
+		FileExt:    "json",
 		FlatNaming: true,
 	}
 
@@ -294,7 +310,7 @@ func TestDetectChangedFiles_AllChangesExcluded(t *testing.T) {
 
 	config := &Config{
 		Paths:          []string{"path/to/translations"},
-		FileFormat:     "json",
+		FileExt:        "json",
 		FlatNaming:     true,
 		AlwaysPullBase: false,
 		BaseLang:       "en",
@@ -318,7 +334,7 @@ func TestDetectChangedFiles_GitDiffError(t *testing.T) {
 
 	config := &Config{
 		Paths:      []string{"path/to/translations"},
-		FileFormat: "json",
+		FileExt:    "json",
 		FlatNaming: true,
 	}
 
@@ -340,7 +356,7 @@ func TestDetectChangedFiles_GitLsFilesError(t *testing.T) {
 
 	config := &Config{
 		Paths:      []string{"path/to/translations"},
-		FileFormat: "json",
+		FileExt:    "json",
 		FlatNaming: true,
 	}
 
@@ -361,7 +377,7 @@ func TestBuildExcludePatterns(t *testing.T) {
 			name: "Flat naming, AlwaysPullBase = false",
 			config: &Config{
 				Paths:          []string{"path/to/translations"},
-				FileFormat:     "json",
+				FileExt:        "json",
 				FlatNaming:     true,
 				AlwaysPullBase: false,
 				BaseLang:       "en",
@@ -376,7 +392,7 @@ func TestBuildExcludePatterns(t *testing.T) {
 			name: "Nested naming, AlwaysPullBase = false",
 			config: &Config{
 				Paths:          []string{"path/to/translations"},
-				FileFormat:     "json",
+				FileExt:        "json",
 				FlatNaming:     false,
 				AlwaysPullBase: false,
 				BaseLang:       "en",
@@ -390,7 +406,7 @@ func TestBuildExcludePatterns(t *testing.T) {
 			name: "Flat naming, AlwaysPullBase = true",
 			config: &Config{
 				Paths:          []string{"path/to/translations"},
-				FileFormat:     "json",
+				FileExt:        "json",
 				FlatNaming:     true,
 				AlwaysPullBase: true,
 				BaseLang:       "en",
@@ -437,68 +453,6 @@ func TestBuildExcludePatterns(t *testing.T) {
 					if !reflect.DeepEqual(normalizedPatternStrings, normalizedExpectedPatterns) {
 						t.Errorf("Expected patterns %v, got %v", normalizedExpectedPatterns, normalizedPatternStrings)
 					}
-				}
-			}
-		})
-	}
-}
-
-func TestParseBoolEnv(t *testing.T) {
-	tests := []struct {
-		name        string
-		envVar      string
-		envValue    string
-		expected    bool
-		expectError bool
-	}{
-		{
-			name:        "Variable not set",
-			envVar:      "TEST_BOOL_ENV",
-			envValue:    "",
-			expected:    false,
-			expectError: false,
-		},
-		{
-			name:        "Variable set to true",
-			envVar:      "TEST_BOOL_ENV",
-			envValue:    "true",
-			expected:    true,
-			expectError: false,
-		},
-		{
-			name:        "Variable set to false",
-			envVar:      "TEST_BOOL_ENV",
-			envValue:    "false",
-			expected:    false,
-			expectError: false,
-		},
-		{
-			name:        "Variable set to invalid value",
-			envVar:      "TEST_BOOL_ENV",
-			envValue:    "invalid",
-			expectError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.envValue != "" {
-				os.Setenv(tt.envVar, tt.envValue)
-			} else {
-				os.Unsetenv(tt.envVar)
-			}
-			defer os.Unsetenv(tt.envVar)
-
-			result, err := parsers.ParseBoolEnv(tt.envVar)
-			if tt.expectError {
-				if err == nil {
-					t.Errorf("Expected error but got nil")
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				} else if result != tt.expected {
-					t.Errorf("Expected %v but got %v", tt.expected, result)
 				}
 			}
 		})
