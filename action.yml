@@ -47,7 +47,7 @@ inputs:
     required: false
     default: false
   skip_original_filenames:
-    description: "Skips setting the --original-filenames and --directory-prefix arguments during download. By default, the action enables --original-filenames=true and sets a directory-prefix to /. When --original-filenames is not set, all translation keys are exported into a single file per language, and --directory-prefix has no effect."
+    description: "Skips setting the --original-filenames and --directory-prefix arguments during download. By default, the action enables --original-filenames=true and sets a directory-prefix to /. When --original-filenames is set to false, all translation keys are exported into a single file per language, and --directory-prefix has no effect."
     required: false
     default: false
   pr_labels:
