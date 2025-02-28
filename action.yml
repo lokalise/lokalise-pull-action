@@ -46,6 +46,10 @@ inputs:
     description: 'Skip setting the include-tags argument during download. This will download all translation keys for the specified format, regardless of tags.'
     required: false
     default: false
+  skip_original_filenames:
+    description: "Skips setting the --original-filenames and --directory-prefix arguments during download. By default, the action enables --original-filenames=true and sets a directory-prefix to /. When --original-filenames is not set, all translation keys are exported into a single file per language, and --directory-prefix has no effect."
+    required: false
+    default: false
   pr_labels:
     description: 'Comma-separated list of labels to apply to the created pull request'
     required: false
@@ -62,6 +66,10 @@ inputs:
     description: 'Timeout for the download operation (in seconds)'
     default: 120
     required: false
+  platform:
+    description: 'Target platform for the binary (linux_amd64, linux_arm64, mac_amd64, mac_arm64)'
+    required: false
+    default: 'linux_amd64'
 permissions:
   contents: write
   pull-requests: write
@@ -104,17 +112,27 @@ runs:
         FLAT_NAMING: "${{ inputs.flat_naming }}"
         DOWNLOAD_TIMEOUT: "${{ inputs.download_timeout }}"
         SKIP_INCLUDE_TAGS: "${{ inputs.skip_include_tags }}"
+        SKIP_ORIGINAL_FILENAMES: "${{ inputs.skip_original_filenames }}"
+        PLATFORM: "${{ inputs.platform }}"
       run: |
         set -e
         
-        CMD_PATH="${{ github.action_path }}/bin/lokalise_download"
+        CMD_PATH="${{ github.action_path }}/bin/lokalise_download_${PLATFORM}"
+        if [ ! -f "$CMD_PATH" ]; then
+          echo "Error: Binary for platform '${PLATFORM}' not found!"
+          exit 1
+        fi
         chmod +x "$CMD_PATH"
         "$CMD_PATH" "${{ inputs.project_id }}" "${{ inputs.api_token }}" || {
           echo "Error: lokalise_download script failed with exit code $?"
           exit 1
         }
 
-        CMD_PATH="${{ github.action_path }}/bin/detect_changed_files"
+        CMD_PATH="${{ github.action_path }}/bin/detect_changed_files_${PLATFORM}"
+        if [ ! -f "$CMD_PATH" ]; then
+          echo "Error: Binary for platform '${PLATFORM}' not found!"
+          exit 1
+        fi
         chmod +x "$CMD_PATH"
         "$CMD_PATH" || {
           echo "Error: detect_changed_files script failed with exit code $?"
@@ -132,11 +150,17 @@ runs:
         ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
         TEMP_BRANCH_PREFIX: "${{ inputs.temp_branch_prefix }}"
+        PLATFORM: "${{ inputs.platform }}" 
       shell: bash
       run: |
         set -e
 
-        CMD_PATH="${{ github.action_path }}/bin/commit_changes"
+        CMD_PATH="${{ github.action_path }}/bin/commit_changes_${PLATFORM}"
+        if [ ! -f "$CMD_PATH" ]; then
+          echo "Error: Binary for platform '${PLATFORM}' not found!"
+          exit 1
+        fi
+
         chmod +x "$CMD_PATH"
         $("$CMD_PATH") || {
           echo "Error: commit_changes script failed with exit code $?"

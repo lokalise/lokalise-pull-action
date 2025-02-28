@@ -217,6 +217,39 @@ func TestConstructDownloadArgsWithoutIncludeTags(t *testing.T) {
 	})
 }
 
+func TestConstructDownloadArgsWithoutOriginalFilenames(t *testing.T) {
+	t.Run("Skip original filenames", func(t *testing.T) {
+		config := DownloadConfig{
+			ProjectID:             "test_project",
+			Token:                 "test_token",
+			FileFormat:            "json",
+			GitHubRefName:         "main",
+			AdditionalParams:      "--custom-flag=true",
+			SkipOriginalFilenames: true,
+		}
+
+		expectedArgs := []string{
+			"--token=test_token",
+			"--project-id=test_project",
+			"file", "download",
+			"--format=json",
+			"--include-tags=main",
+			"--custom-flag=true",
+		}
+
+		args := constructDownloadArgs(config)
+		if len(args) != len(expectedArgs) {
+			t.Errorf("Expected %d arguments, got %d", len(expectedArgs), len(args))
+		}
+
+		for i, arg := range args {
+			if arg != expectedArgs[i] {
+				t.Errorf("Expected argument '%s' at position %d, got '%s'", expectedArgs[i], i, arg)
+			}
+		}
+	})
+}
+
 func TestConstructDownloadArgsWithEmptyAdditionalParams(t *testing.T) {
 	t.Run("Empty Additional Params", func(t *testing.T) {
 		config := DownloadConfig{
@@ -258,8 +291,7 @@ func TestConstructDownloadArgsWithMultipleAdditionalParams(t *testing.T) {
 			Token:            "test_token",
 			FileFormat:       "json",
 			GitHubRefName:    "main",
-			AdditionalParams: "--custom-flag=true --another-flag=false",
-			SkipIncludeTags:  false,
+			AdditionalParams: "--custom-flag=true   --another-flag=false  --quoted=\"some value\" --json='{\"key\": \"value with space\"}' --empty-flag=",
 		}
 
 		expectedArgs := []string{
@@ -272,6 +304,9 @@ func TestConstructDownloadArgsWithMultipleAdditionalParams(t *testing.T) {
 			"--include-tags=main",
 			"--custom-flag=true",
 			"--another-flag=false",
+			"--quoted=some value",
+			"--json={\"key\": \"value with space\"}",
+			"--empty-flag=",
 		}
 
 		args := constructDownloadArgs(config)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
+	"github.com/mattn/go-shellwords"
 )
 
 // exitFunc is a function variable that defaults to os.Exit.
@@ -26,15 +27,16 @@ const (
 
 // DownloadConfig holds all the necessary configuration for downloading files
 type DownloadConfig struct {
-	ProjectID        string
-	Token            string
-	FileFormat       string
-	GitHubRefName    string
-	AdditionalParams string
-	SkipIncludeTags  bool
-	MaxRetries       int
-	SleepTime        int
-	DownloadTimeout  int
+	ProjectID             string
+	Token                 string
+	FileFormat            string
+	GitHubRefName         string
+	AdditionalParams      string
+	SkipIncludeTags       bool
+	SkipOriginalFilenames bool
+	MaxRetries            int
+	SleepTime             int
+	DownloadTimeout       int
 }
 
 func main() {
@@ -47,18 +49,23 @@ func main() {
 	if err != nil {
 		skipIncludeTags = false
 	}
+	skipOriginalFilenames, err := parsers.ParseBoolEnv("SKIP_ORIGINAL_FILENAMES")
+	if err != nil {
+		skipOriginalFilenames = false
+	}
 
 	// Create the download configuration
 	config := DownloadConfig{
-		ProjectID:        os.Args[1],
-		Token:            os.Args[2],
-		FileFormat:       os.Getenv("FILE_FORMAT"),
-		GitHubRefName:    os.Getenv("GITHUB_REF_NAME"),
-		AdditionalParams: os.Getenv("CLI_ADD_PARAMS"),
-		SkipIncludeTags:  skipIncludeTags,
-		MaxRetries:       parsers.ParseUintEnv("MAX_RETRIES", defaultMaxRetries),
-		SleepTime:        parsers.ParseUintEnv("SLEEP_TIME", defaultSleepTime),
-		DownloadTimeout:  parsers.ParseUintEnv("DOWNLOAD_TIMEOUT", defaultDownloadTimeout),
+		ProjectID:             os.Args[1],
+		Token:                 os.Args[2],
+		FileFormat:            os.Getenv("FILE_FORMAT"),
+		GitHubRefName:         os.Getenv("GITHUB_REF_NAME"),
+		AdditionalParams:      os.Getenv("CLI_ADD_PARAMS"),
+		SkipIncludeTags:       skipIncludeTags,
+		SkipOriginalFilenames: skipOriginalFilenames,
+		MaxRetries:            parsers.ParseUintEnv("MAX_RETRIES", defaultMaxRetries),
+		SleepTime:             parsers.ParseUintEnv("SLEEP_TIME", defaultSleepTime),
+		DownloadTimeout:       parsers.ParseUintEnv("DOWNLOAD_TIMEOUT", defaultDownloadTimeout),
 	}
 
 	// Validate the configuration
@@ -111,8 +118,10 @@ func constructDownloadArgs(config DownloadConfig) []string {
 		fmt.Sprintf("--project-id=%s", config.ProjectID),
 		"file", "download",
 		fmt.Sprintf("--format=%s", config.FileFormat),
-		"--original-filenames=true",
-		"--directory-prefix=/",
+	}
+
+	if !config.SkipOriginalFilenames {
+		args = append(args, "--original-filenames=true", "--directory-prefix=/")
 	}
 
 	if !config.SkipIncludeTags {
@@ -120,7 +129,11 @@ func constructDownloadArgs(config DownloadConfig) []string {
 	}
 
 	if config.AdditionalParams != "" {
-		args = append(args, strings.Fields(config.AdditionalParams)...)
+		parsedParams, err := shellwords.Parse(config.AdditionalParams)
+		if err != nil {
+			returnWithError(fmt.Sprintf("Failed to parse additional parameters: %v", err))
+		}
+		args = append(args, parsedParams...)
 	}
 
 	return args

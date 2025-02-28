@@ -81,10 +81,12 @@ You'll need to provide some parameters for the action. These can be set as envir
 - `always_pull_base` — By default, changes in the base language translation files (defined by the `base_lang` option) are ignored when checking for updates. Set this option to `true` to include changes in the base language translations in the pull request. Defaults to `false`.
 - `flat_naming` — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`. Defaults to `false`.
 - `skip_include_tags` — Skip setting the `--include-tags` argument during download. This will download all translation keys for the specified format, regardless of tags. You can also provide custom filtering options via `additional_params`, for example `--include-tags staging,dev`.
+- `skip_original_filenames` — Skips setting the `--original-filenames` and `--directory-prefix` arguments during download. By default, the action enables `--original-filenames=true` and sets a `directory-prefix` to `/`. When `--original-filenames` is not set, all translation keys are exported into a single file per language, and `--directory-prefix` has no effect.
 - `pr_labels` — Comma-separated list of labels to apply to the created pull request.
 - `max_retries` — Maximum number of retries on rate limit errors (HTTP 429). Defaults to `3`.
 - `sleep_on_retry` — Number of seconds to sleep before retrying on rate limit errors. Defaults to `1`.
 - `download_timeout` — Timeout for the download operation, in seconds. Defaults to `120`.
+- `platform` — Target platform for the precompiled binaries used by this action (`linux_amd64`, `linux_arm64`, `mac_amd64`, `mac_arm64`). These binaries handle tasks like downloading and processing translations. Typically, you don't need to change this, as the default (`linux_amd64`) works for most environments. Override if running on a macOS runner or a different architecture.
 
 ### Permissions
 

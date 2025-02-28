@@ -51,6 +51,7 @@ func main() {
 		log.Fatalf("Failed to create bin directory: %v", err)
 	}
 
+	// Install gofumpt if needed
 	if err := runCommand("go", []string{"install", "mvdan.cc/gofumpt@latest"}); err != nil {
 		fmt.Println(err)
 	}
@@ -58,6 +59,7 @@ func main() {
 	for _, binaryName := range binaries {
 		fullPkgPath := filepath.Join(getProjectRoot(), rootSrcDir, binaryName)
 
+		// Lint all .go files in the package
 		err := filepath.Walk(fullPkgPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
@@ -72,26 +74,35 @@ func main() {
 			continue
 		}
 
-		// Define output path in the bin directory
-		binaryPath := filepath.Join(binDir, binaryName)
-
-		// Build the binary
-		if err := buildBinary(fullPkgPath, binaryPath); err != nil {
+		// Build the binaries for all target platforms
+		builtBinaries, err := buildBinary(fullPkgPath, binDir, binaryName)
+		if err != nil {
 			log.Printf("Build failed for %s: %v", binaryName, err)
 			continue
 		}
 
-		// Compress the binary with UPX, if available
+		// Compress only Linux binaries with UPX (if available)
 		if checkCommand(upxAvailable) {
-			if err := compressWithUPX(binaryPath); err != nil {
-				log.Printf("Compression failed for %s: %v", binaryName, err)
+			for _, binPath := range builtBinaries {
+				// Check if it's a Linux binary before compressing
+				if isLinuxBinary(binPath) {
+					if err := compressWithUPX(binPath); err != nil {
+						log.Printf("Compression failed for %s: %v", binPath, err)
+					}
+				} else {
+					fmt.Printf("Skipping UPX compression for macOS binary: %s\n", binPath)
+				}
 			}
 		} else {
-			fmt.Printf("UPX not found; skipping compression for %s.\n", binaryName)
+			fmt.Println("UPX not found; skipping compression.")
 		}
 
-		fmt.Printf("Build complete. Binary located at %s\n", binaryPath)
+		fmt.Printf("Build complete. Binaries located at %s\n", binDir)
 	}
+}
+
+func isLinuxBinary(filePath string) bool {
+	return filepath.Ext(filePath) == "" && (filepath.Base(filePath) == "linux_amd64" || filepath.Base(filePath) == "linux_arm64")
 }
 
 // getProjectRoot returns the absolute path of the project root
@@ -103,23 +114,49 @@ func getProjectRoot() string {
 	return root
 }
 
-// buildBinary compiles the Go binary
-func buildBinary(srcDir, outputPath string) error {
-	fmt.Println("Building binary for Linux (Ubuntu)...")
-	cmd := exec.Command("go", "build", "-tags=tiny", "-ldflags=-s -w", "-o", outputPath)
-	cmd.Dir = srcDir
+// buildBinary compiles the Go binary for multiple platforms and returns the generated file paths
+func buildBinary(srcDir, outputDir, binaryName string) ([]string, error) {
+	targets := []struct {
+		goos   string
+		goarch string
+		suffix string
+	}{
+		{"linux", "amd64", "_linux_amd64"},
+		{"linux", "arm64", "_linux_arm64"},
+		{"darwin", "amd64", "_mac_amd64"},
+		{"darwin", "arm64", "_mac_arm64"},
+	}
 
-	// Set environment variables for cross-compilation to Linux
-	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
+	var builtBinaries []string
 
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	for _, target := range targets {
+		outputPath := filepath.Join(outputDir, binaryName+target.suffix)
+
+		fmt.Printf("Building binary for %s/%s -> %s\n", target.goos, target.goarch, outputPath)
+
+		cmd := exec.Command("go", "build", "-tags=tiny", "-ldflags=-s -w", "-o", outputPath)
+		cmd.Dir = srcDir
+		cmd.Env = append(os.Environ(),
+			"GOOS="+target.goos,
+			"GOARCH="+target.goarch,
+			"CGO_ENABLED=0",
+		)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			return nil, fmt.Errorf("failed to build for %s/%s: %w", target.goos, target.goarch, err)
+		}
+
+		builtBinaries = append(builtBinaries, outputPath)
+	}
+
+	return builtBinaries, nil
 }
 
 // compressWithUPX compresses the binary with UPX, if available
 func compressWithUPX(binaryPath string) error {
-	fmt.Println("Compressing binary with UPX...")
+	fmt.Println("Compressing binary with UPX:", binaryPath)
 	return runCommand("upx", []string{"--best", "--lzma", binaryPath})
 }
 
