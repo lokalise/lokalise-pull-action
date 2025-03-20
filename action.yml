@@ -66,6 +66,10 @@ inputs:
     description: 'Timeout for the download operation (in seconds)'
     default: 120
     required: false
+  async_mode:
+    description: 'Use async mode for translations download'
+    default: false
+    required: false
   os_platform:
     description: 'Target platform for the binary (linux_amd64, linux_arm64, mac_amd64, mac_arm64)'
     required: false
@@ -114,6 +118,7 @@ runs:
         SKIP_INCLUDE_TAGS: "${{ inputs.skip_include_tags }}"
         SKIP_ORIGINAL_FILENAMES: "${{ inputs.skip_original_filenames }}"
         PLATFORM: "${{ inputs.os_platform }}"
+        ASYNC_MODE: "${{ inputs.async_mode }}"
       run: |
         set -e
         

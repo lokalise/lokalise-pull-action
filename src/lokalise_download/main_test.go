@@ -250,6 +250,39 @@ func TestConstructDownloadArgsWithoutOriginalFilenames(t *testing.T) {
 	})
 }
 
+func TestConstructDownloadArgsWithAsync(t *testing.T) {
+	t.Run("Async mode", func(t *testing.T) {
+		config := DownloadConfig{
+			ProjectID:             "test_project",
+			Token:                 "test_token",
+			FileFormat:            "json",
+			GitHubRefName:         "main",
+			SkipOriginalFilenames: true,
+			AsyncMode:             true,
+		}
+
+		expectedArgs := []string{
+			"--token=test_token",
+			"--project-id=test_project",
+			"file", "download",
+			"--format=json",
+			"--async",
+			"--include-tags=main",
+		}
+
+		args := constructDownloadArgs(config)
+		if len(args) != len(expectedArgs) {
+			t.Errorf("Expected %d arguments, got %d", len(expectedArgs), len(args))
+		}
+
+		for i, arg := range args {
+			if arg != expectedArgs[i] {
+				t.Errorf("Expected argument '%s' at position %d, got '%s'", expectedArgs[i], i, arg)
+			}
+		}
+	})
+}
+
 func TestConstructDownloadArgsWithEmptyAdditionalParams(t *testing.T) {
 	t.Run("Empty Additional Params", func(t *testing.T) {
 		config := DownloadConfig{

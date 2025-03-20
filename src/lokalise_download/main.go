@@ -37,6 +37,7 @@ type DownloadConfig struct {
 	MaxRetries            int
 	SleepTime             int
 	DownloadTimeout       int
+	AsyncMode             bool
 }
 
 func main() {
@@ -53,6 +54,10 @@ func main() {
 	if err != nil {
 		skipOriginalFilenames = false
 	}
+	asyncMode, err := parsers.ParseBoolEnv("ASYNC_MODE")
+	if err != nil {
+		asyncMode = false
+	}
 
 	// Create the download configuration
 	config := DownloadConfig{
@@ -63,6 +68,7 @@ func main() {
 		AdditionalParams:      os.Getenv("CLI_ADD_PARAMS"),
 		SkipIncludeTags:       skipIncludeTags,
 		SkipOriginalFilenames: skipOriginalFilenames,
+		AsyncMode:             asyncMode,
 		MaxRetries:            parsers.ParseUintEnv("MAX_RETRIES", defaultMaxRetries),
 		SleepTime:             parsers.ParseUintEnv("SLEEP_TIME", defaultSleepTime),
 		DownloadTimeout:       parsers.ParseUintEnv("DOWNLOAD_TIMEOUT", defaultDownloadTimeout),
@@ -118,6 +124,10 @@ func constructDownloadArgs(config DownloadConfig) []string {
 		fmt.Sprintf("--project-id=%s", config.ProjectID),
 		"file", "download",
 		fmt.Sprintf("--format=%s", config.FileFormat),
+	}
+
+	if config.AsyncMode {
+		args = append(args, "--async")
 	}
 
 	if !config.SkipOriginalFilenames {
