@@ -66,7 +66,7 @@ inputs:
     description: 'Timeout for the download operation (in seconds)'
     default: 120
     required: false
-  platform:
+  os_platform:
     description: 'Target platform for the binary (linux_amd64, linux_arm64, mac_amd64, mac_arm64)'
     required: false
     default: 'linux_amd64'
@@ -113,7 +113,7 @@ runs:
         DOWNLOAD_TIMEOUT: "${{ inputs.download_timeout }}"
         SKIP_INCLUDE_TAGS: "${{ inputs.skip_include_tags }}"
         SKIP_ORIGINAL_FILENAMES: "${{ inputs.skip_original_filenames }}"
-        PLATFORM: "${{ inputs.platform }}"
+        PLATFORM: "${{ inputs.os_platform }}"
       run: |
         set -e
         
@@ -150,7 +150,7 @@ runs:
         ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
         TEMP_BRANCH_PREFIX: "${{ inputs.temp_branch_prefix }}"
-        PLATFORM: "${{ inputs.platform }}" 
+        PLATFORM: "${{ inputs.os_platform }}" 
       shell: bash
       run: |
         set -e
