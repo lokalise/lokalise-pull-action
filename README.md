@@ -25,15 +25,21 @@ jobs:
           fetch-depth: 0
 
       - name: Pull from Lokalise
-        uses: lokalise/lokalise-pull-action@v3.5.0
+        uses: lokalise/lokalise-pull-action@v3.6.0
         with:
           api_token: ${{ secrets.LOKALISE_API_TOKEN }}
           project_id: LOKALISE_PROJECT_ID
+          base_lang: en
           translations_path: |
             TRANSLATIONS_PATH1
             TRANSLATIONS_PATH2
-          file_format: FILE_FORMAT
-          additional_params: ADDITIONAL_CLI_PARAMS
+          file_format: json
+          additional_params: |
+            --indentation=2sp
+            --export-empty-as=skip
+            --export-sort=a_z
+            --replace-breaks=false
+            --language-mapping=[{"original_language_iso":"en_US","custom_language_iso":"en-US"}]
 ```
 
 ### Important note on Lokalise filenames and tags
@@ -76,7 +82,17 @@ You'll need to provide some parameters for the action. These can be set as envir
 #### Optional parameters
 
 - `file_ext` — Custom file extension to use when searching for translation files (without leading dot). By default, the extension is inferred from the file_format value. However, for certain formats (e.g., `json_structured`), the downloaded files may still have a generic extension (e.g., `.json`). In such cases, this parameter allows specifying the correct extension manually to ensure proper file matching.
-- `additional_params` — Extra parameters to pass to the [Lokalise CLI when pulling files](https://github.com/lokalise/lokalise-cli-2-go/blob/main/docs/lokalise2_file_download.md). For example, you can use `--indentation 2sp` to manage indentation. Multiple CLI arguments can be added, such as `--indentation 2sp --placeholder-format icu`. Defaults to an empty string.
+- `additional_params` — Extra parameters to pass to the [Lokalise CLI when pulling files](https://github.com/lokalise/lokalise-cli-2-go/blob/main/docs/lokalise2_file_download.md). For example, you can use `--indentation=2sp` to manage indentation. Defaults to an empty string. Multiple CLI arguments can be added:
+
+```yaml
+additional_params: |
+  --indentation=2sp
+  --export-empty-as=skip
+  --export-sort=a_z
+  --replace-breaks=false
+  --language-mapping=[{"original_language_iso":"en_US","custom_language_iso":"en-US"}]
+```
+
 - `temp_branch_prefix` — A prefix for the temporary branch used to create the pull request. For example, using `lok` will result in a branch name starting with `lok`. Defaults to `lok`.
 - `always_pull_base` — By default, changes in the base language translation files (defined by the `base_lang` option) are ignored when checking for updates. Set this option to `true` to include changes in the base language translations in the pull request. Defaults to `false`.
 - `flat_naming` — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`. Defaults to `false`.
