@@ -162,7 +162,7 @@ func downloadFiles(config DownloadConfig, downloadExecutor func(cmdPath string, 
 	for attempt := 1; attempt <= config.MaxRetries; attempt++ {
 		fmt.Printf("Attempt %d of %d\n", attempt, maxRetries)
 
-		fmt.Printf("Executing command: ./bin/lokalise2 %s\n", strings.Join(args, " "))
+		fmt.Printf("Executing command: ./bin/lokalise2 %q\n", args)
 
 		outputBytes, err := downloadExecutor("./bin/lokalise2", args, config.DownloadTimeout)
 
