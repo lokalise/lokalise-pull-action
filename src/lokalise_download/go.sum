@@ -1,4 +1,2 @@
 github.com/bodrovis/lokalise-actions-common/v2 v2.0.0 h1:U4xre30YRunXHNEhzmCP+jgKBn9fi90s+CzrnOfAzqI=
 github.com/bodrovis/lokalise-actions-common/v2 v2.0.0/go.mod h1:y6oql3+vFgmqGe6CCH0c/mu3+QicwkvIMxj0tNiTiho=
-github.com/mattn/go-shellwords v1.0.12 h1:M2zGm7EW6UQJvDeQxo4T51eKPurbeFbe8WtebGE2xrk=
-github.com/mattn/go-shellwords v1.0.12/go.mod h1:EZzvwXDESEeg03EKmM+RmDnNOPKG4lLtQsUlTZDWQ8Y=

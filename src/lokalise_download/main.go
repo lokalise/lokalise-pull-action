@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
-	"github.com/mattn/go-shellwords"
 )
 
 // exitFunc is a function variable that defaults to os.Exit.
@@ -138,12 +137,25 @@ func constructDownloadArgs(config DownloadConfig) []string {
 		args = append(args, fmt.Sprintf("--include-tags=%s", config.GitHubRefName))
 	}
 
+	// NEW bulletproof handling here 👇
 	if config.AdditionalParams != "" {
-		parsedParams, err := shellwords.Parse(config.AdditionalParams)
-		if err != nil {
-			returnWithError(fmt.Sprintf("Failed to parse additional parameters: %v", err))
+		lines := strings.Split(config.AdditionalParams, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue // skip empty lines
+			}
+			if strings.Contains(line, "=") {
+				// Split at first "="
+				parts := strings.SplitN(line, "=", 2)
+				key := strings.TrimSpace(parts[0])
+				value := strings.TrimSpace(parts[1])
+				args = append(args, fmt.Sprintf("%s=%s", key, value))
+			} else {
+				// Flag without "=" (boolean flags)
+				args = append(args, line)
+			}
 		}
-		args = append(args, parsedParams...)
 	}
 
 	return args
