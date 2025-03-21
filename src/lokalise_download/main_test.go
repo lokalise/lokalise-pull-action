@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"reflect"
 	"runtime"
 	"testing"
 )
@@ -324,10 +325,10 @@ func TestConstructDownloadArgsWithMultipleAdditionalParams(t *testing.T) {
 			Token:            "test_token",
 			FileFormat:       "json",
 			GitHubRefName:    "main",
-			AdditionalParams: "--custom-flag=true   --another-flag=false  --quoted=\"some value\" --json='{\"key\": \"value with space\"}' --empty-flag=",
+			AdditionalParams: `--custom-flag=true   --another-flag=false  --quoted="some value" --json='{"key": "value with space"}' --empty-flag=`,
 		}
 
-		expectedArgs := []string{
+		expected := []string{
 			"--token=test_token",
 			"--project-id=test_project",
 			"file", "download",
@@ -342,15 +343,10 @@ func TestConstructDownloadArgsWithMultipleAdditionalParams(t *testing.T) {
 			"--empty-flag=",
 		}
 
-		args := constructDownloadArgs(config)
-		if len(args) != len(expectedArgs) {
-			t.Errorf("Expected %d arguments, got %d", len(expectedArgs), len(args))
-		}
+		actual := constructDownloadArgs(config)
 
-		for i, arg := range args {
-			if arg != expectedArgs[i] {
-				t.Errorf("Expected argument '%s' at position %d, got '%s'", expectedArgs[i], i, arg)
-			}
+		if !reflect.DeepEqual(actual, expected) {
+			t.Errorf("Arguments do not match.\nExpected:\n%v\nActual:\n%v", expected, actual)
 		}
 	})
 }

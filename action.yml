@@ -99,7 +99,7 @@ runs:
   using: "composite"
   steps:
     - name: Install Lokalise CLIv2
-      uses: bodrovis/install-lokalise-cli-v2@master
+      uses: bodrovis/install-lokalise-cli-v2@v1.1.0
 
     - name: Pull translation files from Lokalise
       id: pull-files
