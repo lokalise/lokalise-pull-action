@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -137,22 +138,11 @@ func constructDownloadArgs(config DownloadConfig) []string {
 		args = append(args, fmt.Sprintf("--include-tags=%s", config.GitHubRefName))
 	}
 
-	// NEW bulletproof handling here 👇
 	if config.AdditionalParams != "" {
-		lines := strings.Split(config.AdditionalParams, "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue // skip empty lines
-			}
-			if strings.Contains(line, "=") {
-				// Split at first "="
-				parts := strings.SplitN(line, "=", 2)
-				key := strings.TrimSpace(parts[0])
-				value := strings.TrimSpace(parts[1])
-				args = append(args, fmt.Sprintf("%s=%s", key, value))
-			} else {
-				// Flag without "=" (boolean flags)
+		scanner := bufio.NewScanner(strings.NewReader(config.AdditionalParams))
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line != "" {
 				args = append(args, line)
 			}
 		}
