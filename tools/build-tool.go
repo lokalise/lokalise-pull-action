@@ -134,7 +134,9 @@ func buildBinary(srcDir, outputDir, binaryName string) ([]string, error) {
 
 		fmt.Printf("Building binary for %s/%s -> %s\n", target.goos, target.goarch, outputPath)
 
-		cmd := exec.Command("go", "build", "-tags=tiny", "-ldflags=-s -w", "-o", outputPath)
+		ldflags := "-s -w -extldflags=-static"
+		cmd := exec.Command("go", "build", "-tags=netgo,osusergo", "-trimpath", "-ldflags", ldflags, "-o", outputPath)
+
 		cmd.Dir = srcDir
 		cmd.Env = append(os.Environ(),
 			"GOOS="+target.goos,

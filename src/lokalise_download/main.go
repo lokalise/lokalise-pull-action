@@ -146,6 +146,9 @@ func constructDownloadArgs(config DownloadConfig) []string {
 				args = append(args, line)
 			}
 		}
+		if err := scanner.Err(); err != nil {
+			returnWithError(fmt.Sprintf("Failed to parse additional parameters: %v", err))
+		}
 	}
 
 	return args
