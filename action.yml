@@ -99,7 +99,8 @@ runs:
   using: "composite"
   steps:
     - name: Install Lokalise CLIv2
-      uses: lokalise/install-lokalise-cli-v2@v1.1.1
+      # lokalise/install-lokalise-cli-v2@v1.1.1
+      uses: lokalise/install-lokalise-cli-v2@ca4b3cfba6b9fc71a92076f501084d9d1903ac5e
 
     - name: Pull translation files from Lokalise
       id: pull-files
