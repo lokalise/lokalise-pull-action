@@ -82,6 +82,11 @@ inputs:
     description: 'Git email to set in git config. If not provided, uses "<username>@users.noreply.github.com".'
     required: false
     default: ''
+  custom_github_token:
+    description: 'Optional GitHub token to use for API operations instead of the default GITHUB_TOKEN. Useful for custom permissions or elevated scopes.'
+    secret: true
+    required: false
+    default: ''
 
 permissions:
   contents: write
@@ -197,7 +202,7 @@ runs:
       # actions/github-script@v7.0.1
       uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea
       with:
-        github-token: ${{ github.token }}
+        github-token: ${{ inputs.custom_github_token || github.token }}
         result-encoding: string
         script: |
           const path = require('path');
