@@ -74,6 +74,15 @@ inputs:
     description: 'Target platform for the binary (linux_amd64, linux_arm64, mac_amd64, mac_arm64)'
     required: false
     default: 'linux_amd64'
+  git_user_name:
+    description: 'Git username to set in git config. If not provided, defaults to GitHub actor.'
+    required: false
+    default: ''
+  git_user_email:
+    description: 'Git email to set in git config. If not provided, uses "<username>@users.noreply.github.com".'
+    required: false
+    default: ''
+
 permissions:
   contents: write
   pull-requests: write
@@ -158,7 +167,9 @@ runs:
         ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
         TEMP_BRANCH_PREFIX: "${{ inputs.temp_branch_prefix }}"
-        PLATFORM: "${{ inputs.os_platform }}" 
+        PLATFORM: "${{ inputs.os_platform }}"
+        GIT_USER_NAME: "${{ inputs.git_user_name }}"
+        GIT_USER_EMAIL: "${{ inputs.git_user_email }}"
       shell: bash
       run: |
         set -e

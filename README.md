@@ -104,6 +104,8 @@ additional_params: |
 - `download_timeout` — Timeout for the download operation, in seconds. Defaults to `120`.
 - `async_mode` — Download translations in asynchronous mode. Not recommended for small projects but required for larger ones (>= 10 000 key-language pairs). Defaults to `false`.
 - `os_platform` — Target platform for the precompiled binaries used by this action (`linux_amd64`, `linux_arm64`, `mac_amd64`, `mac_arm64`). These binaries handle tasks like downloading and processing translations. Typically, you don't need to change this, as the default (`linux_amd64`) works for most environments. Override if running on a macOS runner or a different architecture.
+- `git_user_name` — Optional Git username to use when committing changes. If not provided, the action will default to the GitHub actor associated with the workflow run. Useful if you want to use a specific name (e.g. "Localization Bot") in your commit history.
+- `git_user_email` — Optional Git email address to associate with commits. If not set, it defaults to a noreply address based on the Git username (e.g. `username@users.noreply.github.com`). This is helpful for cleaner commit metadata or if you want to associate commits with a bot/user email.
 
 ### Permissions
 

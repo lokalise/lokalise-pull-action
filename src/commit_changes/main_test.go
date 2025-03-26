@@ -48,6 +48,8 @@ func TestEnvVarsToConfig(t *testing.T) {
 				"BASE_LANG":          "en",
 				"FLAT_NAMING":        "true",
 				"ALWAYS_PULL_BASE":   "false",
+				"GIT_USER_NAME":      "my_user",
+				"GIT_USER_EMAIL":     "test@example.com",
 			},
 			expectedConfig: &Config{
 				GitHubActor:      "test_actor",
@@ -58,6 +60,8 @@ func TestEnvVarsToConfig(t *testing.T) {
 				BaseLang:         "en",
 				FlatNaming:       true,
 				AlwaysPullBase:   false,
+				GitUserName:      "my_user",
+				GitUserEmail:     "test@example.com",
 			},
 			expectError: false,
 		},
@@ -130,7 +134,8 @@ func TestEnvVarsToConfig(t *testing.T) {
 			// Clear environment variables not in the test case
 			allEnvVars := []string{
 				"GITHUB_ACTOR", "GITHUB_SHA", "GITHUB_REF_NAME", "TEMP_BRANCH_PREFIX",
-				"TRANSLATIONS_PATH", "FILE_FORMAT", "BASE_LANG", "FLAT_NAMING", "ALWAYS_PULL_BASE",
+				"TRANSLATIONS_PATH", "FILE_FORMAT", "FILE_EXT", "BASE_LANG",
+				"FLAT_NAMING", "ALWAYS_PULL_BASE", "GIT_USER_NAME", "GIT_USER_EMAIL",
 			}
 
 			for _, key := range allEnvVars {
@@ -257,6 +262,33 @@ func TestSetGitUser(t *testing.T) {
 
 	config := &Config{
 		GitHubActor: "test_actor",
+	}
+
+	err := setGitUser(config, runner)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}
+
+func TestSetGitUser_WithCustomValues(t *testing.T) {
+	runner := &MockCommandRunner{
+		RunFunc: func(name string, args ...string) error {
+			if name == "git" && args[0] == "config" && args[1] == "--global" {
+				if args[2] == "user.name" && args[3] == "custom_user" {
+					return nil
+				}
+				if args[2] == "user.email" && args[3] == "custom_email@example.com" {
+					return nil
+				}
+			}
+			return fmt.Errorf("unexpected command: %s %v", name, args)
+		},
+	}
+
+	config := &Config{
+		GitHubActor:  "ignored_actor",
+		GitUserName:  "custom_user",
+		GitUserEmail: "custom_email@example.com",
 	}
 
 	err := setGitUser(config, runner)

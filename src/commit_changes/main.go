@@ -53,6 +53,8 @@ type Config struct {
 	BaseLang         string
 	FlatNaming       bool
 	AlwaysPullBase   bool
+	GitUserName      string
+	GitUserEmail     string
 }
 
 func main() {
@@ -152,7 +154,7 @@ func envVarsToConfig() (*Config, error) {
 		fileExt = os.Getenv("FILE_FORMAT")
 	}
 	if fileExt == "" {
-		return nil, fmt.Errorf("Cannot infer file extension. Make sure FILE_FORMAT or FILE_EXT environment variables are set")
+		return nil, fmt.Errorf("Cannot infer file extension. Make sure FILE_EXT or FILE_FORMAT environment variables are set")
 	}
 
 	// Construct and return the Config object
@@ -165,19 +167,30 @@ func envVarsToConfig() (*Config, error) {
 		BaseLang:         envValues["BASE_LANG"],
 		FlatNaming:       envBoolValues["FLAT_NAMING"],
 		AlwaysPullBase:   envBoolValues["ALWAYS_PULL_BASE"],
+		GitUserName:      os.Getenv("GIT_USER_NAME"),
+		GitUserEmail:     os.Getenv("GIT_USER_EMAIL"),
 	}, nil
 }
 
 // setGitUser configures git user.name and user.email
 func setGitUser(config *Config, runner CommandRunner) error {
-	email := fmt.Sprintf("%s@users.noreply.github.com", config.GitHubActor)
+	username := config.GitUserName
+	email := config.GitUserEmail
 
-	if err := runner.Run("git", "config", "--global", "user.name", config.GitHubActor); err != nil {
+	if username == "" {
+		username = config.GitHubActor
+	}
+	if email == "" {
+		email = fmt.Sprintf("%s@users.noreply.github.com", username)
+	}
+
+	if err := runner.Run("git", "config", "--global", "user.name", username); err != nil {
 		return fmt.Errorf("failed to set git user.name: %v", err)
 	}
 	if err := runner.Run("git", "config", "--global", "user.email", email); err != nil {
 		return fmt.Errorf("failed to set git user.email: %v", err)
 	}
+
 	return nil
 }
 
