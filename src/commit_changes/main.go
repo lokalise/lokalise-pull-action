@@ -45,16 +45,17 @@ func (d DefaultCommandRunner) Capture(name string, args ...string) (string, erro
 
 // Config holds the environment variables required for the script
 type Config struct {
-	GitHubActor      string
-	GitHubSHA        string
-	GitHubRefName    string
-	TempBranchPrefix string
-	FileExt          string
-	BaseLang         string
-	FlatNaming       bool
-	AlwaysPullBase   bool
-	GitUserName      string
-	GitUserEmail     string
+	GitHubActor        string
+	GitHubSHA          string
+	GitHubRefName      string
+	TempBranchPrefix   string
+	FileExt            string
+	BaseLang           string
+	FlatNaming         bool
+	AlwaysPullBase     bool
+	GitUserName        string
+	GitUserEmail       string
+	OverrideBranchName string
 }
 
 func main() {
@@ -159,16 +160,17 @@ func envVarsToConfig() (*Config, error) {
 
 	// Construct and return the Config object
 	return &Config{
-		GitHubActor:      envValues["GITHUB_ACTOR"],
-		GitHubSHA:        envValues["GITHUB_SHA"],
-		GitHubRefName:    envValues["GITHUB_REF_NAME"],
-		TempBranchPrefix: envValues["TEMP_BRANCH_PREFIX"],
-		FileExt:          fileExt,
-		BaseLang:         envValues["BASE_LANG"],
-		FlatNaming:       envBoolValues["FLAT_NAMING"],
-		AlwaysPullBase:   envBoolValues["ALWAYS_PULL_BASE"],
-		GitUserName:      os.Getenv("GIT_USER_NAME"),
-		GitUserEmail:     os.Getenv("GIT_USER_EMAIL"),
+		GitHubActor:        envValues["GITHUB_ACTOR"],
+		GitHubSHA:          envValues["GITHUB_SHA"],
+		GitHubRefName:      envValues["GITHUB_REF_NAME"],
+		TempBranchPrefix:   envValues["TEMP_BRANCH_PREFIX"],
+		FileExt:            fileExt,
+		BaseLang:           envValues["BASE_LANG"],
+		FlatNaming:         envBoolValues["FLAT_NAMING"],
+		AlwaysPullBase:     envBoolValues["ALWAYS_PULL_BASE"],
+		GitUserName:        os.Getenv("GIT_USER_NAME"),
+		GitUserEmail:       os.Getenv("GIT_USER_EMAIL"),
+		OverrideBranchName: os.Getenv("OVERRIDE_BRANCH_NAME"),
 	}, nil
 }
 
@@ -196,6 +198,10 @@ func setGitUser(config *Config, runner CommandRunner) error {
 
 // generateBranchName creates a sanitized branch name based on environment variables
 func generateBranchName(config *Config) (string, error) {
+	if config.OverrideBranchName != "" {
+		return sanitizeString(config.OverrideBranchName, 255), nil
+	}
+
 	timestamp := time.Now().Unix()
 	githubSHA := config.GitHubSHA
 	if len(githubSHA) < 6 {
@@ -214,6 +220,9 @@ func generateBranchName(config *Config) (string, error) {
 
 // checkoutBranch creates and checks out the branch, or switches to it if it already exists
 func checkoutBranch(branchName string, runner CommandRunner) error {
+	// Fetch the branch if it might already exist remotely
+	_ = runner.Run("git", "fetch", "origin", branchName)
+
 	// Try to create a new branch
 	if err := runner.Run("git", "checkout", "-b", branchName); err == nil {
 		return nil
