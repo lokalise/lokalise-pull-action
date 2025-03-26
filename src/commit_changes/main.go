@@ -220,8 +220,8 @@ func generateBranchName(config *Config) (string, error) {
 
 // checkoutBranch creates and checks out the branch, or switches to it if it already exists
 func checkoutBranch(branchName string, runner CommandRunner) error {
-	// Fetch the branch if it might already exist remotely
-	_ = runner.Run("git", "fetch", "origin", branchName)
+	// Try to fetch the branch if it exists remotely, suppressing errors/output
+	_, _ = runner.Capture("git", "fetch", "origin", branchName)
 
 	// Try to create a new branch
 	if err := runner.Run("git", "checkout", "-b", branchName); err == nil {
