@@ -572,6 +572,40 @@ func TestGenerateBranchName(t *testing.T) {
 	}
 }
 
+func TestCommitAndPush_ForcePush(t *testing.T) {
+	var capturedArgs []string
+
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			if name == "git" && args[0] == "commit" {
+				return "Files committed", nil
+			}
+			return "", nil
+		},
+		RunFunc: func(name string, args ...string) error {
+			if name == "git" && args[0] == "push" {
+				capturedArgs = args
+				return nil
+			}
+			return nil
+		},
+	}
+
+	config := &Config{
+		ForcePush: true,
+	}
+
+	err := commitAndPush("test_branch", runner, config)
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+
+	expectedArgs := []string{"push", "--force", "origin", "test_branch"}
+	if !slices.Equal(capturedArgs, expectedArgs) {
+		t.Errorf("Expected push args %v, got %v", expectedArgs, capturedArgs)
+	}
+}
+
 func TestCommitAndPush_Success(t *testing.T) {
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
