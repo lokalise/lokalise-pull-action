@@ -91,6 +91,10 @@ inputs:
     description: 'Optional static branch name to use instead of auto-generating one. Useful when you want to reuse the same PR.'
     required: false
     default: ''
+  force_push:
+    description: 'Force push changes to the remote branch (overwrites history). Use with caution. Defaults to false.'
+    required: false
+    default: 'false'
 
 permissions:
   contents: write
@@ -180,6 +184,7 @@ runs:
         GIT_USER_NAME: "${{ inputs.git_user_name }}"
         GIT_USER_EMAIL: "${{ inputs.git_user_email }}"
         OVERRIDE_BRANCH_NAME: "${{ inputs.override_branch_name }}"
+        FORCE_PUSH: "${{ inputs.force_push }}"
       shell: bash
       run: |
         set -e

@@ -350,7 +350,9 @@ func TestCommitAndPush(t *testing.T) {
 		},
 	}
 
-	err := commitAndPush("test_branch", runner)
+	config := &Config{}
+
+	err := commitAndPush("test_branch", runner, config)
 	if err != ErrNoChanges {
 		t.Errorf("Expected ErrNoChanges, got %v", err)
 	}
@@ -586,7 +588,9 @@ func TestCommitAndPush_Success(t *testing.T) {
 		},
 	}
 
-	err := commitAndPush("test_branch", runner)
+	config := &Config{}
+
+	err := commitAndPush("test_branch", runner, config)
 	if err != nil {
 		t.Errorf("Expected no error, but got %v", err)
 	}
@@ -605,7 +609,9 @@ func TestCommitAndPush_CommitError(t *testing.T) {
 		},
 	}
 
-	err := commitAndPush("test_branch", runner)
+	config := &Config{}
+
+	err := commitAndPush("test_branch", runner, config)
 	if err == nil {
 		t.Errorf("Expected error, but got nil")
 	} else if !strings.Contains(err.Error(), "failed to commit changes") {
@@ -629,7 +635,9 @@ func TestCommitAndPush_PushError(t *testing.T) {
 		},
 	}
 
-	err := commitAndPush("test_branch", runner)
+	config := &Config{}
+
+	err := commitAndPush("test_branch", runner, config)
 	if err == nil {
 		t.Errorf("Expected error, but got nil")
 	} else if !strings.Contains(err.Error(), "push failed") {

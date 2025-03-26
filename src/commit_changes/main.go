@@ -56,6 +56,7 @@ type Config struct {
 	GitUserName        string
 	GitUserEmail       string
 	OverrideBranchName string
+	ForcePush          bool
 }
 
 func main() {
@@ -111,7 +112,7 @@ func commitAndPushChanges(runner CommandRunner) (string, error) {
 	}
 
 	// Commit and push changes
-	return branchName, commitAndPush(branchName, runner)
+	return branchName, commitAndPush(branchName, runner, config)
 }
 
 // envVarsToConfig constructs a Config object from required environment variables
@@ -128,6 +129,7 @@ func envVarsToConfig() (*Config, error) {
 	requiredEnvBoolVars := []string{
 		"FLAT_NAMING",
 		"ALWAYS_PULL_BASE",
+		"FORCE_PUSH",
 	}
 
 	envValues := make(map[string]string)
@@ -171,6 +173,7 @@ func envVarsToConfig() (*Config, error) {
 		GitUserName:        os.Getenv("GIT_USER_NAME"),
 		GitUserEmail:       os.Getenv("GIT_USER_EMAIL"),
 		OverrideBranchName: os.Getenv("OVERRIDE_BRANCH_NAME"),
+		ForcePush:          envBoolValues["FORCE_PUSH"],
 	}, nil
 }
 
@@ -265,11 +268,14 @@ func buildGitAddArgs(config *Config) []string {
 	return addArgs
 }
 
-func commitAndPush(branchName string, runner CommandRunner) error {
+func commitAndPush(branchName string, runner CommandRunner, config *Config) error {
 	// Attempt to commit the changes
 	output, err := runner.Capture("git", "commit", "-m", "Translations update")
 	if err == nil {
 		// Commit succeeded, push the branch
+		if config.ForcePush {
+			return runner.Run("git", "push", "--force", "origin", branchName)
+		}
 		return runner.Run("git", "push", "origin", branchName)
 	}
 	if strings.Contains(output, "nothing to commit") {
