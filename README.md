@@ -101,7 +101,7 @@ additional_params: |
 - `git_user_name` — Optional Git username to use when committing changes. If not provided, the action will default to the GitHub actor associated with the workflow run. Useful if you want to use a specific name (e.g. "Localization Bot") in your commit history.
 - `git_user_email` — Optional Git email address to associate with commits. If not set, it defaults to a noreply address based on the Git username (e.g. `username@users.noreply.github.com`). This is helpful for cleaner commit metadata or if you want to associate commits with a bot/user email.
 
-### 🔁 Pull request and GitHub options
+### Pull request and GitHub options
 
 - `custom_github_token` — Optional GitHub token to use when creating or updating the pull request. If not provided, the default `GITHUB_TOKEN` is used. This can be helpful when your workflow requires elevated permissions (e.g., assigning reviewers, interacting with protected branches, or writing outside the current repo). Make sure to keep this token secret.
 - `pr_labels` — Comma-separated list of labels to apply to the created pull request.
