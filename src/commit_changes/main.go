@@ -230,9 +230,11 @@ func checkoutBranch(branchName string, runner CommandRunner) error {
 	if err := runner.Run("git", "checkout", "-b", branchName); err == nil {
 		return nil
 	}
+
 	// If branch already exists, switch to it
+	fmt.Printf("Branch '%s' already exists. Switching to it...\n", branchName)
 	if err := runner.Run("git", "checkout", branchName); err != nil {
-		return fmt.Errorf("failed to checkout branch %s: %v", branchName, err)
+		return fmt.Errorf("failed to checkout existing branch %s: %v", branchName, err)
 	}
 	return nil
 }
