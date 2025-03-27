@@ -67,11 +67,9 @@ To avoid this, double-check that your Lokalise filenames match the expected dire
 
 ## Configuration
 
-### Parameters
-
 You'll need to provide some parameters for the action. These can be set as environment variables, secrets, or passed directly. Refer to the [General setup](https://developers.lokalise.com/docs/github-actions#general-setup-overview) section for detailed instructions.
 
-#### Mandatory parameters
+### Mandatory parameters
 
 - `api_token` — Lokalise API token with read/write permissions.
 - `project_id` — Your Lokalise project ID.
@@ -79,10 +77,11 @@ You'll need to provide some parameters for the action. These can be set as envir
 - `file_format` — Defines the format of your translation files, such as `json` for JSON files. Defaults to `json`. This format determines how translation files are processed and also influences the file extension used when searching for them. However, some specific formats, such as `json_structured`, may still be downloaded with a generic `.json` extension. If you're using such a format, make sure to set the `file_ext` parameter explicitly to match the correct extension for your files.
 - `base_lang` — Your project base language, such as `en` for English. Defaults to `en`.
 
-#### Optional parameters
+### File and CLI options
 
-- `file_ext` — Custom file extension to use when searching for translation files (without leading dot). By default, the extension is inferred from the file_format value. However, for certain formats (e.g., `json_structured`), the downloaded files may still have a generic extension (e.g., `.json`). In such cases, this parameter allows specifying the correct extension manually to ensure proper file matching.
-- `additional_params` — Extra parameters to pass to the [Lokalise CLI when pulling files](https://github.com/lokalise/lokalise-cli-2-go/blob/main/docs/lokalise2_file_download.md). For example, you can use `--indentation=2sp` to manage indentation. Defaults to an empty string. Multiple CLI arguments can be added:
+- `async_mode` — Download translations in asynchronous mode. Not recommended for small projects but required for larger ones (>= 10 000 key-language pairs). Defaults to `false`.
+- `file_ext` — Custom file extension to use when searching for translation files (without leading dot). By default, the extension is inferred from the `file_format` value. However, for certain formats (e.g., `json_structured`), the downloaded files may still have a generic extension (e.g., `.json`). In such cases, this parameter allows specifying the correct extension manually to ensure proper file matching.
+- `additional_params` — Extra parameters to pass to the [Lokalise CLI when pulling files](https://github.com/lokalise/lokalise-cli-2-go/blob/main/docs/lokalise2_file_download.md). For example, you can use `--indentation=2sp` to manage indentation. Defaults to an empty string. Multiple params can be specified:
 
 ```yaml
 additional_params: |
@@ -93,22 +92,35 @@ additional_params: |
   --language-mapping=[{"original_language_iso":"en_US","custom_language_iso":"en-US"}]
 ```
 
+- `flat_naming` — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`. Defaults to `false`.
+- `skip_include_tags` — Skip setting the `--include-tags` argument during download. This will download all translation keys for the specified format, regardless of tags.
+- `skip_original_filenames` — Skips setting the `--original-filenames` and `--directory-prefix` arguments during download. You can disable original filenames by setting `--original-filenames=false` explicitly via `additional_params`.
+
+### Git configuration
+
+- `git_user_name` — Optional Git username to use when committing changes. If not provided, the action will default to the GitHub actor associated with the workflow run. Useful if you want to use a specific name (e.g. "Localization Bot") in your commit history.
+- `git_user_email` — Optional Git email address to associate with commits. If not set, it defaults to a noreply address based on the Git username (e.g. `username@users.noreply.github.com`). This is helpful for cleaner commit metadata or if you want to associate commits with a bot/user email.
+
+### Pull request and GitHub options
+
+- `custom_github_token` — Optional GitHub token to use when creating or updating the pull request. If not provided, the default `GITHUB_TOKEN` is used. This can be helpful when your workflow requires elevated permissions (e.g., assigning reviewers, interacting with protected branches, or writing outside the current repo). Make sure to keep this token secret.
+- `pr_labels` — Comma-separated list of labels to apply to the created pull request.
+- `override_branch_name` — Optional static branch name to use instead of auto-generating one. This is useful if you want the action to update the same pull request across multiple runs (e.g., always syncing to `lokalise-sync`). If the branch already exists, it will be checked out and updated instead of creating a new one.
+- `force_push` — Whether to force push changes to the remote branch. Useful when using a static branch name and you want to overwrite any previous state (e.g., updating an existing PR). Set to `true` with caution, as this will overwrite history. Defaults to `false`.
+
+### Behavior tweaks and retries
+
 - `temp_branch_prefix` — A prefix for the temporary branch used to create the pull request. For example, using `lok` will result in a branch name starting with `lok`. Defaults to `lok`.
 - `always_pull_base` — By default, changes in the base language translation files (defined by the `base_lang` option) are ignored when checking for updates. Set this option to `true` to include changes in the base language translations in the pull request. Defaults to `false`.
-- `flat_naming` — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`. Defaults to `false`.
-- `skip_include_tags` — Skip setting the `--include-tags` argument during download. This will download all translation keys for the specified format, regardless of tags. You can also provide custom filtering options via `additional_params`, for example `--include-tags staging,dev`.
-- `skip_original_filenames` — Skips setting the `--original-filenames` and `--directory-prefix` arguments during download. By default, the action enables `--original-filenames=true` and sets a `directory-prefix` to `/`. When `--original-filenames` is set to `false`, all translation keys are exported into a single file per language, and `--directory-prefix` has no effect. Please note that in order to disable original filename usage, you'll need to explicitly set `--original-filenames=false` via `additional_params`.
-- `pr_labels` — Comma-separated list of labels to apply to the created pull request.
 - `max_retries` — Maximum number of retries on rate limit errors (HTTP 429). Defaults to `3`.
 - `sleep_on_retry` — Number of seconds to sleep before retrying on rate limit errors. Defaults to `1`.
 - `download_timeout` — Timeout for the download operation, in seconds. Defaults to `120`.
-- `async_mode` — Download translations in asynchronous mode. Not recommended for small projects but required for larger ones (>= 10 000 key-language pairs). Defaults to `false`.
-- `os_platform` — Target platform for the precompiled binaries used by this action (`linux_amd64`, `linux_arm64`, `mac_amd64`, `mac_arm64`). These binaries handle tasks like downloading and processing translations. Typically, you don't need to change this, as the default (`linux_amd64`) works for most environments. Override if running on a macOS runner or a different architecture.
-- `git_user_name` — Optional Git username to use when committing changes. If not provided, the action will default to the GitHub actor associated with the workflow run. Useful if you want to use a specific name (e.g. "Localization Bot") in your commit history.
-- `git_user_email` — Optional Git email address to associate with commits. If not set, it defaults to a noreply address based on the Git username (e.g. `username@users.noreply.github.com`). This is helpful for cleaner commit metadata or if you want to associate commits with a bot/user email.
-- `custom_github_token` — Optional GitHub token to use when creating or updating the pull request. If not provided, the default `GITHUB_TOKEN` is used. This can be helpful when your workflow requires elevated permissions (e.g., assigning reviewers, interacting with protected branches, or writing outside the current repo). Make sure to keep this token secret.
 
-### Permissions
+### Platform support
+
+- `os_platform` — Target platform for the precompiled binaries used by this action (`linux_amd64`, `linux_arm64`, `mac_amd64`, `mac_arm64`). These binaries handle tasks like downloading and processing translations. Typically, you don't need to change this, as the default (`linux_amd64`) works for most environments. Override if running on a macOS runner or a different architecture.
+
+### GitHub permissions
 
 1. Go to your repository's **Settings**.
 2. Navigate to **Actions > General**.

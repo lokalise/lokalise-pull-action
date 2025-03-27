@@ -34,34 +34,36 @@ func TestEnvVarsToConfig(t *testing.T) {
 		envVars         map[string]string
 		expectedConfig  *Config
 		expectError     bool
-		expectedErrText string // Error substring to validate
+		expectedErrText string
 	}{
 		{
 			name: "Valid environment variables",
 			envVars: map[string]string{
-				"GITHUB_ACTOR":       "test_actor",
-				"GITHUB_SHA":         "123456",
-				"GITHUB_REF_NAME":    "main",
-				"TEMP_BRANCH_PREFIX": "temp",
-				"TRANSLATIONS_PATH":  "translations/",
-				"FILE_FORMAT":        "json",
-				"BASE_LANG":          "en",
-				"FLAT_NAMING":        "true",
-				"ALWAYS_PULL_BASE":   "false",
-				"GIT_USER_NAME":      "my_user",
-				"GIT_USER_EMAIL":     "test@example.com",
+				"GITHUB_ACTOR":         "test_actor",
+				"GITHUB_SHA":           "123456",
+				"GITHUB_REF_NAME":      "main",
+				"TEMP_BRANCH_PREFIX":   "temp",
+				"TRANSLATIONS_PATH":    "translations/",
+				"FILE_FORMAT":          "json",
+				"BASE_LANG":            "en",
+				"FLAT_NAMING":          "true",
+				"ALWAYS_PULL_BASE":     "false",
+				"GIT_USER_NAME":        "my_user",
+				"GIT_USER_EMAIL":       "test@example.com",
+				"OVERRIDE_BRANCH_NAME": "custom_branch",
 			},
 			expectedConfig: &Config{
-				GitHubActor:      "test_actor",
-				GitHubSHA:        "123456",
-				GitHubRefName:    "main",
-				TempBranchPrefix: "temp",
-				FileExt:          "json",
-				BaseLang:         "en",
-				FlatNaming:       true,
-				AlwaysPullBase:   false,
-				GitUserName:      "my_user",
-				GitUserEmail:     "test@example.com",
+				GitHubActor:        "test_actor",
+				GitHubSHA:          "123456",
+				GitHubRefName:      "main",
+				TempBranchPrefix:   "temp",
+				FileExt:            "json",
+				BaseLang:           "en",
+				FlatNaming:         true,
+				AlwaysPullBase:     false,
+				GitUserName:        "my_user",
+				GitUserEmail:       "test@example.com",
+				OverrideBranchName: "custom_branch",
 			},
 			expectError: false,
 		},
@@ -136,6 +138,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				"GITHUB_ACTOR", "GITHUB_SHA", "GITHUB_REF_NAME", "TEMP_BRANCH_PREFIX",
 				"TRANSLATIONS_PATH", "FILE_FORMAT", "FILE_EXT", "BASE_LANG",
 				"FLAT_NAMING", "ALWAYS_PULL_BASE", "GIT_USER_NAME", "GIT_USER_EMAIL",
+				"OVERRIDE_BRANCH_NAME",
 			}
 
 			for _, key := range allEnvVars {
@@ -300,13 +303,17 @@ func TestSetGitUser_WithCustomValues(t *testing.T) {
 func TestCheckoutBranch(t *testing.T) {
 	runner := &MockCommandRunner{
 		RunFunc: func(name string, args ...string) error {
-			if name == "git" && args[0] == "checkout" && args[1] == "-b" {
-				if args[2] == "new_branch" {
-					return nil // Simulate branch creation
+			if name == "git" {
+				if args[0] == "fetch" && args[1] == "origin" {
+					// Allow fetch for any branch name
+					return nil
 				}
-			}
-			if name == "git" && args[0] == "checkout" {
-				if args[1] == "existing_branch" {
+				if args[0] == "checkout" && args[1] == "-b" {
+					if args[2] == "new_branch" {
+						return nil // Simulate branch creation
+					}
+				}
+				if args[0] == "checkout" && args[1] == "existing_branch" {
 					return nil // Simulate switching to existing branch
 				}
 			}
@@ -343,7 +350,9 @@ func TestCommitAndPush(t *testing.T) {
 		},
 	}
 
-	err := commitAndPush("test_branch", runner)
+	config := &Config{}
+
+	err := commitAndPush("test_branch", runner, config)
 	if err != ErrNoChanges {
 		t.Errorf("Expected ErrNoChanges, got %v", err)
 	}
@@ -500,6 +509,17 @@ func TestGenerateBranchName(t *testing.T) {
 			expectedStart: "temp_feature_branch_123456_",
 		},
 		{
+			name: "Valid inputs with branch override",
+			config: &Config{
+				GitHubSHA:          "1234567890abcdef",
+				GitHubRefName:      "feature_branch",
+				TempBranchPrefix:   "temp",
+				OverrideBranchName: "custom_branch",
+			},
+			expectedError: false,
+			expectedStart: "custom_branch",
+		},
+		{
 			name: "GITHUB_SHA too short",
 			config: &Config{
 				GitHubSHA:        "123",
@@ -552,6 +572,40 @@ func TestGenerateBranchName(t *testing.T) {
 	}
 }
 
+func TestCommitAndPush_ForcePush(t *testing.T) {
+	var capturedArgs []string
+
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			if name == "git" && args[0] == "commit" {
+				return "Files committed", nil
+			}
+			return "", nil
+		},
+		RunFunc: func(name string, args ...string) error {
+			if name == "git" && args[0] == "push" {
+				capturedArgs = args
+				return nil
+			}
+			return nil
+		},
+	}
+
+	config := &Config{
+		ForcePush: true,
+	}
+
+	err := commitAndPush("test_branch", runner, config)
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+
+	expectedArgs := []string{"push", "--force", "origin", "test_branch"}
+	if !slices.Equal(capturedArgs, expectedArgs) {
+		t.Errorf("Expected push args %v, got %v", expectedArgs, capturedArgs)
+	}
+}
+
 func TestCommitAndPush_Success(t *testing.T) {
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
@@ -568,7 +622,9 @@ func TestCommitAndPush_Success(t *testing.T) {
 		},
 	}
 
-	err := commitAndPush("test_branch", runner)
+	config := &Config{}
+
+	err := commitAndPush("test_branch", runner, config)
 	if err != nil {
 		t.Errorf("Expected no error, but got %v", err)
 	}
@@ -587,7 +643,9 @@ func TestCommitAndPush_CommitError(t *testing.T) {
 		},
 	}
 
-	err := commitAndPush("test_branch", runner)
+	config := &Config{}
+
+	err := commitAndPush("test_branch", runner, config)
 	if err == nil {
 		t.Errorf("Expected error, but got nil")
 	} else if !strings.Contains(err.Error(), "failed to commit changes") {
@@ -611,7 +669,9 @@ func TestCommitAndPush_PushError(t *testing.T) {
 		},
 	}
 
-	err := commitAndPush("test_branch", runner)
+	config := &Config{}
+
+	err := commitAndPush("test_branch", runner, config)
 	if err == nil {
 		t.Errorf("Expected error, but got nil")
 	} else if !strings.Contains(err.Error(), "push failed") {

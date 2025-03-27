@@ -45,16 +45,18 @@ func (d DefaultCommandRunner) Capture(name string, args ...string) (string, erro
 
 // Config holds the environment variables required for the script
 type Config struct {
-	GitHubActor      string
-	GitHubSHA        string
-	GitHubRefName    string
-	TempBranchPrefix string
-	FileExt          string
-	BaseLang         string
-	FlatNaming       bool
-	AlwaysPullBase   bool
-	GitUserName      string
-	GitUserEmail     string
+	GitHubActor        string
+	GitHubSHA          string
+	GitHubRefName      string
+	TempBranchPrefix   string
+	FileExt            string
+	BaseLang           string
+	FlatNaming         bool
+	AlwaysPullBase     bool
+	GitUserName        string
+	GitUserEmail       string
+	OverrideBranchName string
+	ForcePush          bool
 }
 
 func main() {
@@ -110,7 +112,7 @@ func commitAndPushChanges(runner CommandRunner) (string, error) {
 	}
 
 	// Commit and push changes
-	return branchName, commitAndPush(branchName, runner)
+	return branchName, commitAndPush(branchName, runner, config)
 }
 
 // envVarsToConfig constructs a Config object from required environment variables
@@ -127,6 +129,7 @@ func envVarsToConfig() (*Config, error) {
 	requiredEnvBoolVars := []string{
 		"FLAT_NAMING",
 		"ALWAYS_PULL_BASE",
+		"FORCE_PUSH",
 	}
 
 	envValues := make(map[string]string)
@@ -159,16 +162,18 @@ func envVarsToConfig() (*Config, error) {
 
 	// Construct and return the Config object
 	return &Config{
-		GitHubActor:      envValues["GITHUB_ACTOR"],
-		GitHubSHA:        envValues["GITHUB_SHA"],
-		GitHubRefName:    envValues["GITHUB_REF_NAME"],
-		TempBranchPrefix: envValues["TEMP_BRANCH_PREFIX"],
-		FileExt:          fileExt,
-		BaseLang:         envValues["BASE_LANG"],
-		FlatNaming:       envBoolValues["FLAT_NAMING"],
-		AlwaysPullBase:   envBoolValues["ALWAYS_PULL_BASE"],
-		GitUserName:      os.Getenv("GIT_USER_NAME"),
-		GitUserEmail:     os.Getenv("GIT_USER_EMAIL"),
+		GitHubActor:        envValues["GITHUB_ACTOR"],
+		GitHubSHA:          envValues["GITHUB_SHA"],
+		GitHubRefName:      envValues["GITHUB_REF_NAME"],
+		TempBranchPrefix:   envValues["TEMP_BRANCH_PREFIX"],
+		FileExt:            fileExt,
+		BaseLang:           envValues["BASE_LANG"],
+		FlatNaming:         envBoolValues["FLAT_NAMING"],
+		AlwaysPullBase:     envBoolValues["ALWAYS_PULL_BASE"],
+		GitUserName:        os.Getenv("GIT_USER_NAME"),
+		GitUserEmail:       os.Getenv("GIT_USER_EMAIL"),
+		OverrideBranchName: os.Getenv("OVERRIDE_BRANCH_NAME"),
+		ForcePush:          envBoolValues["FORCE_PUSH"],
 	}, nil
 }
 
@@ -196,6 +201,10 @@ func setGitUser(config *Config, runner CommandRunner) error {
 
 // generateBranchName creates a sanitized branch name based on environment variables
 func generateBranchName(config *Config) (string, error) {
+	if config.OverrideBranchName != "" {
+		return sanitizeString(config.OverrideBranchName, 255), nil
+	}
+
 	timestamp := time.Now().Unix()
 	githubSHA := config.GitHubSHA
 	if len(githubSHA) < 6 {
@@ -214,13 +223,18 @@ func generateBranchName(config *Config) (string, error) {
 
 // checkoutBranch creates and checks out the branch, or switches to it if it already exists
 func checkoutBranch(branchName string, runner CommandRunner) error {
+	// Try to fetch the branch if it exists remotely, suppressing errors/output
+	_, _ = runner.Capture("git", "fetch", "origin", branchName)
+
 	// Try to create a new branch
 	if err := runner.Run("git", "checkout", "-b", branchName); err == nil {
 		return nil
 	}
+
 	// If branch already exists, switch to it
+	fmt.Printf("Branch '%s' already exists. Switching to it...\n", branchName)
 	if err := runner.Run("git", "checkout", branchName); err != nil {
-		return fmt.Errorf("failed to checkout branch %s: %v", branchName, err)
+		return fmt.Errorf("failed to checkout existing branch %s: %v", branchName, err)
 	}
 	return nil
 }
@@ -256,11 +270,14 @@ func buildGitAddArgs(config *Config) []string {
 	return addArgs
 }
 
-func commitAndPush(branchName string, runner CommandRunner) error {
+func commitAndPush(branchName string, runner CommandRunner, config *Config) error {
 	// Attempt to commit the changes
 	output, err := runner.Capture("git", "commit", "-m", "Translations update")
 	if err == nil {
 		// Commit succeeded, push the branch
+		if config.ForcePush {
+			return runner.Run("git", "push", "--force", "origin", branchName)
+		}
 		return runner.Run("git", "push", "origin", branchName)
 	}
 	if strings.Contains(output, "nothing to commit") {
