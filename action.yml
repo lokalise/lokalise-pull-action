@@ -94,7 +94,7 @@ inputs:
   force_push:
     description: 'Force push changes to the remote branch (overwrites history). Use with caution. Defaults to false.'
     required: false
-    default: 'false'
+    default: false
 
 permissions:
   contents: write
