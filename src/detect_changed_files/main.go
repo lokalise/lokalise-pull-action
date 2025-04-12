@@ -253,7 +253,7 @@ func prepareConfig() (*Config, error) {
 		fileExt = os.Getenv("FILE_FORMAT")
 	}
 	if fileExt == "" {
-		return nil, fmt.Errorf("Cannot infer file extension. Make sure FILE_FORMAT or FILE_EXT environment variables are set")
+		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_FORMAT or FILE_EXT environment variables are set")
 	}
 
 	baseLang := os.Getenv("BASE_LANG")

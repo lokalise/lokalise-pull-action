@@ -157,7 +157,7 @@ func envVarsToConfig() (*Config, error) {
 		fileExt = os.Getenv("FILE_FORMAT")
 	}
 	if fileExt == "" {
-		return nil, fmt.Errorf("Cannot infer file extension. Make sure FILE_EXT or FILE_FORMAT environment variables are set")
+		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_EXT or FILE_FORMAT environment variables are set")
 	}
 
 	// Construct and return the Config object
