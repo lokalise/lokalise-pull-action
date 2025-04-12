@@ -124,7 +124,7 @@ runs:
       # lokalise/install-lokalise-cli-v2@v1.2.0
       uses: lokalise/install-lokalise-cli-v2@0aadabc1b6dfecb602435c1d52fdbfd828c1af01
       with:
-        target-version: 3.1.1
+        target-version: 3.1.2
 
     - name: Pull translation files from Lokalise
       id: pull-files
