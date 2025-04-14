@@ -146,6 +146,8 @@ runs:
         ASYNC_MODE: "${{ inputs.async_mode }}"
       run: |
         set -e
+
+        echo "Downloading translation files from Lokalise..."
         
         CMD_PATH="${{ github.action_path }}/bin/lokalise_download_${PLATFORM}"
         if [ ! -f "$CMD_PATH" ]; then
@@ -157,6 +159,8 @@ runs:
           echo "Error: lokalise_download script failed with exit code $?"
           exit 1
         }
+
+        echo "Download complete! Detecting changed files..."
 
         CMD_PATH="${{ github.action_path }}/bin/detect_changed_files_${PLATFORM}"
         if [ ! -f "$CMD_PATH" ]; then
@@ -189,6 +193,8 @@ runs:
       run: |
         set -e
 
+        echo "Commiting changes..."
+
         CMD_PATH="${{ github.action_path }}/bin/commit_changes_${PLATFORM}"
         if [ ! -f "$CMD_PATH" ]; then
           echo "Error: Binary for platform '${PLATFORM}' not found!"
@@ -201,6 +207,8 @@ runs:
           echo "has_changes=false" >> $GITHUB_OUTPUT
           exit 1
         }
+
+        echo "Changes have been commited!"
 
     - name: Create or Update Pull Request
       if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'
@@ -227,8 +235,11 @@ runs:
       id: check-pr-created
       shell: bash
       run: |
+        echo "Verifying created PR..."
         if [ "${{ steps.create-update-pr.outputs.pr_created }}" != "true" ]; then
+          echo "Failed to create PR."
           echo "pr_created=false" >> $GITHUB_OUTPUT
         else
+          echo "PR has been created."
           echo "pr_created=true" >> $GITHUB_OUTPUT
         fi

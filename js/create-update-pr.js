@@ -1,6 +1,6 @@
 module.exports = async ({ github, context }) => {
   const { repo } = context;
-
+  console.log("Creating or updating PR...")
   try {
     const branchName = process.env.BRANCH_NAME;
     const baseRef = process.env.BASE_REF;
