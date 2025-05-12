@@ -121,8 +121,8 @@ runs:
   using: "composite"
   steps:
     - name: Install Lokalise CLIv2
-      # lokalise/install-lokalise-cli-v2@v1.2.0
-      uses: lokalise/install-lokalise-cli-v2@0aadabc1b6dfecb602435c1d52fdbfd828c1af01
+      # lokalise/install-lokalise-cli-v2@v1.2.1
+      uses: lokalise/install-lokalise-cli-v2@9785b791b01cc6043a00aefa41aa28583e4d969a
       with:
         target-version: 3.1.3
 
