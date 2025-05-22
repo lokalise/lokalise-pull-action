@@ -76,11 +76,11 @@ You'll need to provide some parameters for the action. These can be set as envir
 - `translations_path` — One or more paths to your translation files. For example, if your translations are stored in the `locales` folder at the project root, use `locales`. Defaults to `locales`.
 - `file_format` — Defines the format of your translation files, such as `json` for JSON files. Defaults to `json`. This format determines how translation files are processed and also influences the file extension used when searching for them. However, some specific formats, such as `json_structured`, may still be downloaded with a generic `.json` extension. If you're using such a format, make sure to set the `file_ext` parameter explicitly to match the correct extension for your files.
 - `base_lang` — Your project base language, such as `en` for English. Defaults to `en`.
+- `file_ext` (*not strictly mandatory but still recommended*) — Custom file extension to use when searching for translation files (without leading dot, for example `json` or `yml`). By default, the extension is inferred from the `file_format` value. However, for certain formats (e.g., `json_structured`), the downloaded files may still have a generic extension. In such cases, this parameter allows specifying the correct extension manually to ensure proper file matching.
 
 ### File and CLI options
 
 - `async_mode` — Download translations in asynchronous mode. Not recommended for small projects but required for larger ones (>= 10 000 key-language pairs). Defaults to `false`.
-- `file_ext` — Custom file extension to use when searching for translation files (without leading dot). By default, the extension is inferred from the `file_format` value. However, for certain formats (e.g., `json_structured`), the downloaded files may still have a generic extension (e.g., `.json`). In such cases, this parameter allows specifying the correct extension manually to ensure proper file matching.
 - `additional_params` — Extra parameters to pass to the [Lokalise CLI when pulling files](https://github.com/lokalise/lokalise-cli-2-go/blob/main/docs/lokalise2_file_download.md). For example, you can use `--indentation=2sp` to manage indentation. Defaults to an empty string. Multiple params can be specified:
 
 ```yaml
