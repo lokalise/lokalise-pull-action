@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        cache: false
+
+    - name: Test
+      run: |
+        set -e
+
+        for dir in src/*; do
+          if [ -f "$dir/go.mod" ]; then
+            echo "Running tests in $dir"
+            (cd "$dir" && go test ./...)
+          fi
+        done

@@ -1,4 +1,4 @@
-module commit_changes
+module tools
 
 go 1.24
 

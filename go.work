@@ -1,0 +1,8 @@
+go 1.24.3
+
+use (
+	./src/commit_changes
+	./src/detect_changed_files
+	./src/lokalise_download
+	./tools
+)
