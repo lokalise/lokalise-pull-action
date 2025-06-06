@@ -55,6 +55,7 @@ type Config struct {
 	AlwaysPullBase     bool
 	GitUserName        string
 	GitUserEmail       string
+	GitCommitMessage   string
 	OverrideBranchName string
 	ForcePush          bool
 }
@@ -172,6 +173,7 @@ func envVarsToConfig() (*Config, error) {
 		AlwaysPullBase:     envBoolValues["ALWAYS_PULL_BASE"],
 		GitUserName:        os.Getenv("GIT_USER_NAME"),
 		GitUserEmail:       os.Getenv("GIT_USER_EMAIL"),
+		GitCommitMessage:   os.Getenv("GIT_COMMIT_MESSAGE"),
 		OverrideBranchName: os.Getenv("OVERRIDE_BRANCH_NAME"),
 		ForcePush:          envBoolValues["FORCE_PUSH"],
 	}, nil
@@ -272,7 +274,7 @@ func buildGitAddArgs(config *Config) []string {
 
 func commitAndPush(branchName string, runner CommandRunner, config *Config) error {
 	// Attempt to commit the changes
-	output, err := runner.Capture("git", "commit", "-m", "Translations update")
+	output, err := runner.Capture("git", "commit", "-m", config.GitCommitMessage)
 	if err == nil {
 		// Commit succeeded, push the branch
 		if config.ForcePush {

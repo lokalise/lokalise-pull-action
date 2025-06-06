@@ -82,6 +82,10 @@ inputs:
     description: 'Git email to set in git config. If not provided, uses "<username>@users.noreply.github.com".'
     required: false
     default: ''
+  git_commit_message:
+    description: 'Git commit message used. If not provided, defaults to "Translations update"'
+    required: false
+    default: 'Translations update'
   custom_github_token:
     description: 'Optional GitHub token to use for API operations instead of the default GITHUB_TOKEN. Useful for custom permissions or elevated scopes.'
     secret: true
