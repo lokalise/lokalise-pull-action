@@ -161,6 +161,11 @@ func envVarsToConfig() (*Config, error) {
 		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_EXT or FILE_FORMAT environment variables are set")
 	}
 
+	commitMsg := os.Getenv("GIT_COMMIT_MESSAGE")
+	if commitMsg == "" {
+		commitMsg = "Translations update"
+	}
+
 	// Construct and return the Config object
 	return &Config{
 		GitHubActor:        envValues["GITHUB_ACTOR"],
@@ -173,7 +178,7 @@ func envVarsToConfig() (*Config, error) {
 		AlwaysPullBase:     envBoolValues["ALWAYS_PULL_BASE"],
 		GitUserName:        os.Getenv("GIT_USER_NAME"),
 		GitUserEmail:       os.Getenv("GIT_USER_EMAIL"),
-		GitCommitMessage:   os.Getenv("GIT_COMMIT_MESSAGE"),
+		GitCommitMessage:   commitMsg,
 		OverrideBranchName: os.Getenv("OVERRIDE_BRANCH_NAME"),
 		ForcePush:          envBoolValues["FORCE_PUSH"],
 	}, nil

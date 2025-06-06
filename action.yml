@@ -83,7 +83,7 @@ inputs:
     required: false
     default: ''
   git_commit_message:
-    description: 'Git commit message used. If not provided, defaults to "Translations update"'
+    description: 'Git commit message used. If not provided, defaults to "Translations update".'
     required: false
     default: 'Translations update'
   custom_github_token:

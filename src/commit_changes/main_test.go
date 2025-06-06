@@ -51,6 +51,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				"GIT_USER_NAME":        "my_user",
 				"GIT_USER_EMAIL":       "test@example.com",
 				"OVERRIDE_BRANCH_NAME": "custom_branch",
+				"GIT_COMMIT_MESSAGE":   "My commit msg",
 			},
 			expectedConfig: &Config{
 				GitHubActor:        "test_actor",
@@ -64,6 +65,39 @@ func TestEnvVarsToConfig(t *testing.T) {
 				GitUserName:        "my_user",
 				GitUserEmail:       "test@example.com",
 				OverrideBranchName: "custom_branch",
+				GitCommitMessage:   "My commit msg",
+			},
+			expectError: false,
+		},
+		{
+			name: "Empty commit msg",
+			envVars: map[string]string{
+				"GITHUB_ACTOR":         "test_actor",
+				"GITHUB_SHA":           "123456",
+				"GITHUB_REF_NAME":      "main",
+				"TEMP_BRANCH_PREFIX":   "temp",
+				"TRANSLATIONS_PATH":    "translations/",
+				"FILE_FORMAT":          "json",
+				"BASE_LANG":            "en",
+				"FLAT_NAMING":          "true",
+				"ALWAYS_PULL_BASE":     "false",
+				"GIT_USER_NAME":        "my_user",
+				"GIT_USER_EMAIL":       "test@example.com",
+				"OVERRIDE_BRANCH_NAME": "custom_branch",
+			},
+			expectedConfig: &Config{
+				GitHubActor:        "test_actor",
+				GitHubSHA:          "123456",
+				GitHubRefName:      "main",
+				TempBranchPrefix:   "temp",
+				FileExt:            "json",
+				BaseLang:           "en",
+				FlatNaming:         true,
+				AlwaysPullBase:     false,
+				GitUserName:        "my_user",
+				GitUserEmail:       "test@example.com",
+				OverrideBranchName: "custom_branch",
+				GitCommitMessage:   "Translations update",
 			},
 			expectError: false,
 		},
@@ -90,6 +124,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				BaseLang:         "en",
 				FlatNaming:       true,
 				AlwaysPullBase:   false,
+				GitCommitMessage: "Translations update",
 			},
 			expectError: false,
 		},
@@ -138,7 +173,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				"GITHUB_ACTOR", "GITHUB_SHA", "GITHUB_REF_NAME", "TEMP_BRANCH_PREFIX",
 				"TRANSLATIONS_PATH", "FILE_FORMAT", "FILE_EXT", "BASE_LANG",
 				"FLAT_NAMING", "ALWAYS_PULL_BASE", "GIT_USER_NAME", "GIT_USER_EMAIL",
-				"OVERRIDE_BRANCH_NAME",
+				"OVERRIDE_BRANCH_NAME", "GIT_COMMIT_MESSAGE",
 			}
 
 			for _, key := range allEnvVars {
@@ -335,22 +370,41 @@ func TestCheckoutBranch(t *testing.T) {
 }
 
 func TestCommitAndPush(t *testing.T) {
+	expectedMessage := "my test commit message"
+
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
 			if name == "git" && args[0] == "commit" {
+				// Check that -m flag is present
+				foundM := false
+				foundMsg := false
+				for i := 0; i < len(args); i++ {
+					if args[i] == "-m" {
+						foundM = true
+						if i+1 < len(args) && args[i+1] == expectedMessage {
+							foundMsg = true
+						}
+					}
+				}
+				if !foundM || !foundMsg {
+					t.Errorf("Expected -m %q in git commit args, got: %v", expectedMessage, args)
+				}
+
 				return "nothing to commit, working tree clean", fmt.Errorf("nothing to commit")
 			}
 			return "", nil
 		},
 		RunFunc: func(name string, args ...string) error {
 			if name == "git" && args[0] == "push" && args[1] == "origin" {
-				return nil // Simulate successful push
+				return nil
 			}
 			return fmt.Errorf("unexpected command: %s %v", name, args)
 		},
 	}
 
-	config := &Config{}
+	config := &Config{
+		GitCommitMessage: expectedMessage,
+	}
 
 	err := commitAndPush("test_branch", runner, config)
 	if err != ErrNoChanges {

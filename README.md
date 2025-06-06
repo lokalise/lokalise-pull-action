@@ -107,6 +107,7 @@ additional_params: |
 - `pr_labels` — Comma-separated list of labels to apply to the created pull request.
 - `override_branch_name` — Optional static branch name to use instead of auto-generating one. This is useful if you want the action to update the same pull request across multiple runs (e.g., always syncing to `lokalise-sync`). If the branch already exists, it will be checked out and updated instead of creating a new one.
 - `force_push` — Whether to force push changes to the remote branch. Useful when using a static branch name and you want to overwrite any previous state (e.g., updating an existing PR). Set to `true` with caution, as this will overwrite history. Defaults to `false`.
+- `git_commit_message` — Git commit message to use. If not provided, defaults to "Translations update".
 
 ### Behavior tweaks and retries
 
