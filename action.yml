@@ -191,6 +191,7 @@ runs:
         PLATFORM: "${{ inputs.os_platform }}"
         GIT_USER_NAME: "${{ inputs.git_user_name }}"
         GIT_USER_EMAIL: "${{ inputs.git_user_email }}"
+        GIT_COMMIT_MESSAGE: "${{ inputs.git_commit_message }}"
         OVERRIDE_BRANCH_NAME: "${{ inputs.override_branch_name }}"
         FORCE_PUSH: "${{ inputs.force_push }}"
       shell: bash
