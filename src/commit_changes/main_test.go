@@ -268,6 +268,12 @@ func TestSanitizeString(t *testing.T) {
 			maxLength: 10,
 			expected:  "Short",
 		},
+		{
+			name:      "Allow branch folders",
+			input:     "feature/valid-branch-name",
+			maxLength: 50,
+			expected:  "feature/valid-branch-name",
+		},
 	}
 
 	for _, tt := range tests {
