@@ -596,7 +596,7 @@ func TestGenerateBranchName(t *testing.T) {
 				TempBranchPrefix: "temp",
 			},
 			expectedError: false,
-			expectedStart: "temp_featurebranch_abcdef_",
+			expectedStart: "temp_feature/branch_abcdef_",
 		},
 		{
 			name: "GITHUB_REF_NAME exceeding 50 characters",

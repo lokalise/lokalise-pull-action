@@ -296,7 +296,7 @@ func commitAndPush(branchName string, runner CommandRunner, config *Config) erro
 
 // sanitizeString removes unwanted characters from a string and truncates it to maxLength
 func sanitizeString(input string, maxLength int) string {
-	// Only allow letters, numbers, underscores, and hyphens
+	// Only allow letters, numbers, underscores, hyphens, and forward slashes
 	allowed := func(r rune) bool {
 		return (r >= 'a' && r <= 'z') ||
 			(r >= 'A' && r <= 'Z') ||
