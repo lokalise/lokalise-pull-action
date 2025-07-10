@@ -117,6 +117,8 @@ additional_params: |
 
 - `custom_github_token` — Optional GitHub token to use when creating or updating the pull request. If not provided, the default `GITHUB_TOKEN` is used. This can be helpful when your workflow requires elevated permissions (e.g., assigning reviewers, interacting with protected branches, or writing outside the current repo). Make sure to keep this token secret.
 - `pr_labels` — Comma-separated list of labels to apply to the created pull request.
+- `pr_title` — Title for the pull request. If not provided, defaults to "Translations update".
+- `pr_body` — Body text for the pull request. If not provided, defaults to "This pull request updates translations from Lokalise".
 - `override_branch_name` — Optional static branch name to use instead of auto-generating one. This is useful if you want the action to update the same pull request across multiple runs (e.g., always syncing to `lokalise-sync`). If the branch already exists, it will be checked out and updated instead of creating a new one.
 - `force_push` — Whether to force push changes to the remote branch. Useful when using a static branch name and you want to overwrite any previous state (e.g., updating an existing PR). Set to `true` with caution, as this will overwrite history. Defaults to `false`.
 - `git_commit_message` — Git commit message to use. If not provided, defaults to "Translations update".

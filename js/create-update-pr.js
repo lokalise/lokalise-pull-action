@@ -8,6 +8,8 @@ module.exports = async ({ github, context }) => {
       .split(',')
       .map(label => label.trim())
       .filter(label => label.length > 0);
+    const prTitle = process.env.PR_TITLE;
+    const prBody = process.env.PR_BODY;
 
     if (!branchName || !baseRef) {
       throw new Error("Required environment variables are missing");
@@ -36,10 +38,10 @@ module.exports = async ({ github, context }) => {
     const { data: newPr } = await github.rest.pulls.create({
       owner: repo.owner,
       repo: repo.repo,
-      title: "Lokalise translations update",
+      title: prTitle,
       head: branchName,
       base: baseRef,
-      body: "This PR updates translations from Lokalise.",
+      body: prBody,
     });
 
     if (prLabels.length > 0) {
