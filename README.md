@@ -44,11 +44,21 @@ jobs:
 
 ### Important note on Lokalise filenames and tags
 
-Before running this action, ensure that your translation keys on Lokalise are correctly assigned with appropriate [filenames](https://docs.lokalise.com/en/articles/2281317-filenames) and [tags](https://docs.lokalise.com/en/articles/1475552-tags).
+Before running this action, ensure that your translation keys in Lokalise are properly assigned with relevant [filenames](https://docs.lokalise.com/en/articles/2281317-filenames) and [tags](https://docs.lokalise.com/en/articles/1475552-tags).
 
 #### Tags and branch context
 
-If you are running this action from the `hub` branch on GitHub, the action will download only the keys that have the `hub` tag assigned. If no such keys are found, the action will halt execution.
+By default, the action filters downloaded keys based on a tag that matches the Git branch name used to trigger the workflow. This is done automatically via the `--include-tags=BRANCH_NAME` command-line argument.
+
+For example, if the action is triggered from the `hub` branch on GitHub, it will download only the keys tagged with `hub`: `--include-tags=hub`. If no keys with the specified tag are found, the action will terminate.
+
+To disable this automatic filtering or use custom tags, set the `skip_include_tags` parameter to `true`. You can also provide your own tags via the `additional_params` field:
+
+```yaml
+skip_include_tags: true
+additional_params: |
+  --include-tags=custom_tag
+```
 
 #### Filenames and directory structure
 
@@ -65,6 +75,8 @@ If the filenames do not include the correct directory prefix (like `locales/`), 
 
 To avoid this, double-check that your Lokalise filenames match the expected directory structure.
 
+Note that by default the action adds the `--original-filenames=true` and `--directory-prefix=/` command line arguments. To disable this behavior, set the `skip_original_filenames` to `true`.
+
 ## Configuration
 
 You'll need to provide some parameters for the action. These can be set as environment variables, secrets, or passed directly. Refer to the [General setup](https://developers.lokalise.com/docs/github-actions#general-setup-overview) section for detailed instructions.
@@ -73,7 +85,7 @@ You'll need to provide some parameters for the action. These can be set as envir
 
 - `api_token` — Lokalise API token with read/write permissions.
 - `project_id` — Your Lokalise project ID.
-- `translations_path` — One or more paths to your translation files. For example, if your translations are stored in the `locales` folder at the project root, use `locales`. Defaults to `locales`.
+- `translations_path` — One or more paths to your translation files. Do not provide the actual filenames here. For example, if your translations are stored in the `locales` folder at the project root, use `locales`. Defaults to `locales`.
 - `file_format` — Defines the format of your translation files, such as `json` for JSON files. Defaults to `json`. This format determines how translation files are processed and also influences the file extension used when searching for them. However, some specific formats, such as `json_structured`, may still be downloaded with a generic `.json` extension. If you're using such a format, make sure to set the `file_ext` parameter explicitly to match the correct extension for your files.
 - `base_lang` — Your project base language, such as `en` for English. Defaults to `en`.
 - `file_ext` (*not strictly mandatory but still recommended*) — Custom file extension to use when searching for translation files (without leading dot, for example `json` or `yml`). By default, the extension is inferred from the `file_format` value. However, for certain formats (e.g., `json_structured`), the downloaded files may still have a generic extension. In such cases, this parameter allows specifying the correct extension manually to ensure proper file matching.
