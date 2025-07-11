@@ -240,8 +240,8 @@ runs:
         PR_LABELS: ${{ inputs.pr_labels }}
         PR_TITLE: ${{ inputs.pr_title }}
         PR_BODY: ${{ inputs.pr_body }}
-        PR_TEAMS_REVIEWERS: ${{ pr_teams_reviewers }}
-        PR_REVIEWERS: ${{ pr_reviewers }}
+        PR_TEAMS_REVIEWERS: ${{ inputs.pr_teams_reviewers }}
+        PR_REVIEWERS: ${{ inputs.pr_reviewers }}
       id: create-update-pr
       # actions/github-script@v7.0.1
       uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea
