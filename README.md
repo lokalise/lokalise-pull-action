@@ -123,7 +123,8 @@ additional_params: |
 - `force_push` — Whether to force push changes to the remote branch. Useful when using a static branch name and you want to overwrite any previous state (e.g., updating an existing PR). Set to `true` with caution, as this will overwrite history. Defaults to `false`.
 - `git_commit_message` — Git commit message to use. If not provided, defaults to "Translations update".
 - `pr_reviewers` — Optional comma-separated list of GitHub usernames to request as reviewers on the pull request. Only individual users can be specified here. Reviewers must have access to the repository.
-- `pr_teams_reviewers` — Optional comma-separated list of team slugs (e.g., `backend`, `qa`) from the same GitHub organization that owns the repository. These teams will be requested as reviewers. Has no effect for repositories not under an organization, or if the teams are not part of the org.
+- `pr_teams_reviewers` — Optional comma-separated list of team slugs (e.g., `backend`, `qa`) from the same GitHub organization that owns the repository. These teams will be requested as reviewers. Has no effect for repositories not under an organization, or if the teams are not part of the org.  
+  + Requesting team reviewers requires a token with the `repo` and `read:org` scopes. If the default `GITHUB_TOKEN` is restricted by your organization, supply a custom Personal Access Token via `custom_github_token` that includes at least those scopes.
 
 ### Behavior tweaks and retries
 
