@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
 
       - name: Pull from Lokalise
-        uses: lokalise/lokalise-pull-action@v3.10.0
+        uses: lokalise/lokalise-pull-action@v3.11.0
         with:
           api_token: ${{ secrets.LOKALISE_API_TOKEN }}
           project_id: LOKALISE_PROJECT_ID
@@ -198,6 +198,7 @@ By default, the following command-line parameters are set when downloading files
 ## Special notes and known issues
 
 * If you are using Gettext (PO files) and the action opens pull requests when no translations have been changed and the only difference is the "revision date", [refer to the following comment for clarifications](https://github.com/lokalise/lokalise-pull-action/issues/9#issuecomment-2578225342)
+* If you are using iOS strings files, [please check the following document on our DeveloperHub](https://developers.lokalise.com/docs/github-actions#support-for-ios-strings-files) containing setup recommendations
 
 ## License
 
