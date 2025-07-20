@@ -245,7 +245,6 @@ runs:
         BASE_LANG: "${{ inputs.base_lang }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
         PLATFORM: "${{ inputs.os_platform }}"
-        FLAT_NAMING: "${{ inputs.flat_naming }}"
       shell: bash
       run: |
         echo "Running post-process command:"
