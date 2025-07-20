@@ -119,7 +119,11 @@ inputs:
     description: 'Shell command to run after downloading translation files and before committing. Useful for custom replacements, cleanup, or any post-processing logic.'
     required: false
     default: ''
-    
+  post_process_strict:
+    description: 'Whether to fail the action if the post_process_command returns a non-zero exit code'
+    required: false
+    default: 'false'
+
 permissions:
   contents: write
   pull-requests: write
@@ -207,11 +211,24 @@ runs:
         BASE_LANG: "${{ inputs.base_lang }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
         PLATFORM: "${{ inputs.os_platform }}"
+        STRICT: "${{ inputs.post_process_strict }}"
       shell: bash
       run: |
         echo "Running post-process command:"
         echo "${{ inputs.post_process_command }}"
+        
+        set +e
         eval "${{ inputs.post_process_command }}"
+        EXIT_CODE=$?
+
+        if [[ "$STRICT" == "true" && "$EXIT_CODE" -ne 0 ]]; then
+          echo "Post-processing failed with exit code $EXIT_CODE and strict mode is enabled. Exiting."
+          exit $EXIT_CODE
+        elif [[ "$EXIT_CODE" -ne 0 ]]; then
+          echo "Post-processing failed with exit code $EXIT_CODE, but strict mode is off. Continuing..."
+        else
+          echo "Post-processing finished successfully."
+        fi
 
     - name: Commit changes
       id: create-commit

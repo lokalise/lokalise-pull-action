@@ -147,6 +147,8 @@ post_process_command: "sed -i 's/test/REPLACED/g' messages/fr.json"
 post_process_command: "./scripts/postprocess"
 ```
 
+- `post_process_strict` — Whether to fail the workflow if the `post_process_command` fails (non-zero exit code). If set to `true`, the workflow will exit immediately on failure. Defaults to `false`.
+
 ### Platform support
 
 - `os_platform` — Target platform for the precompiled binaries used by this action (`linux_amd64`, `linux_arm64`, `mac_amd64`, `mac_arm64`). These binaries handle tasks like downloading and processing translations. Typically, you don't need to change this, as the default (`linux_amd64`) works for most environments. Override if running on a macOS runner or a different architecture.
