@@ -198,6 +198,21 @@ runs:
           exit 1
         }
 
+    - name: Run post-processing command
+      if: steps.pull-files.outputs.has_changes == 'true' && inputs.post_process_command != ''
+      env:
+        FILE_FORMAT: ${{ inputs.file_format }}
+        FILE_EXT: ${{ inputs.file_ext }}
+        TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
+        BASE_LANG: "${{ inputs.base_lang }}"
+        FLAT_NAMING: "${{ inputs.flat_naming }}"
+        PLATFORM: "${{ inputs.os_platform }}"
+      shell: bash
+      run: |
+        echo "Running post-process command:"
+        echo "${{ inputs.post_process_command }}"
+        eval "${{ inputs.post_process_command }}"
+
     - name: Commit changes
       id: create-commit
       if: steps.pull-files.outputs.has_changes == 'true'
@@ -235,21 +250,6 @@ runs:
         }
 
         echo "Changes have been commited!"
-
-    - name: Run post-processing command
-      if: steps.pull-files.outputs.has_changes == 'true' && inputs.post_process_command != ''
-      env:
-        FILE_FORMAT: ${{ inputs.file_format }}
-        FILE_EXT: ${{ inputs.file_ext }}
-        TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
-        BASE_LANG: "${{ inputs.base_lang }}"
-        FLAT_NAMING: "${{ inputs.flat_naming }}"
-        PLATFORM: "${{ inputs.os_platform }}"
-      shell: bash
-      run: |
-        echo "Running post-process command:"
-        echo "${{ inputs.post_process_command }}"
-        eval "${{ inputs.post_process_command }}"
 
     - name: Create or Update Pull Request
       if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'
