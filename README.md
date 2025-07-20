@@ -133,6 +133,19 @@ additional_params: |
 - `max_retries` — Maximum number of retries on rate limit errors (HTTP 429). Defaults to `3`.
 - `sleep_on_retry` — Number of seconds to sleep before retrying on rate limit errors. Defaults to `1`.
 - `download_timeout` — Timeout for the download operation, in seconds. Defaults to `120`.
+- `post_process_command` — A shell command that runs after pulling translation files from Lokalise but before committing them. This allows you to perform custom transformations, cleanup, replacements, or validations on the downloaded files. The command is executed in the root of your repository and has access to several environment variables (TRANSLATIONS_PATH, BASE_LANG, FILE_FORMAT, FILE_EXT, FLAT_NAMING, PLATFORM).
+  + Please note that if your command requires a custom interpreter (e.g. running tools that are not available by default on GitHub-hosted runners), you are responsible for setting it up yourself before the command is executed.
+
+```yaml
+# This will run replace_test.py file from the scripts folder in the root of your repo
+post_process_command: "python scripts/replace_test.py"
+
+# Or using a simple shell one-liner:
+post_process_command: "sed -i 's/test/REPLACED/g' messages/fr.json"
+
+# You can also run custom tools or binaries:
+post_process_command: "./scripts/postprocess"
+```
 
 ### Platform support
 
