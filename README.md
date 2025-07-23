@@ -161,13 +161,15 @@ def replace_values(obj):
     else:
         return obj
 
-# TRANSLATIONS_PATH is set for you as an ENV variable
+# TRANSLATIONS_PATH, FILE_EXT are set for you
 translations_path = os.getenv("TRANSLATIONS_PATH", "locales")
+file_ext = os.getenv("FILE_EXT", "json")
+file_path = os.path.join(translations_path, f"fr.{file_ext}")
 
-with open(os.path.join(translations_path, "fr.json"), "r", encoding="utf-8") as f:
+with open(file_path, "r", encoding="utf-8") as f:
     data = json.load(f)
 
-with open(target_file, "w", encoding="utf-8") as f:
+with open(file_path, "w", encoding="utf-8") as f:
     json.dump(replace_values(data), f, ensure_ascii=False, indent=2)
 ```
 
