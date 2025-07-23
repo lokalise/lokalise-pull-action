@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
 
       - name: Pull from Lokalise
-        uses: lokalise/lokalise-pull-action@v3.11.0
+        uses: lokalise/lokalise-pull-action@v3.13.0
         with:
           api_token: ${{ secrets.LOKALISE_API_TOKEN }}
           project_id: LOKALISE_PROJECT_ID
@@ -133,8 +133,10 @@ additional_params: |
 - `max_retries` — Maximum number of retries on rate limit errors (HTTP 429). Defaults to `3`.
 - `sleep_on_retry` — Number of seconds to sleep before retrying on rate limit errors. Defaults to `1`.
 - `download_timeout` — Timeout for the download operation, in seconds. Defaults to `120`.
-- `post_process_command` — A shell command that runs after pulling translation files from Lokalise but before committing them. This allows you to perform custom transformations, cleanup, replacements, or validations on the downloaded files. The command is executed in the root of your repository and has access to several environment variables (TRANSLATIONS_PATH, BASE_LANG, FILE_FORMAT, FILE_EXT, FLAT_NAMING, PLATFORM).
-  + Please note that if your command requires a custom interpreter (e.g. running tools that are not available by default on GitHub-hosted runners), you are responsible for setting it up yourself before the command is executed.
+- `post_process_command` — A shell command that runs after pulling translation files from Lokalise but before committing them. This allows you to perform custom transformations, cleanup, replacements, or validations on the downloaded files. The command is executed in the root of your repository and has access to several environment variables (`TRANSLATIONS_PATH`, `BASE_LANG`, `FILE_FORMAT`, `FILE_EXT`, `FLAT_NAMING`, `PLATFORM`).
+  + Please note that this is an **experimental feature**. You are fully responsible for the logic and behavior of any script executed through this option. These scripts run in your own repository context, under your control. If something breaks or behaves unexpectedly, we cannot guarantee support or ensure the security of the code being executed.
+  + If your command requires a custom interpreter (e.g. running tools that are not available by default on GitHub-hosted runners), you are responsible for setting it up yourself before the command is executed.
+
 
 ```yaml
 # This will run replace_test.py file from the scripts folder in the root of your repo

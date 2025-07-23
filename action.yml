@@ -116,7 +116,7 @@ inputs:
     required: false
     default: 'false'
   post_process_command:
-    description: 'Shell command to run after downloading translation files and before committing. Useful for custom replacements, cleanup, or any post-processing logic.'
+    description: 'Shell command to run after downloading translation files and before committing. Useful for custom replacements, cleanup, or any post-processing logic. Still experimental.'
     required: false
     default: ''
   post_process_strict:
@@ -203,7 +203,7 @@ runs:
         }
 
     - name: Run post-processing command
-      if: steps.pull-files.outputs.has_changes == 'true' && inputs.post_process_command != ''
+      if: inputs.post_process_command != ''
       env:
         FILE_FORMAT: ${{ inputs.file_format }}
         FILE_EXT: ${{ inputs.file_ext }}
