@@ -137,7 +137,6 @@ additional_params: |
   + Please note that this is an **experimental feature**. You are fully responsible for the logic and behavior of any script executed through this option. These scripts run in your own repository context, under your control. If something breaks or behaves unexpectedly, we cannot guarantee support or ensure the security of the code being executed.
   + If your command requires a custom interpreter (e.g. running tools that are not available by default on GitHub-hosted runners), you are responsible for setting it up yourself before the command is executed.
 
-
 ```yaml
 # This will run replace_test.py file from the scripts folder in the root of your repo
 post_process_command: "python scripts/replace_test.py"
@@ -147,6 +146,29 @@ post_process_command: "sed -i 's/test/REPLACED/g' messages/fr.json"
 
 # You can also run custom tools or binaries:
 post_process_command: "./scripts/postprocess"
+```
+
+Then, for example, code post-processing logic inside the `./scripts/replace_test.py` file:
+
+```py
+def replace_values(obj):
+    if isinstance(obj, dict):
+        return {k: replace_values(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [replace_values(v) for v in obj]
+    elif isinstance(obj, str):
+        return obj.replace("test", "REPLACED")
+    else:
+        return obj
+
+# TRANSLATIONS_PATH is set for you as an ENV variable
+translations_path = os.getenv("TRANSLATIONS_PATH", "locales")
+
+with open(os.path.join(translations_path, "fr.json"), "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+with open(target_file, "w", encoding="utf-8") as f:
+    json.dump(replace_values(data), f, ensure_ascii=False, indent=2)
 ```
 
 - `post_process_strict` — Whether to fail the workflow if the `post_process_command` fails (non-zero exit code). If set to `true`, the workflow will exit immediately on failure. Defaults to `false`.
@@ -218,7 +240,7 @@ By default, the following command-line parameters are set when downloading files
 ## Special notes and known issues
 
 * If you are using Gettext (PO files) and the action opens pull requests when no translations have been changed and the only difference is the "revision date", [refer to the following comment for clarifications](https://github.com/lokalise/lokalise-pull-action/issues/9#issuecomment-2578225342)
-* If you are using iOS strings files, [please check the following document on our DeveloperHub](https://developers.lokalise.com/docs/github-actions#support-for-ios-strings-files) containing setup recommendations
+* If you are using iOS strings files, [please check the following document on our Developer Hub](https://developers.lokalise.com/docs/github-actions#support-for-ios-strings-files) containing setup recommendations
 
 ## License
 
