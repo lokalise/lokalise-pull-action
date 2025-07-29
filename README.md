@@ -125,10 +125,10 @@ additional_params: |
 - `pr_reviewers` — Optional comma-separated list of GitHub usernames to request as reviewers on the pull request. Only individual users can be specified here. Reviewers must have access to the repository.
 - `pr_teams_reviewers` — Optional comma-separated list of team slugs (e.g., `backend`, `qa`) from the same GitHub organization that owns the repository. These teams will be requested as reviewers. Has no effect for repositories not under an organization, or if the teams are not part of the org.  
   + Requesting team reviewers requires a token with the `repo` and `read:org` scopes. If the default `GITHUB_TOKEN` is restricted by your organization, supply a custom Personal Access Token via `custom_github_token` that includes at least those scopes.
+- `temp_branch_prefix` — A prefix for the temporary branch used to create the pull request. For example, using `lok` will result in a branch name starting with `lok`. Defaults to `lok`.
 
 ### Behavior tweaks and retries
 
-- `temp_branch_prefix` — A prefix for the temporary branch used to create the pull request. For example, using `lok` will result in a branch name starting with `lok`. Defaults to `lok`.
 - `always_pull_base` — By default, changes in the base language translation files (defined by the `base_lang` option) are ignored when checking for updates. Set this option to `true` to include changes in the base language translations in the pull request. Defaults to `false`.
 - `max_retries` — Maximum number of retries on rate limit errors (HTTP 429). Defaults to `3`.
 - `sleep_on_retry` — Number of seconds to sleep before retrying on rate limit errors. Defaults to `1`.
