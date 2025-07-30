@@ -2,7 +2,10 @@
 
 GitHub action to download translation files from [Lokalise TMS](https://lokalise.com/) to your GitHub repository in the form of a pull request.
 
-**Step-by-step tutorial covering the usage of this action is available on [Lokalise Developer Hub](https://developers.lokalise.com/docs/github-actions).** To upload translation files from GitHub to Lokalise, use the [lokalise-push-action](https://github.com/lokalise/lokalise-push-action).
+* Step-by-step tutorial covering the usage of this action is available on [Lokalise Developer Hub](https://developers.lokalise.com/docs/github-actions)
+* If you're looking for an in-depth tutorial, [check out our blog post](https://lokalise.com/blog/github-actions-for-lokalise-translation/)
+
+To upload translation files from GitHub to Lokalise, use the [lokalise-push-action](https://github.com/lokalise/lokalise-push-action).
 
 ## Usage
 
