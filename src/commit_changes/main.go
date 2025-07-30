@@ -65,7 +65,7 @@ func main() {
 	if err != nil {
 		if err == ErrNoChanges {
 			fmt.Fprintln(os.Stderr, "No changes detected, exiting")
-			os.Exit(0) // Exit with code 0 when there are no changes
+			os.Exit(0)
 		} else {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 			os.Exit(1)
@@ -288,7 +288,6 @@ func commitAndPush(branchName string, runner CommandRunner, config *Config) erro
 		return runner.Run("git", "push", "origin", branchName)
 	}
 	if strings.Contains(output, "nothing to commit") {
-		// No changes to commit
 		return ErrNoChanges
 	}
 	return fmt.Errorf("failed to commit changes: %v\nOutput: %s", err, output)
