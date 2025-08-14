@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"reflect"
@@ -529,6 +530,81 @@ func TestIsRetryableErrorMatrix(t *testing.T) {
 		if got != c.want {
 			t.Fatalf("case %d: want %v got %v for %q", i, c.want, got, errStr(c.err))
 		}
+	}
+}
+
+func TestIsServerError_CaseInsensitiveAndVariants(t *testing.T) {
+	cases := []struct {
+		out  string
+		want bool
+	}{
+		{"Error: API request error 500 Something went wrong.", true},
+		{"api request error 500", true},
+		{"API REQUEST ERROR 500", true},
+		{"Status code 500 from server", true},
+		{"HTTP 500 internal", true},
+		{"ok 200", false},
+		{"random text without codes", false},
+	}
+	for i, c := range cases {
+		got := isServerError(c.out)
+		if got != c.want {
+			t.Fatalf("case %d: want %v, got %v for %q", i, c.want, got, c.out)
+		}
+	}
+}
+
+func TestDownloadFiles_ServerErrorTriggersFastExit(t *testing.T) {
+	cfg := DownloadConfig{
+		ProjectID:       "p",
+		Token:           "t",
+		FileFormat:      "json",
+		GitHubRefName:   "main",
+		MaxRetries:      3,
+		SleepTime:       1,
+		DownloadTimeout: 10,
+	}
+
+	// Simulate noisy CLI: first a 500 line, then tons of flags/help spam.
+	longSpam := strings.Repeat("--some-flag=value\n", 2000)
+	out := "Error: API request error 500 Something went wrong. Please contact support if the issue repeats.\n" + longSpam
+	mockExec := func(cmdPath string, args []string, timeout int) ([]byte, error) {
+		return []byte(out), errors.New("exit 1")
+	}
+
+	// Capture stderr.
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stderr = w
+
+	// Run and recover expected panic from exitFunc(1).
+	var pan any
+	done := make(chan struct{})
+	go func() {
+		defer func() {
+			pan = recover()
+			close(done)
+		}()
+		downloadFiles(cfg, mockExec)
+	}()
+
+	<-done
+	_ = w.Close()
+	os.Stderr = oldStderr
+	buf, _ := io.ReadAll(r)
+	_ = r.Close()
+
+	if pan == nil {
+		t.Fatalf("expected panic from returnWithError (exitFunc), got none")
+	}
+
+	// Assert stderr contained our server-500 message.
+	stderrOut := string(buf)
+	if !strings.Contains(stderrOut, "server responded with an error (500); exiting") {
+		t.Fatalf("expected server-500 message in stderr.\n--- STDERR ---\n%s\n--- END ---", stderrOut)
 	}
 }
 

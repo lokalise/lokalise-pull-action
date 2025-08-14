@@ -176,8 +176,6 @@ func constructDownloadArgs(config DownloadConfig) []string {
 
 // downloadFiles attempts to download files from Lokalise using the lokalise2 CLI tool.
 // It handles rate limiting by retrying with exponential backoff and checks for specific API errors.
-// downloadFiles attempts to download files from Lokalise using the lokalise2 CLI tool.
-// It handles rate limiting & transient failures with exponential backoff and clear early exits.
 func downloadFiles(config DownloadConfig, downloadExecutor func(cmdPath string, args []string, timeout int) ([]byte, error)) {
 	fmt.Println("Starting download from Lokalise")
 
@@ -268,7 +266,10 @@ func isNoKeysError(output string) bool {
 }
 
 func isServerError(output string) bool {
-	return strings.Contains(strings.ToLower(output), "API request error 500")
+	s := strings.ToLower(output)
+	return strings.Contains(s, "api request error 500") ||
+		strings.Contains(s, "status code 500") ||
+		strings.Contains(s, "http 500")
 }
 
 // min returns the smaller of two integers.
