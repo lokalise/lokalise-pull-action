@@ -244,15 +244,18 @@ func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	if isRateLimitError(err) {
 		return true
 	}
 
+	// Lowercase the message for case-insensitive matching
 	msg := strings.ToLower(err.Error())
 
-	// timeouts or polling limit (same set as upload)
-	if strings.Contains(msg, "timeout") ||
+	// Timeouts or transient network failures
+	if strings.Contains(msg, "command timed out") ||
 		strings.Contains(msg, "timed out") ||
+		strings.Contains(msg, "context deadline exceeded") ||
 		strings.Contains(msg, "time exceeded") ||
 		strings.Contains(msg, "polling time exceeded limit") {
 		return true

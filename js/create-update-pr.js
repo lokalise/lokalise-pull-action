@@ -1,3 +1,4 @@
+// create-update-pr.js
 module.exports = async ({ github, context }) => {
   const { repo } = context;
   console.log("Creating or updating PR...");
@@ -12,20 +13,9 @@ module.exports = async ({ github, context }) => {
       throw new Error("Required environment variables are missing");
     }
 
-    const prLabels = (process.env.PR_LABELS || "")
-      .split(",")
-      .map(l => l.trim())
-      .filter(Boolean);
-
-    const prReviewers = (process.env.PR_REVIEWERS || "")
-      .split(",")
-      .map(r => r.trim())
-      .filter(Boolean);
-
-    const prTeams = (process.env.PR_TEAMS_REVIEWERS || "")
-      .split(",")
-      .map(t => t.trim())
-      .filter(Boolean);
+    const prDraft = String(process.env.PR_DRAFT || "false").toLowerCase() === "true";
+    const prAssignees = (process.env.PR_ASSIGNEES || "")
+      .split(",").map(s => s.trim()).filter(Boolean);
 
     /* ─────────── CHECK FOR EXISTING PR ─────────── */
     const { data: pullRequests } = await github.rest.pulls.list({
@@ -37,14 +27,42 @@ module.exports = async ({ github, context }) => {
     });
 
     if (pullRequests.length > 0) {
-      console.log(`PR already exists: ${pullRequests[0].html_url}`);
-      return {
-        created: false,
-        pr: {
-          number: pullRequests[0].number,
-          id: pullRequests[0].id,
-        },
-      };
+      const existing = pullRequests[0];
+      const prNumber = existing.number;
+
+      console.log(`PR already exists: ${existing.html_url}`);
+
+      // Convert to draft if requested and not already draft
+      if (prDraft && !existing.draft) {
+        try {
+          await github.rest.pulls.update({
+            owner: repo.owner,
+            repo: repo.repo,
+            pull_number: prNumber,
+            draft: true,
+          });
+          console.log("Converted existing PR to draft.");
+        } catch (err) {
+          console.warn(`Cannot convert to draft: ${err.message}`);
+        }
+      }
+
+      // Add assignees (PRs are issues under the hood)
+      if (prAssignees.length) {
+        try {
+          await github.rest.issues.addAssignees({
+            owner: repo.owner,
+            repo: repo.repo,
+            issue_number: prNumber,
+            assignees: prAssignees,
+          });
+          console.log("Assignees added.");
+        } catch (err) {
+          console.warn(`Cannot add assignees: ${err.message}`);
+        }
+      }
+
+      return { created: false, pr: { number: prNumber, id: existing.id } };
     }
 
     /* ─────────── CREATE PR ─────────── */
@@ -55,42 +73,26 @@ module.exports = async ({ github, context }) => {
       head: branchName,
       base: baseRef,
       body: prBody,
+      draft: prDraft,
     });
 
-    /* ─────────── ADD LABELS ─────────── */
-    if (prLabels.length) {
-      await github.rest.issues.addLabels({
-        owner: repo.owner,
-        repo: repo.repo,
-        issue_number: newPr.number,
-        labels: prLabels,
-      });
-    }
-
-    /* ─────────── REQUEST REVIEWERS ─────────── */
-    if (prReviewers.length || prTeams.length) {
+    // Add assignees on the PR's issue
+    if (prAssignees.length) {
       try {
-        await github.rest.pulls.requestReviewers({
+        await github.rest.issues.addAssignees({
           owner: repo.owner,
           repo: repo.repo,
-          pull_number: newPr.number,
-          reviewers: prReviewers,
-          team_reviewers: prTeams,
+          issue_number: newPr.number,
+          assignees: prAssignees,
         });
+        console.log("Assignees added.");
       } catch (err) {
-        console.warn(`Cannot add team reviewers: ${err.message}`);
+        console.warn(`Cannot add assignees: ${err.message}`);
       }
     }
 
     console.log(`Created new PR: ${newPr.html_url}`);
-
-    return {
-      created: true,
-      pr: {
-        number: newPr.number,
-        id: newPr.id,
-      },
-    };
+    return { created: true, pr: { number: newPr.number, id: newPr.id } };
   } catch (error) {
     console.error(`Failed to create or update pull request: ${error.message}`);
     return { created: false };
