@@ -518,7 +518,7 @@ func TestIsRetryableErrorMatrix(t *testing.T) {
 	}{
 		{nil, false},
 		{errors.New("permanent"), false},
-		{errors.New("timeout while doing X"), true},
+		{errors.New("timed out while doing X"), true},
 		{errors.New("TIMED OUT"), true},
 		{errors.New("time exceeded"), true},
 		{errors.New("polling time exceeded limit"), true},
