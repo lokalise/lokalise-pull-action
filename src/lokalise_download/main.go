@@ -5,14 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
+	"github.com/bodrovis/lokalise-actions-common/v2/tailring"
 )
 
 // exitFunc is a function variable that defaults to os.Exit.
@@ -40,53 +39,6 @@ type DownloadConfig struct {
 	SleepTime             int
 	DownloadTimeout       int
 	AsyncMode             bool
-}
-
-// ringBuffer keeps only the last N bytes written (thread-safe).
-type ringBuffer struct {
-	mu    sync.Mutex
-	buf   []byte
-	limit int
-}
-
-func newRingBuffer(n int) *ringBuffer { return &ringBuffer{limit: n} }
-
-func (r *ringBuffer) Write(p []byte) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.limit <= 0 {
-		return len(p), nil
-	}
-	if len(p) >= r.limit {
-		// keep only the tail of this chunk
-		if cap(r.buf) < r.limit {
-			r.buf = make([]byte, 0, r.limit)
-		}
-		r.buf = append(r.buf[:0], p[len(p)-r.limit:]...)
-		return len(p), nil
-	}
-	need := len(r.buf) + len(p) - r.limit
-	if need > 0 {
-		r.buf = r.buf[need:]
-	}
-	r.buf = append(r.buf, p...)
-	return len(p), nil
-}
-
-func (r *ringBuffer) String() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return string(r.buf)
-}
-
-func (r *ringBuffer) Bytes() []byte {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	// return a copy
-	b := make([]byte, len(r.buf))
-	copy(b, r.buf)
-	return b
 }
 
 func main() {
@@ -155,11 +107,11 @@ func executeDownload(cmdPath string, args []string, downloadTimeout int) ([]byte
 	cmd := exec.CommandContext(ctx, cmdPath, args...)
 
 	// Combined tail (stdout + stderr) for error parsing & returning to caller.
-	rb := newRingBuffer(64 * 1024)
+	rb := tailring.NewKB(64)
 
 	// Stream to CI logs and mirror into our combined tail.
-	cmd.Stdout = io.MultiWriter(os.Stdout, rb)
-	cmd.Stderr = io.MultiWriter(os.Stderr, rb)
+	cmd.Stdout = tailring.Tee(os.Stdout, rb)
+	cmd.Stderr = tailring.Tee(os.Stderr, rb)
 
 	err := cmd.Run()
 
