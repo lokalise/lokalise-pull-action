@@ -198,6 +198,9 @@ func downloadFiles(config DownloadConfig, downloadExecutor func(cmdPath string, 
 			if isNoKeysError(output) {
 				returnWithError("no keys for export with current settings; exiting")
 			}
+			if isServerError(output) {
+				returnWithError("server responded with an error (500); exiting")
+			}
 			fmt.Println("Successfully downloaded files.")
 			return
 		}
@@ -262,6 +265,10 @@ func isRateLimitError(err error) bool {
 
 func isNoKeysError(output string) bool {
 	return strings.Contains(strings.ToLower(output), "no keys for export")
+}
+
+func isServerError(output string) bool {
+	return strings.Contains(strings.ToLower(output), "API request error 500")
 }
 
 // min returns the smaller of two integers.
