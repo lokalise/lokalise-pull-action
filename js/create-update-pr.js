@@ -13,9 +13,19 @@ module.exports = async ({ github, context }) => {
       throw new Error("Required environment variables are missing");
     }
 
-    const prDraft = String(process.env.PR_DRAFT || "false").toLowerCase() === "true";
+    const prLabels = (process.env.PR_LABELS || "")
+      .split(",").map(s => s.trim()).filter(Boolean);
+
+    const prReviewers = (process.env.PR_REVIEWERS || "")
+      .split(",").map(s => s.trim()).filter(Boolean);
+
+    const prTeams = (process.env.PR_TEAMS_REVIEWERS || "")
+      .split(",").map(s => s.trim()).filter(Boolean);
+
     const prAssignees = (process.env.PR_ASSIGNEES || "")
       .split(",").map(s => s.trim()).filter(Boolean);
+
+    const prDraft = String(process.env.PR_DRAFT || "false").toLowerCase() === "true";
 
     /* ─────────── CHECK FOR EXISTING PR ─────────── */
     const { data: pullRequests } = await github.rest.pulls.list({
@@ -32,7 +42,7 @@ module.exports = async ({ github, context }) => {
 
       console.log(`PR already exists: ${existing.html_url}`);
 
-      // Convert to draft if requested and not already draft
+      // convert to draft if requested
       if (prDraft && !existing.draft) {
         try {
           await github.rest.pulls.update({
@@ -47,7 +57,32 @@ module.exports = async ({ github, context }) => {
         }
       }
 
-      // Add assignees (PRs are issues under the hood)
+      // labels
+      if (prLabels.length) {
+        await github.rest.issues.addLabels({
+          owner: repo.owner,
+          repo: repo.repo,
+          issue_number: prNumber,
+          labels: prLabels,
+        });
+      }
+
+      // reviewers (users/teams)
+      if (prReviewers.length || prTeams.length) {
+        try {
+          await github.rest.pulls.requestReviewers({
+            owner: repo.owner,
+            repo: repo.repo,
+            pull_number: prNumber,
+            reviewers: prReviewers,
+            team_reviewers: prTeams,
+          });
+        } catch (err) {
+          console.warn(`Cannot add reviewers: ${err.message}`);
+        }
+      }
+
+      // assignees
       if (prAssignees.length) {
         try {
           await github.rest.issues.addAssignees({
@@ -76,7 +111,32 @@ module.exports = async ({ github, context }) => {
       draft: prDraft,
     });
 
-    // Add assignees on the PR's issue
+    // labels
+    if (prLabels.length) {
+      await github.rest.issues.addLabels({
+        owner: repo.owner,
+        repo: repo.repo,
+        issue_number: newPr.number,
+        labels: prLabels,
+      });
+    }
+
+    // reviewers
+    if (prReviewers.length || prTeams.length) {
+      try {
+        await github.rest.pulls.requestReviewers({
+          owner: repo.owner,
+          repo: repo.repo,
+          pull_number: newPr.number,
+          reviewers: prReviewers,
+          team_reviewers: prTeams,
+        });
+      } catch (err) {
+        console.warn(`Cannot add reviewers: ${err.message}`);
+      }
+    }
+
+    // assignees
     if (prAssignees.length) {
       try {
         await github.rest.issues.addAssignees({

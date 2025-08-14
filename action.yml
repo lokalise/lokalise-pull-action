@@ -135,6 +135,7 @@ inputs:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 branding:
   icon: 'download-cloud'
   color: 'orange'
