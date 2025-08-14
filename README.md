@@ -1,5 +1,7 @@
 # GitHub action to pull translation files from Lokalise
 
+![GitHub Release](https://img.shields.io/github/v/release/lokalise/lokalise-pull-action)
+
 GitHub action to download translation files from [Lokalise TMS](https://lokalise.com/) to your GitHub repository in the form of a pull request.
 
 * Step-by-step tutorial covering the usage of this action is available on [Lokalise Developer Hub](https://developers.lokalise.com/docs/github-actions)
@@ -28,7 +30,7 @@ jobs:
           fetch-depth: 0
 
       - name: Pull from Lokalise
-        uses: lokalise/lokalise-pull-action@v3.13.0
+        uses: lokalise/lokalise-pull-action@v3.14.0
         with:
           api_token: ${{ secrets.LOKALISE_API_TOKEN }}
           project_id: LOKALISE_PROJECT_ID
@@ -122,6 +124,8 @@ additional_params: |
 - `pr_labels` — Comma-separated list of labels to apply to the created pull request.
 - `pr_title` — Title for the pull request. If not provided, defaults to "Translations update".
 - `pr_body` — Body text for the pull request. If not provided, defaults to "This pull request updates translations from Lokalise".
+- `pr_draft` — Whether to create the pull request as a draft. Accepts `true` or `false`. Defaults to `false`.
+- `pr_assignees` — Comma-separated list of GitHub usernames to assign to the created pull request. Assignees will be added immediately after the PR is created. Defaults to an empty string (no assignees).
 - `override_branch_name` — Optional static branch name to use instead of auto-generating one. This is useful if you want the action to update the same pull request across multiple runs (e.g., always syncing to `lokalise-sync`). If the branch already exists, it will be checked out and updated instead of creating a new one.
 - `force_push` — Whether to force push changes to the remote branch. Useful when using a static branch name and you want to overwrite any previous state (e.g., updating an existing PR). Set to `true` with caution, as this will overwrite history. Defaults to `false`.
 - `git_commit_message` — Git commit message to use. If not provided, defaults to "Translations update".

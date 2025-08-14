@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
+	"github.com/bodrovis/lokalise-actions-common/v2/tailring"
 )
 
 // exitFunc is a function variable that defaults to os.Exit.
@@ -100,21 +101,44 @@ func validateDownloadConfig(config DownloadConfig) {
 // executeDownload runs the lokalise2 CLI to download files with a timeout
 func executeDownload(cmdPath string, args []string, downloadTimeout int) ([]byte, error) {
 	timeout := time.Duration(downloadTimeout) * time.Second
-
-	// Create a context with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, cmdPath, args...)
 
-	outputBytes, err := cmd.CombinedOutput()
+	// Separate tails so stderr spam won't evict stdout (and vice versa).
+	rbErr := tailring.NewKB(64) // stderr gets more room
+	rbOut := tailring.NewKB(16) // stdout can be smaller
 
-	// Check if the context timed out
-	if ctx.Err() == context.DeadlineExceeded {
-		return outputBytes, errors.New("command timed out")
+	cmd.Stdout = tailring.Tee(os.Stdout, rbOut)
+	cmd.Stderr = tailring.Tee(os.Stderr, rbErr)
+
+	err := cmd.Run()
+
+	// Merge for the caller (stderr first so errors are up front).
+	combined := append(rbErr.Bytes(), rbOut.Bytes()...)
+
+	// Timeouts
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return combined, fmt.Errorf("command timed out after %ds", downloadTimeout)
 	}
 
-	return outputBytes, err
+	// Non-zero exit: wrap with stderr tail so err.Error() always contains the real error.
+	if err != nil {
+		var ee *exec.ExitError
+		exit := ""
+		if errors.As(err, &ee) {
+			exit = fmt.Sprintf(" (exit %d)", ee.ExitCode())
+		}
+		stderrTail := strings.TrimSpace(rbErr.String())
+		if stderrTail != "" {
+			return combined, fmt.Errorf("command failed%s: %s: %w", exit, stderrTail, err)
+		}
+		// fallback if somehow no stderr
+		return combined, fmt.Errorf("command failed%s: %w", exit, err)
+	}
+
+	return combined, nil
 }
 
 // constructDownloadArgs builds the arguments for the lokalise2 CLI tool
@@ -160,53 +184,105 @@ func downloadFiles(config DownloadConfig, downloadExecutor func(cmdPath string, 
 	fmt.Println("Starting download from Lokalise")
 
 	args := constructDownloadArgs(config)
+
 	startTime := time.Now()
 	sleepTime := config.SleepTime
 	maxRetries := config.MaxRetries
 
-	for attempt := 1; attempt <= config.MaxRetries; attempt++ {
+	for attempt := 1; attempt <= maxRetries; attempt++ {
 		fmt.Printf("Attempt %d of %d\n", attempt, maxRetries)
 
 		outputBytes, err := downloadExecutor("./bin/lokalise2", args, config.DownloadTimeout)
-
 		output := string(outputBytes)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error() // includes stderr tail from executeDownload()
+		}
 
-		// Check for rate limit error (HTTP status code 429)
-		if isRateLimitError(output) {
-			if time.Since(startTime).Seconds() >= maxTotalTime {
-				returnWithError(fmt.Sprintf("Max retry time exceeded; exiting after %d attempts.", attempt))
+		// 500s should fail fast
+		if isServerError(output) || isServerError(errStr) {
+			returnWithError("server responded with an error (500); exiting")
+		}
+
+		// 406 (no keys) should also bail fast
+		if isNoKeysError(output) || isNoKeysError(errStr) {
+			returnWithError("no keys for export with current settings; exiting")
+		}
+
+		// success?
+		if err == nil {
+			fmt.Println("Successfully downloaded files.")
+			return
+		}
+		// retryable?
+		if isRetryableError(err) {
+			// last attempt? bail, don't sleep
+			if attempt == maxRetries {
+				returnWithError(fmt.Sprintf("Failed to download files after %d attempts. Last error: %v", attempt, err))
 			}
-			fmt.Printf("Rate limit error on attempt %d; retrying in %d seconds...\n", attempt, sleepTime)
+
+			// will we blow the total budget if we sleep?
+			elapsed := time.Since(startTime)
+			if elapsed+time.Duration(sleepTime)*time.Second >= time.Duration(maxTotalTime)*time.Second {
+				returnWithError(fmt.Sprintf("Max retry time exceeded (%d seconds); exiting after %d attempts.", maxTotalTime, attempt))
+			}
+
+			fmt.Printf("Retryable error on attempt %d (%v); sleeping %ds before retry...\n", attempt, err, sleepTime)
 			time.Sleep(time.Duration(sleepTime) * time.Second)
 			sleepTime = min(sleepTime*2, maxSleepTime)
 			continue
 		}
 
-		// Check for "no keys" error (HTTP status code 406)
-		if isNoKeysError(output) {
-			returnWithError("no keys for export with current settings; exiting")
-		}
-
-		if err == nil {
-			fmt.Println("Successfully downloaded files.")
-			return
-		}
-
-		// For any other errors, log the output and continue to the next attempt
 		fmt.Fprintf(os.Stderr, "Unexpected error during download on attempt %d: %s\n", attempt, output)
+		returnWithError(fmt.Sprintf("Permanent error during download: %v", err))
 	}
 
-	returnWithError(fmt.Sprintf("Failed to download files after %d attempts.", config.MaxRetries))
+	returnWithError(fmt.Sprintf("Failed to download files after %d attempts.", maxRetries))
 }
 
-// isRateLimitError checks if the output contains a rate limit error (HTTP status code 429).
-func isRateLimitError(output string) bool {
-	return strings.Contains(output, "API request error 429")
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if isRateLimitError(err) {
+		return true
+	}
+
+	// Lowercase the message for case-insensitive matching
+	msg := strings.ToLower(err.Error())
+
+	// Timeouts or transient network failures
+	if strings.Contains(msg, "command timed out") ||
+		strings.Contains(msg, "timed out") ||
+		strings.Contains(msg, "context deadline exceeded") ||
+		strings.Contains(msg, "time exceeded") ||
+		strings.Contains(msg, "polling time exceeded limit") {
+		return true
+	}
+
+	return false
 }
 
-// isNoKeysError checks if the output contains a "no keys" error (HTTP status code 406).
-func isNoKeysError(output string) bool {
-	return strings.Contains(output, "API request error 406")
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "api request error 429") ||
+		strings.Contains(s, "request error 429") ||
+		strings.Contains(s, "rate limit")
+}
+
+func isServerError(s string) bool {
+	x := strings.ToLower(s)
+	return strings.Contains(x, "api request error 500") ||
+		strings.Contains(x, "status code 500") ||
+		strings.Contains(x, "http 500")
+}
+
+func isNoKeysError(s string) bool {
+	return strings.Contains(strings.ToLower(s), "406 no keys for export")
 }
 
 // min returns the smaller of two integers.

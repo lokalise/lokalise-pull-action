@@ -70,6 +70,14 @@ inputs:
     description: 'Comma-separated list of team slugs within the organization to assign as reviewers for the pull request.'
     required: false
     default: ''
+  pr_draft:
+    description: 'Create PR as draft'
+    required: false
+    default: 'false'
+  pr_assignees:
+    description: 'Comma-separated list of assignees for the PR'
+    required: false
+    default: ''
   max_retries:
     description: 'Maximum number of retries on rate limit errors'
     required: false
@@ -127,6 +135,7 @@ inputs:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 branding:
   icon: 'download-cloud'
   color: 'orange'
@@ -251,7 +260,7 @@ runs:
       run: |
         set -euo pipefail
 
-        echo "Commiting changes..."
+        echo "Committing changes..."
 
         CMD_PATH="${{ github.action_path }}/bin/commit_changes_${PLATFORM}"
         if [ ! -f "$CMD_PATH" ]; then
@@ -278,6 +287,8 @@ runs:
         PR_BODY: ${{ inputs.pr_body }}
         PR_TEAMS_REVIEWERS: ${{ inputs.pr_teams_reviewers }}
         PR_REVIEWERS: ${{ inputs.pr_reviewers }}
+        PR_DRAFT: ${{ inputs.pr_draft }}
+        PR_ASSIGNEES: ${{ inputs.pr_assignees }}
       id: create-update-pr
       # actions/github-script@v7.0.1
       uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea
