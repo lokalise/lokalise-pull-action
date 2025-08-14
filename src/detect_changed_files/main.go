@@ -48,12 +48,11 @@ func (d DefaultCommandRunner) Run(name string, args ...string) ([]string, error)
 }
 
 type Config struct {
-	TranslationsPath string
-	FileExt          string
-	FlatNaming       bool
-	AlwaysPullBase   bool
-	BaseLang         string
-	Paths            []string
+	FileExt        string
+	FlatNaming     bool
+	AlwaysPullBase bool
+	BaseLang       string
+	Paths          []string
 }
 
 func main() {
