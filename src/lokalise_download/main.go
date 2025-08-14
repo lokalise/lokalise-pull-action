@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
@@ -41,8 +42,9 @@ type DownloadConfig struct {
 	AsyncMode             bool
 }
 
-// ringBuffer keeps only the last N bytes written (combined stdout+stderr tail).
+// ringBuffer keeps only the last N bytes written (thread-safe).
 type ringBuffer struct {
+	mu    sync.Mutex
 	buf   []byte
 	limit int
 }
@@ -50,10 +52,17 @@ type ringBuffer struct {
 func newRingBuffer(n int) *ringBuffer { return &ringBuffer{limit: n} }
 
 func (r *ringBuffer) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if r.limit <= 0 {
 		return len(p), nil
 	}
 	if len(p) >= r.limit {
+		// keep only the tail of this chunk
+		if cap(r.buf) < r.limit {
+			r.buf = make([]byte, 0, r.limit)
+		}
 		r.buf = append(r.buf[:0], p[len(p)-r.limit:]...)
 		return len(p), nil
 	}
@@ -65,8 +74,20 @@ func (r *ringBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (r *ringBuffer) String() string { return string(r.buf) }
-func (r *ringBuffer) Bytes() []byte  { return append([]byte(nil), r.buf...) }
+func (r *ringBuffer) String() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return string(r.buf)
+}
+
+func (r *ringBuffer) Bytes() []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// return a copy
+	b := make([]byte, len(r.buf))
+	copy(b, r.buf)
+	return b
+}
 
 func main() {
 	// Ensure the required command-line arguments are provided
