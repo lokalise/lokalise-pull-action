@@ -106,35 +106,39 @@ func executeDownload(cmdPath string, args []string, downloadTimeout int) ([]byte
 
 	cmd := exec.CommandContext(ctx, cmdPath, args...)
 
-	// Combined tail (stdout + stderr) for error parsing & returning to caller.
-	rb := tailring.NewKB(64)
+	// Separate tails so stderr spam won't evict stdout (and vice versa).
+	rbErr := tailring.NewKB(64) // stderr gets more room
+	rbOut := tailring.NewKB(16) // stdout can be smaller
 
-	// Stream to CI logs and mirror into our combined tail.
-	cmd.Stdout = tailring.Tee(os.Stdout, rb)
-	cmd.Stderr = tailring.Tee(os.Stderr, rb)
+	cmd.Stdout = tailring.Tee(os.Stdout, rbOut)
+	cmd.Stderr = tailring.Tee(os.Stderr, rbErr)
 
 	err := cmd.Run()
 
-	// Prefer checking the returned error for timeout, but fall back to ctx.
+	// Merge for the caller (stderr first so errors are up front).
+	combined := append(rbErr.Bytes(), rbOut.Bytes()...)
+
+	// Timeouts
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return rb.Bytes(), fmt.Errorf("command timed out after %ds", downloadTimeout)
+		return combined, fmt.Errorf("command timed out after %ds", downloadTimeout)
 	}
 
-	// Bubble up process error; keeps the tail in the message like upload does.
+	// Non-zero exit: wrap with stderr tail so err.Error() always contains the real error.
 	if err != nil {
 		var ee *exec.ExitError
 		exit := ""
 		if errors.As(err, &ee) {
 			exit = fmt.Sprintf(" (exit %d)", ee.ExitCode())
 		}
-		tail := strings.TrimSpace(rb.String())
-		if tail != "" {
-			return rb.Bytes(), fmt.Errorf("command failed%s: %s: %w", exit, tail, err)
+		stderrTail := strings.TrimSpace(rbErr.String())
+		if stderrTail != "" {
+			return combined, fmt.Errorf("command failed%s: %s: %w", exit, stderrTail, err)
 		}
-		return rb.Bytes(), fmt.Errorf("command failed%s: %w", exit, err)
+		// fallback if somehow no stderr
+		return combined, fmt.Errorf("command failed%s: %w", exit, err)
 	}
 
-	return rb.Bytes(), nil
+	return combined, nil
 }
 
 // constructDownloadArgs builds the arguments for the lokalise2 CLI tool
@@ -190,15 +194,26 @@ func downloadFiles(config DownloadConfig, downloadExecutor func(cmdPath string, 
 
 		outputBytes, err := downloadExecutor("./bin/lokalise2", args, config.DownloadTimeout)
 		output := string(outputBytes)
-
-		if isNoKeysError(output) {
-			returnWithError("no keys for export with current settings; exiting")
+		errStr := ""
+		if err != nil {
+			errStr = err.Error() // includes stderr tail from executeDownload()
 		}
 
-		if isServerError(output) {
+		// 500s should fail fast
+		if isServerError(output) || isServerError(errStr) {
 			returnWithError("server responded with an error (500); exiting")
 		}
 
+		// 406 (no keys) should also bail fast
+		if isNoKeysError(output) || isNoKeysError(errStr) {
+			returnWithError("no keys for export with current settings; exiting")
+		}
+
+		// success?
+		if err == nil {
+			fmt.Println("Successfully downloaded files.")
+			return
+		}
 		// retryable?
 		if isRetryableError(err) {
 			// last attempt? bail, don't sleep
@@ -256,15 +271,15 @@ func isRateLimitError(err error) bool {
 		strings.Contains(s, "rate limit")
 }
 
-func isNoKeysError(output string) bool {
-	return strings.Contains(strings.ToLower(output), "no keys for export")
+func isServerError(s string) bool {
+	x := strings.ToLower(s)
+	return strings.Contains(x, "api request error 500") ||
+		strings.Contains(x, "status code 500") ||
+		strings.Contains(x, "http 500")
 }
 
-func isServerError(output string) bool {
-	s := strings.ToLower(output)
-	return strings.Contains(s, "api request error 500") ||
-		strings.Contains(s, "status code 500") ||
-		strings.Contains(s, "http 500")
+func isNoKeysError(s string) bool {
+	return strings.Contains(strings.ToLower(s), "406 no keys for export")
 }
 
 // min returns the smaller of two integers.
