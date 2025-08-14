@@ -198,11 +198,12 @@ func downloadFiles(config DownloadConfig, downloadExecutor func(cmdPath string, 
 			if isNoKeysError(output) {
 				returnWithError("no keys for export with current settings; exiting")
 			}
-			if isServerError(output) {
-				returnWithError("server responded with an error (500); exiting")
-			}
 			fmt.Println("Successfully downloaded files.")
 			return
+		}
+
+		if isServerError(output) {
+			returnWithError("server responded with an error (500); exiting")
 		}
 
 		// retryable?
@@ -224,7 +225,6 @@ func downloadFiles(config DownloadConfig, downloadExecutor func(cmdPath string, 
 			continue
 		}
 
-		// non-retryable: show tail and die
 		fmt.Fprintf(os.Stderr, "Unexpected error during download on attempt %d: %s\n", attempt, output)
 		returnWithError(fmt.Sprintf("Permanent error during download: %v", err))
 	}
