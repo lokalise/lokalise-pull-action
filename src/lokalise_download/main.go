@@ -191,13 +191,8 @@ func downloadFiles(config DownloadConfig, downloadExecutor func(cmdPath string, 
 		outputBytes, err := downloadExecutor("./bin/lokalise2", args, config.DownloadTimeout)
 		output := string(outputBytes)
 
-		// success path (still fail fast on "no keys")
-		if err == nil {
-			if isNoKeysError(output) {
-				returnWithError("no keys for export with current settings; exiting")
-			}
-			fmt.Println("Successfully downloaded files.")
-			return
+		if isNoKeysError(output) {
+			returnWithError("no keys for export with current settings; exiting")
 		}
 
 		if isServerError(output) {
