@@ -531,6 +531,7 @@ func TestIsRetryableErrorMatrix(t *testing.T) {
 		}
 	}
 }
+
 func expectPanic(t *testing.T, shouldPanic bool) {
 	t.Helper()
 	if r := recover(); r != nil {
