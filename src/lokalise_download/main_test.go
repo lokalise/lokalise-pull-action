@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -27,13 +29,13 @@ func TestMain(m *testing.M) {
 
 func TestExecuteDownloadTimeout(t *testing.T) {
 	// Define the path to the mock process binary
-	mockBinary := "./fixtures/mock_sleep"
+	mockBinary := "./fixtures/sleep/mock_sleep"
 	if runtime.GOOS == "windows" {
 		mockBinary += ".exe"
 	}
 
 	// Build the mock binary from the fixtures directory
-	buildMockBinaryIfNeeded(t, "./fixtures/sleep.go", mockBinary)
+	buildMockBinaryIfNeeded(t, "./fixtures/sleep/sleep.go", mockBinary)
 
 	// Use the actual executeDownload function with the mock binary
 	args := []string{"sleep"} // Argument to trigger sleep in the mock process
@@ -46,12 +48,34 @@ func TestExecuteDownloadTimeout(t *testing.T) {
 	// Assert that the error matches "command timed out"
 	if err == nil {
 		t.Errorf("Expected timeout error, but got nil")
-	} else if err.Error() != "command timed out" {
+	} else if err.Error() != fmt.Sprintf("command timed out after %ds", downloadTimeout) {
 		t.Errorf("Expected 'command timed out' error, but got: %v", err)
 	}
 
 	// Debug: Print captured output
 	fmt.Printf("Output from mock binary: %s\n", string(outputBytes))
+}
+
+func TestExecuteDownloadCapturesCombinedTail(t *testing.T) {
+	mockBinary := "./fixtures/noise/mock_noise"
+	if runtime.GOOS == "windows" {
+		mockBinary += ".exe"
+	}
+	buildMockBinaryIfNeeded(t, "./fixtures/noise/noise.go", mockBinary)
+
+	// mock prints to stdout and stderr, exits 1 with a final error line
+	out, err := executeDownload(mockBinary, []string{"noisy"}, 5)
+	if err == nil {
+		t.Fatalf("expected failure, got nil")
+	}
+	s := string(out)
+	if !containsAll(s, []string{
+		"hello from stdout 2",
+		"warn from stderr 2",
+		"polling time exceeded limit",
+	}) {
+		t.Fatalf("combined tail missing expected lines.\nTail:\n%s", s)
+	}
 }
 
 func TestExecuteDownloadNonTimeoutError(t *testing.T) {
@@ -437,6 +461,94 @@ func TestDownloadFiles(t *testing.T) {
 	}
 }
 
+func TestDownloadFiles_RetryableTimeoutThenSuccess(t *testing.T) {
+	cfg := DownloadConfig{
+		ProjectID: "p", Token: "t", FileFormat: "json", GitHubRefName: "main",
+		MaxRetries: 3, SleepTime: 1, DownloadTimeout: 5,
+	}
+	call := 0
+	exec := func(cmdPath string, args []string, timeout int) ([]byte, error) {
+		call++
+		if call == 1 {
+			return []byte("foo"), errors.New("command timed out after 1s")
+		}
+		return []byte("ok"), nil
+	}
+	defer expectPanic(t, false)
+	downloadFiles(cfg, exec)
+	if call != 2 {
+		t.Fatalf("expected 2 calls (retry once then success), got %d", call)
+	}
+}
+
+func TestDownloadFiles_LastAttemptEarlyExit(t *testing.T) {
+	cfg := DownloadConfig{
+		ProjectID: "p", Token: "t", FileFormat: "json", GitHubRefName: "main",
+		MaxRetries: 2, SleepTime: 1, DownloadTimeout: 5,
+	}
+	exec := func(cmdPath string, args []string, timeout int) ([]byte, error) {
+		return []byte("polling time exceeded limit"), errors.New("polling time exceeded limit")
+	}
+	defer expectPanic(t, true) // expect failure after 2 attempts without sleeping after last
+	downloadFiles(cfg, exec)
+}
+
+func TestDownloadFiles_MaxTotalBudgetPreventsSleep(t *testing.T) {
+	cfg := DownloadConfig{
+		ProjectID: "p", Token: "t", FileFormat: "json", GitHubRefName: "main",
+		MaxRetries: 3, SleepTime: maxTotalTime, DownloadTimeout: 5,
+	}
+	exec := func(cmdPath string, args []string, timeout int) ([]byte, error) {
+		return []byte("timeout"), errors.New("command timed out after 1s")
+	}
+	start := time.Now()
+	defer expectPanic(t, true)
+	downloadFiles(cfg, exec)
+	// Should fail fast (no actual sleep), keep this generous
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("expected budget short-circuit without long sleep")
+	}
+}
+
+func TestIsRetryableErrorMatrix(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{nil, false},
+		{errors.New("permanent"), false},
+		{errors.New("timeout while doing X"), true},
+		{errors.New("TIMED OUT"), true},
+		{errors.New("time exceeded"), true},
+		{errors.New("polling time exceeded limit"), true},
+		{errors.New("API request error 429"), true},
+		{errors.New("rate limit"), true},
+	}
+	for i, c := range cases {
+		got := isRetryableError(c.err)
+		if got != c.want {
+			t.Fatalf("case %d: want %v got %v for %q", i, c.want, got, errStr(c.err))
+		}
+	}
+}
+func expectPanic(t *testing.T, shouldPanic bool) {
+	t.Helper()
+	if r := recover(); r != nil {
+		if !shouldPanic {
+			t.Fatalf("unexpected panic: %v", r)
+		}
+	} else if shouldPanic {
+		t.Fatalf("expected panic, got none")
+	}
+}
+
+func errStr(e error) string {
+	if e == nil {
+		return "<nil>"
+	}
+	return e.Error()
+}
+
 // buildMockBinaryIfNeeded compiles the mock Go program if it's not already built or is outdated.
 func buildMockBinaryIfNeeded(t *testing.T, sourcePath, outputPath string) {
 	sourceInfo, err := os.Stat(sourcePath)
@@ -455,4 +567,13 @@ func buildMockBinaryIfNeeded(t *testing.T, sourcePath, outputPath string) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to build mock binary: %v", err)
 	}
+}
+
+func containsAll(s string, needles []string) bool {
+	for _, n := range needles {
+		if !strings.Contains(s, n) {
+			return false
+		}
+	}
+	return true
 }
