@@ -95,9 +95,12 @@ You'll need to provide some parameters for the action. These can be set as envir
 - `base_lang` — Your project base language, such as `en` for English. Defaults to `en`.
 - `file_ext` (*not strictly mandatory but still recommended*) — Custom file extension to use when searching for translation files (without leading dot, for example `json` or `yml`). By default, the extension is inferred from the `file_format` value. However, for certain formats (e.g., `json_structured`), the downloaded files may still have a generic extension. In such cases, this parameter allows specifying the correct extension manually to ensure proper file matching.
 
-### File and CLI options
+### Download options
 
 - `async_mode` — Download translations in asynchronous mode. Not recommended for small projects but required for larger ones (>= 10 000 key-language pairs). Defaults to `false`.
+- `flat_naming` — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`. Defaults to `false`.
+- `skip_include_tags` — Skip setting the `--include-tags` argument during download. This will download all translation keys for the specified format, regardless of tags.
+- `skip_original_filenames` — Skips setting the `--original-filenames` and `--directory-prefix` arguments during download. You can disable original filenames by setting `--original-filenames=false` explicitly via `additional_params`.
 - `additional_params` — Extra parameters to pass to the [Lokalise CLI when pulling files](https://github.com/lokalise/lokalise-cli-2-go/blob/main/docs/lokalise2_file_download.md). For example, you can use `--indentation=2sp` to manage indentation. Defaults to an empty string. Multiple params can be specified:
 
 ```yaml
@@ -109,37 +112,8 @@ additional_params: |
   --language-mapping=[{"original_language_iso":"en_US","custom_language_iso":"en-US"}]
 ```
 
-- `flat_naming` — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`. Defaults to `false`.
-- `skip_include_tags` — Skip setting the `--include-tags` argument during download. This will download all translation keys for the specified format, regardless of tags.
-- `skip_original_filenames` — Skips setting the `--original-filenames` and `--directory-prefix` arguments during download. You can disable original filenames by setting `--original-filenames=false` explicitly via `additional_params`.
+### Post-processing
 
-### Git configuration
-
-- `git_user_name` — Optional Git username to use when committing changes. If not provided, the action will default to the GitHub actor associated with the workflow run. Useful if you want to use a specific name (e.g. "Localization Bot") in your commit history.
-- `git_user_email` — Optional Git email address to associate with commits. If not set, it defaults to a noreply address based on the Git username (e.g. `username@users.noreply.github.com`). This is helpful for cleaner commit metadata or if you want to associate commits with a bot/user email.
-
-### Pull request and GitHub options
-
-- `custom_github_token` — Optional GitHub token to use when creating or updating the pull request. If not provided, the default `GITHUB_TOKEN` is used. This can be helpful when your workflow requires elevated permissions (e.g., assigning reviewers, interacting with protected branches, or writing outside the current repo). Make sure to keep this token secret.
-- `pr_labels` — Comma-separated list of labels to apply to the created pull request.
-- `pr_title` — Title for the pull request. If not provided, defaults to "Translations update".
-- `pr_body` — Body text for the pull request. If not provided, defaults to "This pull request updates translations from Lokalise".
-- `pr_draft` — Whether to create the pull request as a draft. Accepts `true` or `false`. Defaults to `false`.
-- `pr_assignees` — Comma-separated list of GitHub usernames to assign to the created pull request. Assignees will be added immediately after the PR is created. Defaults to an empty string (no assignees).
-- `override_branch_name` — Optional static branch name to use instead of auto-generating one. This is useful if you want the action to update the same pull request across multiple runs (e.g., always syncing to `lokalise-sync`). If the branch already exists, it will be checked out and updated instead of creating a new one.
-- `force_push` — Whether to force push changes to the remote branch. Useful when using a static branch name and you want to overwrite any previous state (e.g., updating an existing PR). Set to `true` with caution, as this will overwrite history. Defaults to `false`.
-- `git_commit_message` — Git commit message to use. If not provided, defaults to "Translations update".
-- `pr_reviewers` — Optional comma-separated list of GitHub usernames to request as reviewers on the pull request. Only individual users can be specified here. Reviewers must have access to the repository.
-- `pr_teams_reviewers` — Optional comma-separated list of team slugs (e.g., `backend`, `qa`) from the same GitHub organization that owns the repository. These teams will be requested as reviewers. Has no effect for repositories not under an organization, or if the teams are not part of the org.  
-  + Requesting team reviewers requires a token with the `repo` and `read:org` scopes. If the default `GITHUB_TOKEN` is restricted by your organization, supply a custom Personal Access Token via `custom_github_token` that includes at least those scopes.
-- `temp_branch_prefix` — A prefix for the temporary branch used to create the pull request. For example, using `lok` will result in a branch name starting with `lok`. Defaults to `lok`.
-
-### Behavior tweaks and retries
-
-- `always_pull_base` — By default, changes in the base language translation files (defined by the `base_lang` option) are ignored when checking for updates. Set this option to `true` to include changes in the base language translations in the pull request. Defaults to `false`.
-- `max_retries` — Maximum number of retries on rate limit errors (HTTP 429). Defaults to `3`.
-- `sleep_on_retry` — Number of seconds to sleep before retrying on rate limit errors. Defaults to `1`.
-- `download_timeout` — Timeout for the download operation, in seconds. Defaults to `120`.
 - `post_process_command` — A shell command that runs after pulling translation files from Lokalise but before committing them. This allows you to perform custom transformations, cleanup, replacements, or validations on the downloaded files. The command is executed in the root of your repository and has access to several environment variables (`TRANSLATIONS_PATH`, `BASE_LANG`, `FILE_FORMAT`, `FILE_EXT`, `FLAT_NAMING`, `PLATFORM`).
   + Please note that this is an **experimental feature**. You are fully responsible for the logic and behavior of any script executed through this option. These scripts run in your own repository context, under your control. If something breaks or behaves unexpectedly, we cannot guarantee support or ensure the security of the code being executed.
   + If your command requires a custom interpreter (e.g. running tools that are not available by default on GitHub-hosted runners), you are responsible for setting it up yourself before the command is executed.
@@ -182,11 +156,46 @@ with open(file_path, "w", encoding="utf-8") as f:
 
 - `post_process_strict` — Whether to fail the workflow if the `post_process_command` fails (non-zero exit code). If set to `true`, the workflow will exit immediately on failure. Defaults to `false`.
 
+### Update behavior
+
+- `always_pull_base` — By default, changes in the base language translation files (defined by the `base_lang` option) are ignored when checking for updates. Set this option to `true` to include changes in the base language translations in the pull request. Defaults to `false`.
+
+### Retry and timeout
+
+- `max_retries` — Maximum number of retries on rate limit errors (HTTP 429). Defaults to `3`.
+- `sleep_on_retry` — Number of seconds to sleep before retrying on rate limit errors. Defaults to `1`.
+- `download_timeout` — Timeout for the download operation, in seconds. Defaults to `120`.
+
+### Git identity
+- `git_user_name` — Optional Git username for commits. Defaults to the GitHub actor of the workflow run. Handy for using a specific identity (e.g., "Localization Bot").
+- `git_user_email` — Optional Git email for commits. Defaults to a noreply address based on the username (e.g., `username@users.noreply.github.com`). Useful for cleaner commit metadata or bot identities.
+
+### Commit and branch control
+- `git_commit_message` — Custom commit message. Defaults to "Translations update".
+- `override_branch_name` — Static branch name instead of an auto-generated one. Helps update the same PR across runs (e.g., always `lokalise-sync`). If the branch exists, it’s updated rather than recreated.
+- `force_push` — Force push to the remote branch. Use with caution, as it overwrites history. Defaults to `false`.
+- `temp_branch_prefix` — Prefix for temporary branch names (e.g., `lok` → branch starts with `lok`). Defaults to `lok`.
+
+### Pull request details
+- `pr_title` — Title for the PR. Defaults to "Translations update".
+- `pr_body` — Body text for the PR. Defaults to "This pull request updates translations from Lokalise".
+- `pr_labels` — Comma-separated labels to apply to the PR.
+- `pr_draft` — Create the PR as a draft (`true`/`false`). Defaults to `false`.
+- `pr_assignees` — Comma-separated GitHub usernames to assign to the PR. Defaults to none.
+
+### Review requests
+- `pr_reviewers` — Comma-separated GitHub usernames to request as reviewers. Only individual users can be specified.
+- `pr_teams_reviewers` — Comma-separated team slugs (e.g., `backend`, `qa`) from the same org as the repo.  
+  + Requires a token with `repo` and `read:org` scopes if the default `GITHUB_TOKEN` is restricted.
+
+### Authentication
+- `custom_github_token` — Optional token for creating/updating pull requests. Defaults to `GITHUB_TOKEN`. Use when elevated permissions are needed (assigning reviewers, interacting with protected branches, cross-repo changes). Keep secret.
+
 ### Platform support
 
 - `os_platform` — Target platform for the precompiled binaries used by this action (`linux_amd64`, `linux_arm64`, `mac_amd64`, `mac_arm64`). These binaries handle tasks like downloading and processing translations. Typically, you don't need to change this, as the default (`linux_amd64`) works for most environments. Override if running on a macOS runner or a different architecture.
 
-### GitHub permissions
+### Configuring GitHub permissions
 
 1. Go to your repository's **Settings**.
 2. Navigate to **Actions > General**.
