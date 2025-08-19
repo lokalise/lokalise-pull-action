@@ -139,7 +139,7 @@ func buildDownloadParams(config DownloadConfig) client.DownloadParams {
 	}
 
 	if !config.SkipIncludeTags {
-		params["include_tags"] = config.GitHubRefName
+		params["include_tags"] = []string{config.GitHubRefName}
 	}
 
 	// parse additional params

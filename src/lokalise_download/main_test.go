@@ -53,7 +53,7 @@ func TestBuildDownloadParams_DefaultsAndFlags(t *testing.T) {
 		"async":              true,
 		"original_filenames": true,
 		"directory_prefix":   "/",
-		"include_tags":       "release-2025-08-19",
+		"include_tags":       []string{"release-2025-08-19"},
 		"untranslated":       "true",
 		"no_duplicate_keys":  true,  // flag without value becomes true
 		"plural_format":      "icu", // hyphens -> underscores
@@ -144,9 +144,17 @@ func TestDownloadFiles_Success(t *testing.T) {
 	if fd.gotParams["format"] != "json" {
 		t.Fatalf("expected format=json, got %v", fd.gotParams["format"])
 	}
-	if fd.gotParams["include_tags"] != "v1.2.3" {
-		t.Fatalf("expected include_tags=v1.2.3, got %v", fd.gotParams["include_tags"])
+
+	got, ok := fd.gotParams["include_tags"].([]string)
+	if !ok {
+		t.Fatalf("include_tags type mismatch, got %T", fd.gotParams["include_tags"])
 	}
+
+	want := []string{"v1.2.3"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected include_tags=%v, got %v", want, got)
+	}
+
 	if fd.gotParams["original_filenames"] != true {
 		t.Fatalf("expected original_filenames=true, got %v", fd.gotParams["original_filenames"])
 	}
