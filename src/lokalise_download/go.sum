@@ -1,2 +1,8 @@
 github.com/bodrovis/lokalise-actions-common/v2 v2.3.1 h1:xclGPUN8cOWNQMuR+7oGaAAAVfiaoW9NhWS5QsZ7gik=
 github.com/bodrovis/lokalise-actions-common/v2 v2.3.1/go.mod h1:z7yHyFbN7jCd/5lrdvPVBQGiMcnYEPaX51wjJUYY6fo=
+github.com/bodrovis/lokex v0.0.0-20250819150219-0407f01110c6 h1:3jOWgyRn0YcjL0ZFd3DFE1sfJqQgJKus7ImNbAxohaw=
+github.com/bodrovis/lokex v0.0.0-20250819150219-0407f01110c6/go.mod h1:/hyv7agzyh82puumWv3EY3h/j3e3kmx5T6X4G59ppYg=
+github.com/jarcoal/httpmock v1.4.1 h1:0Ju+VCFuARfFlhVXFc2HxlcQkfB+Xq12/EotHko+x2A=
+github.com/jarcoal/httpmock v1.4.1/go.mod h1:ftW1xULwo+j0R0JJkJIIi7UKigZUXCLLanykgjwBXL0=
+github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
+github.com/joho/godotenv v1.5.1/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
