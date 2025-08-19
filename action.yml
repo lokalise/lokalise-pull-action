@@ -157,13 +157,6 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Install Lokalise CLIv2
-      # lokalise/install-lokalise-cli-v2@v2.0.0
-      uses: lokalise/install-lokalise-cli-v2@e3dab54bcb8e779dab39712a65ee01a4d399871d
-      with:
-        target-version: 3.1.4
-        add-to-path: false
-
     - name: Pull translation files from Lokalise
       id: pull-files
       shell: bash
