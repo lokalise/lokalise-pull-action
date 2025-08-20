@@ -1,9 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"time"
@@ -17,11 +18,13 @@ import (
 var exitFunc = os.Exit
 
 const (
-	defaultMaxRetries      = 5   // Default number of retries for rate-limited requests
+	defaultMaxRetries      = 3   // Default number of retries for rate-limited requests
 	defaultSleepTime       = 1   // Default initial sleep time in seconds between retries
 	maxSleepTime           = 60  // Maximum sleep time in seconds between retries
-	maxTotalTime           = 300 // Maximum total time in seconds for all retries
-	defaultDownloadTimeout = 120 // Timeout for the download script
+	defaultGlobalTimeout   = 600 // Maximum total time in seconds for the whole operation
+	defaultHTTPTimeout     = 120 // Timeout for the HTTP calls
+	defaultPollInitialWait = 1
+	defaultPollMaxWait     = 120
 )
 
 // DownloadConfig holds all the necessary configuration for downloading files
@@ -34,9 +37,13 @@ type DownloadConfig struct {
 	SkipIncludeTags       bool
 	SkipOriginalFilenames bool
 	MaxRetries            int
-	SleepTime             int
-	DownloadTimeout       int
+	InitialSleepTime      time.Duration
+	MaxSleepTime          time.Duration
+	HTTPTimeout           time.Duration
+	GlobalTimeout         time.Duration
 	AsyncMode             bool
+	AsyncPollInitialWait  time.Duration
+	AsyncPollMaxWait      time.Duration
 }
 
 type Downloader interface {
@@ -44,18 +51,19 @@ type Downloader interface {
 }
 
 type ClientFactory interface {
-	NewDownloader(token, projectID string, retries, downloadTimeout, initialBackoff, maxBackoff int) (Downloader, error)
+	NewDownloader(cfg DownloadConfig) (Downloader, error)
 }
 
 type LokaliseFactory struct{}
 
-func (f *LokaliseFactory) NewDownloader(token, projectID string, retries, downloadTimeout, initialBackoff, maxBackoff int) (Downloader, error) {
+func (f *LokaliseFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) {
 	lokaliseClient, err := client.NewClient(
-		token,
-		projectID,
-		client.WithMaxDownloadRetries(retries),
-		client.WithHTTPTimeout(time.Duration(downloadTimeout)*time.Second),
-		client.WithBackoff(time.Duration(initialBackoff)*time.Second, time.Duration(maxBackoff)*time.Second),
+		cfg.Token,
+		cfg.ProjectID,
+		client.WithMaxRetries(cfg.MaxRetries),
+		client.WithHTTPTimeout(cfg.HTTPTimeout),
+		client.WithBackoff(cfg.InitialSleepTime, cfg.MaxSleepTime),
+		client.WithPollWait(cfg.AsyncPollInitialWait, cfg.AsyncPollMaxWait),
 	)
 	if err != nil {
 		return nil, err
@@ -93,13 +101,17 @@ func main() {
 		SkipOriginalFilenames: skipOriginalFilenames,
 		AsyncMode:             asyncMode,
 		MaxRetries:            parsers.ParseUintEnv("MAX_RETRIES", defaultMaxRetries),
-		SleepTime:             parsers.ParseUintEnv("SLEEP_TIME", defaultSleepTime),
-		DownloadTimeout:       parsers.ParseUintEnv("DOWNLOAD_TIMEOUT", defaultDownloadTimeout),
+		InitialSleepTime:      time.Duration(parsers.ParseUintEnv("SLEEP_TIME", defaultSleepTime)) * time.Second,
+		MaxSleepTime:          time.Duration(maxSleepTime) * time.Second,
+		HTTPTimeout:           time.Duration(parsers.ParseUintEnv("HTTP_TIMEOUT", defaultHTTPTimeout)) * time.Second,
+		GlobalTimeout:         time.Duration(parsers.ParseUintEnv("GLOBAL_TIMEOUT", defaultGlobalTimeout)) * time.Second,
+		AsyncPollInitialWait:  time.Duration(parsers.ParseUintEnv("ASYNC_POLL_INITIAL_WAIT", defaultPollInitialWait)) * time.Second,
+		AsyncPollMaxWait:      time.Duration(parsers.ParseUintEnv("ASYNC_POLL_MAX_WAIT", defaultPollMaxWait)) * time.Second,
 	}
 
 	validateDownloadConfig(config)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(maxTotalTime)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), config.GlobalTimeout)
 	defer cancel()
 
 	err = downloadFiles(ctx, config, &LokaliseFactory{})
@@ -143,34 +155,30 @@ func buildDownloadParams(config DownloadConfig) client.DownloadParams {
 	}
 
 	// parse additional params
-	if config.AdditionalParams != "" {
-		scanner := bufio.NewScanner(strings.NewReader(config.AdditionalParams))
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			// strip leading "--"
-			line = strings.TrimPrefix(line, "--")
-			// split key=val
-			parts := strings.SplitN(line, "=", 2)
-			key := strings.ReplaceAll(parts[0], "-", "_")
-			if len(parts) == 2 {
-				params[key] = parts[1]
-			} else {
-				// flag without value → true
-				params[key] = true
-			}
+	ap := strings.TrimSpace(config.AdditionalParams)
+	if ap != "" {
+		add, err := parseJSONMap(ap)
+		if err != nil {
+			returnWithError("Invalid additional_params (must be JSON object): " + err.Error())
 		}
+		maps.Copy(params, add)
 	}
 
 	return params
 }
 
+func parseJSONMap(s string) (map[string]any, error) {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func downloadFiles(ctx context.Context, cfg DownloadConfig, factory ClientFactory) error {
 	fmt.Println("Starting download from Lokalise")
 
-	downloader, err := factory.NewDownloader(cfg.Token, cfg.ProjectID, cfg.MaxRetries, cfg.DownloadTimeout, cfg.SleepTime, maxSleepTime)
+	downloader, err := factory.NewDownloader(cfg)
 	if err != nil {
 		return fmt.Errorf("cannot create Lokalise API client: %w", err)
 	}

@@ -79,21 +79,33 @@ inputs:
     required: false
     default: ''
   max_retries:
-    description: 'Maximum number of retries on rate limit errors'
+    description: 'Maximum number of retries on rate limit and other retryable errors'
     required: false
     default: 3
   sleep_on_retry:
     description: 'Number of seconds to sleep before retrying'
     required: false
     default: 1
-  download_timeout:
-    description: 'Timeout for the download operation (in seconds)'
+  http_timeout:
+    description: 'Timeout for HTTP calls (in seconds)'
     required: false
     default: 120
+  global_timeout:
+    description: 'Global timeout for the whole operation (in seconds)'
+    required: false
+    default: 600
   async_mode:
     description: 'Use async mode for translations download'
     required: false
     default: 'false'
+  async_poll_initial_wait:
+    description: 'Number of seconds to wait before polling the async download process for the first time'
+    required: false
+    default: 1
+  async_poll_max_wait:
+    description: 'Timeout for polling the async download process'
+    required: false
+    default: 120
   os_platform:
     description: 'Target platform for the binary (linux_amd64, linux_arm64, mac_amd64, mac_arm64)'
     required: false
@@ -170,11 +182,14 @@ runs:
         BASE_LANG: "${{ inputs.base_lang }}"
         ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
-        DOWNLOAD_TIMEOUT: "${{ inputs.download_timeout }}"
+        HTTP_TIMEOUT: "${{ inputs.http_timeout }}"
+        GLOBAL_TIMEOUT: "${{ inputs.global_timeout }}"
         SKIP_INCLUDE_TAGS: "${{ inputs.skip_include_tags }}"
         SKIP_ORIGINAL_FILENAMES: "${{ inputs.skip_original_filenames }}"
         PLATFORM: "${{ inputs.os_platform }}"
         ASYNC_MODE: "${{ inputs.async_mode }}"
+        ASYNC_POLL_INITIAL_WAIT: "${{ inputs.async_poll_initial_wait }}"
+        ASYNC_POLL_MAX_WAIT: "${{ inputs.async_poll_max_wait }}"
       run: |
         set -euo pipefail
 

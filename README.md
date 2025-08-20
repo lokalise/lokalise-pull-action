@@ -39,12 +39,17 @@ jobs:
             TRANSLATIONS_PATH1
             TRANSLATIONS_PATH2
           file_format: json
-          additional_params: |
-            --indentation=2sp
-            --export-empty-as=skip
-            --export-sort=a_z
-            --replace-breaks=false
-            --language-mapping=[{"original_language_iso":"en_US","custom_language_iso":"en-US"}]
+          additional_params: >
+            {
+              "indentation": "2sp",
+              "export_empty_as": "skip",
+              "export_sort": "a_z",
+              "replace_breaks": false,
+              "include_tags": ["release-2025-08-19"],
+              "language_mapping": [
+                {"original_language_iso": "en_US", "custom_language_iso": "en-US"}
+              ]
+            }
 ```
 
 ### Important note on Lokalise filenames and tags
@@ -61,8 +66,10 @@ To disable this automatic filtering or use custom tags, set the `skip_include_ta
 
 ```yaml
 skip_include_tags: true
-additional_params: |
-  --include-tags=custom_tag
+additional_params: >
+  {
+    "include_tags": ["release-2025-08-19"]
+  }
 ```
 
 #### Filenames and directory structure
@@ -101,15 +108,20 @@ You'll need to provide some parameters for the action. These can be set as envir
 - `flat_naming` — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`. Defaults to `false`.
 - `skip_include_tags` — Skip setting the `--include-tags` argument during download. This will download all translation keys for the specified format, regardless of tags.
 - `skip_original_filenames` — Skips setting the `--original-filenames` and `--directory-prefix` arguments during download. You can disable original filenames by setting `--original-filenames=false` explicitly via `additional_params`.
-- `additional_params` — Extra parameters to pass to the [Lokalise CLI when pulling files](https://github.com/lokalise/lokalise-cli-2-go/blob/main/docs/lokalise2_file_download.md). For example, you can use `--indentation=2sp` to manage indentation. Defaults to an empty string. Multiple params can be specified:
+- `additional_params` — Extra parameters to pass when sending API request. For example, you can use `"indentation": "2sp"` to manage indentation. Defaults to an empty string. Multiple params can be specified:
 
 ```yaml
-additional_params: |
-  --indentation=2sp
-  --export-empty-as=skip
-  --export-sort=a_z
-  --replace-breaks=false
-  --language-mapping=[{"original_language_iso":"en_US","custom_language_iso":"en-US"}]
+additional_params: >
+  {
+    "indentation": "2sp",
+    "export_empty_as": "skip",
+    "export_sort": "a_z",
+    "replace_breaks": false,
+    "include_tags": ["release-2025-08-19"],
+    "language_mapping": [
+      {"original_language_iso": "en_US", "custom_language_iso": "en-US"}
+    ]
+  }
 ```
 
 ### Post-processing
@@ -162,9 +174,12 @@ with open(file_path, "w", encoding="utf-8") as f:
 
 ### Retry and timeout
 
-- `max_retries` — Maximum number of retries on rate limit errors (HTTP 429). Defaults to `3`.
-- `sleep_on_retry` — Number of seconds to sleep before retrying on rate limit errors. Defaults to `1`.
-- `download_timeout` — Timeout for the download operation, in seconds. Defaults to `120`.
+- `max_retries` — Maximum number of retries on rate limit (HTTP 429) and other retryable errors. Defaults to `3`.
+- `sleep_on_retry` — Number of seconds to sleep before retrying on retryable errors (exponential backoff applies). Defaults to `1`.
+- `http_timeout` — Timeout in seconds for every HTTP operation (requesting bundle, downloading archive, etc.). Defaults to `120`.
+- `async_poll_initial_wait` — Number of seconds to wait before polling the async download process for the first time. Has no effect if the `async_mode` is disabled. Defaults to `1`.
+- `async_poll_max_wait` — Timeout for polling the async download process. Has no effect if the `async_mode` is disabled. Defaults to `120`.
+- `global_timeout` — Global timeout in seconds for the whole download and unzip operation. Defaults to `600`.
 
 ### Git identity
 - `git_user_name` — Optional Git username for commits. Defaults to the GitHub actor of the workflow run. Handy for using a specific identity (e.g., "Localization Bot").
