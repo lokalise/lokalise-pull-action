@@ -178,7 +178,7 @@ with open(file_path, "w", encoding="utf-8") as f:
 - `http_timeout` — Timeout in seconds for every HTTP operation (requesting bundle, downloading archive, etc.). Defaults to `120`.
 - `async_poll_initial_wait` — Number of seconds to wait before polling the async download process for the first time. Has no effect if the `async_mode` is disabled. Defaults to `1`.
 - `async_poll_max_wait` — Timeout for polling the async download process. Has no effect if the `async_mode` is disabled. Defaults to `120`.
-- `global_timeout` — Global timeout in seconds for the whole download and unzip operation. Defaults to `600`.
+- `download_timeout` — Timeout in seconds for the whole download and unzip operation. Defaults to `600`.
 
 ### Git identity
 - `git_user_name` — Optional Git username for commits. Defaults to the GitHub actor of the workflow run. Handy for using a specific identity (e.g., "Localization Bot").

@@ -90,8 +90,8 @@ inputs:
     description: 'Timeout for HTTP calls (in seconds)'
     required: false
     default: 120
-  global_timeout:
-    description: 'Global timeout for the whole operation (in seconds)'
+  download_timeout:
+    description: 'Timeout for the whole download operation (in seconds)'
     required: false
     default: 600
   async_mode:
@@ -183,7 +183,7 @@ runs:
         ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
         HTTP_TIMEOUT: "${{ inputs.http_timeout }}"
-        GLOBAL_TIMEOUT: "${{ inputs.global_timeout }}"
+        DOWNLOAD_TIMEOUT: "${{ inputs.download_timeout }}"
         SKIP_INCLUDE_TAGS: "${{ inputs.skip_include_tags }}"
         SKIP_ORIGINAL_FILENAMES: "${{ inputs.skip_original_filenames }}"
         PLATFORM: "${{ inputs.os_platform }}"

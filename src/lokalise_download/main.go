@@ -21,7 +21,7 @@ const (
 	defaultMaxRetries      = 3   // Default number of retries for rate-limited requests
 	defaultSleepTime       = 1   // Default initial sleep time in seconds between retries
 	maxSleepTime           = 60  // Maximum sleep time in seconds between retries
-	defaultGlobalTimeout   = 600 // Maximum total time in seconds for the whole operation
+	defaultDownloadTimeout = 600 // Maximum total time in seconds for the whole operation
 	defaultHTTPTimeout     = 120 // Timeout for the HTTP calls
 	defaultPollInitialWait = 1
 	defaultPollMaxWait     = 120
@@ -40,7 +40,7 @@ type DownloadConfig struct {
 	InitialSleepTime      time.Duration
 	MaxSleepTime          time.Duration
 	HTTPTimeout           time.Duration
-	GlobalTimeout         time.Duration
+	DownloadTimeout       time.Duration
 	AsyncMode             bool
 	AsyncPollInitialWait  time.Duration
 	AsyncPollMaxWait      time.Duration
@@ -108,14 +108,14 @@ func main() {
 		InitialSleepTime:      time.Duration(parsers.ParseUintEnv("SLEEP_TIME", defaultSleepTime)) * time.Second,
 		MaxSleepTime:          time.Duration(maxSleepTime) * time.Second,
 		HTTPTimeout:           time.Duration(parsers.ParseUintEnv("HTTP_TIMEOUT", defaultHTTPTimeout)) * time.Second,
-		GlobalTimeout:         time.Duration(parsers.ParseUintEnv("GLOBAL_TIMEOUT", defaultGlobalTimeout)) * time.Second,
+		DownloadTimeout:       time.Duration(parsers.ParseUintEnv("DOWNLOAD_TIMEOUT", defaultDownloadTimeout)) * time.Second,
 		AsyncPollInitialWait:  time.Duration(parsers.ParseUintEnv("ASYNC_POLL_INITIAL_WAIT", defaultPollInitialWait)) * time.Second,
 		AsyncPollMaxWait:      time.Duration(parsers.ParseUintEnv("ASYNC_POLL_MAX_WAIT", defaultPollMaxWait)) * time.Second,
 	}
 
 	validateDownloadConfig(config)
 
-	ctx, cancel := context.WithTimeout(context.Background(), config.GlobalTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), config.DownloadTimeout)
 	defer cancel()
 
 	err = downloadFiles(ctx, config, &LokaliseFactory{})
