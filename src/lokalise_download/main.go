@@ -50,6 +50,10 @@ type Downloader interface {
 	Download(ctx context.Context, dest string, params client.DownloadParams) (string, error)
 }
 
+type AsyncDownloader interface {
+	DownloadAsync(ctx context.Context, dest string, params client.DownloadParams) (string, error)
+}
+
 type ClientFactory interface {
 	NewDownloader(cfg DownloadConfig) (Downloader, error)
 }
@@ -141,10 +145,6 @@ func buildDownloadParams(config DownloadConfig) client.DownloadParams {
 		"format": config.FileFormat,
 	}
 
-	if config.AsyncMode {
-		params["async"] = true
-	}
-
 	if !config.SkipOriginalFilenames {
 		params["original_filenames"] = true
 		params["directory_prefix"] = "/"
@@ -178,17 +178,27 @@ func parseJSONMap(s string) (map[string]any, error) {
 func downloadFiles(ctx context.Context, cfg DownloadConfig, factory ClientFactory) error {
 	fmt.Println("Starting download from Lokalise")
 
-	downloader, err := factory.NewDownloader(cfg)
+	dl, err := factory.NewDownloader(cfg)
 	if err != nil {
 		return fmt.Errorf("cannot create Lokalise API client: %w", err)
 	}
 
 	params := buildDownloadParams(cfg)
-	_, err = downloader.Download(ctx, "./", params)
-	if err != nil {
-		return fmt.Errorf("download failed: %w", err)
+
+	if cfg.AsyncMode {
+		if ad, ok := dl.(AsyncDownloader); ok {
+			if _, err := ad.DownloadAsync(ctx, "./", params); err != nil {
+				return fmt.Errorf("download failed: %w", err)
+			}
+			return nil
+		}
+		// should never happen in real code
+		return fmt.Errorf("async mode requested, but downloader doesn't support DownloadAsync")
 	}
 
+	if _, err := dl.Download(ctx, "./", params); err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
 	return nil
 }
 

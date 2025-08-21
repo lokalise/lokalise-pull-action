@@ -52,7 +52,6 @@ func TestBuildDownloadParams_JSON_MergesAndOverrides(t *testing.T) {
 
 	want := client.DownloadParams{
 		"format":             "json",
-		"async":              true,
 		"original_filenames": true,
 		"directory_prefix":   "/",
 		"include_tags":       []any{"custom-1", "custom-2"},
@@ -132,7 +131,7 @@ func TestBuildDownloadParams_LegacyFlags_Aborts(t *testing.T) {
 
 // ---------- downloadFiles tests ----------
 
-func TestDownloadFiles_Success(t *testing.T) {
+func TestDownloadFiles_AsyncSuccess(t *testing.T) {
 	cfg := DownloadConfig{
 		ProjectID:             "proj_123",
 		Token:                 "tok_abc",
@@ -140,7 +139,81 @@ func TestDownloadFiles_Success(t *testing.T) {
 		GitHubRefName:         "v1.2.3",
 		SkipIncludeTags:       false,
 		SkipOriginalFilenames: false,
-		AsyncMode:             true,
+		AsyncMode:             true, // async path
+		MaxRetries:            7,
+		InitialSleepTime:      2 * time.Second,
+		MaxSleepTime:          time.Duration(maxSleepTime) * time.Second,
+		HTTPTimeout:           30 * time.Second,
+	}
+
+	fd := &fakeDownloader{}
+	ad := &fakeAsyncDownloader{fakeDownloader: fd}
+	ff := &fakeFactory{downloader: ad}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := downloadFiles(ctx, cfg, ff); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// factory knobs
+	if ff.gotToken != "tok_abc" || ff.gotProjectID != "proj_123" {
+		t.Fatalf("factory received wrong credentials: token=%s projectID=%s", ff.gotToken, ff.gotProjectID)
+	}
+	if ff.gotRetries != 7 {
+		t.Fatalf("expected retries=7, got %d", ff.gotRetries)
+	}
+	if ff.gotHTTPTO != 30*time.Second {
+		t.Fatalf("expected http timeout=30s, got %v", ff.gotHTTPTO)
+	}
+	if ff.gotInitialBackoff != 2*time.Second {
+		t.Fatalf("expected initial backoff=2s, got %v", ff.gotInitialBackoff)
+	}
+	if ff.gotMaxBackoff != time.Duration(maxSleepTime)*time.Second {
+		t.Fatalf("expected max backoff=%ds, got %v", maxSleepTime, ff.gotMaxBackoff)
+	}
+
+	// downloader inputs
+	if !fd.called {
+		t.Fatalf("expected some download method to be called")
+	}
+	if fd.gotDest != "./" {
+		t.Fatalf("expected dest ./, got %s", fd.gotDest)
+	}
+	if fd.gotParams["format"] != "json" {
+		t.Fatalf("expected format=json, got %v", fd.gotParams["format"])
+	}
+	got, ok := fd.gotParams["include_tags"].([]string)
+	if !ok {
+		t.Fatalf("include_tags type mismatch, got %T", fd.gotParams["include_tags"])
+	}
+	want := []string{"v1.2.3"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected include_tags=%v, got %v", want, got)
+	}
+	if fd.gotParams["original_filenames"] != true {
+		t.Fatalf("expected original_filenames=true, got %v", fd.gotParams["original_filenames"])
+	}
+	if fd.gotParams["directory_prefix"] != "/" {
+		t.Fatalf("expected directory_prefix=/, got %v", fd.gotParams["directory_prefix"])
+	}
+
+	// assert the ASYNC path was used
+	if !ad.asyncCalled {
+		t.Fatalf("expected DownloadAsync to be called")
+	}
+}
+
+func TestDownloadFiles_SyncSuccess(t *testing.T) {
+	cfg := DownloadConfig{
+		ProjectID:             "proj_123",
+		Token:                 "tok_abc",
+		FileFormat:            "json",
+		GitHubRefName:         "v1.2.3",
+		SkipIncludeTags:       false,
+		SkipOriginalFilenames: false,
+		AsyncMode:             false, // sync path
 		MaxRetries:            7,
 		InitialSleepTime:      2 * time.Second,
 		MaxSleepTime:          time.Duration(maxSleepTime) * time.Second,
@@ -157,49 +230,46 @@ func TestDownloadFiles_Success(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// factory knobs
+	// factory knobs (same checks)
 	if ff.gotToken != "tok_abc" || ff.gotProjectID != "proj_123" {
 		t.Fatalf("factory received wrong credentials: token=%s projectID=%s", ff.gotToken, ff.gotProjectID)
 	}
 	if ff.gotRetries != 7 {
 		t.Fatalf("expected retries=7, got %d", ff.gotRetries)
 	}
-	if ff.gotHTTPTO != 30*time.Second { // ✅ compare durations
+	if ff.gotHTTPTO != 30*time.Second {
 		t.Fatalf("expected http timeout=30s, got %v", ff.gotHTTPTO)
 	}
-	if ff.gotInitialBackoff != 2*time.Second { // ✅
+	if ff.gotInitialBackoff != 2*time.Second {
 		t.Fatalf("expected initial backoff=2s, got %v", ff.gotInitialBackoff)
 	}
-	if ff.gotMaxBackoff != time.Duration(maxSleepTime)*time.Second { // ✅
+	if ff.gotMaxBackoff != time.Duration(maxSleepTime)*time.Second {
 		t.Fatalf("expected max backoff=%ds, got %v", maxSleepTime, ff.gotMaxBackoff)
 	}
 
 	// downloader inputs
+	if !fd.called {
+		t.Fatalf("expected Download to be called")
+	}
 	if fd.gotDest != "./" {
 		t.Fatalf("expected dest ./, got %s", fd.gotDest)
 	}
 	if fd.gotParams["format"] != "json" {
 		t.Fatalf("expected format=json, got %v", fd.gotParams["format"])
 	}
-
 	got, ok := fd.gotParams["include_tags"].([]string)
 	if !ok {
 		t.Fatalf("include_tags type mismatch, got %T", fd.gotParams["include_tags"])
 	}
-
 	want := []string{"v1.2.3"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected include_tags=%v, got %v", want, got)
 	}
-
 	if fd.gotParams["original_filenames"] != true {
 		t.Fatalf("expected original_filenames=true, got %v", fd.gotParams["original_filenames"])
 	}
 	if fd.gotParams["directory_prefix"] != "/" {
 		t.Fatalf("expected directory_prefix=/, got %v", fd.gotParams["directory_prefix"])
-	}
-	if fd.gotParams["async"] != true {
-		t.Fatalf("expected async=true, got %v", fd.gotParams["async"])
 	}
 }
 
@@ -351,6 +421,7 @@ func TestEnvParsingIntoConfig_BadJSON_Aborts(t *testing.T) {
 // ---------- fakes & helpers ----------
 
 type fakeDownloader struct {
+	called     bool
 	gotCtx     context.Context
 	gotDest    string
 	gotParams  client.DownloadParams
@@ -359,10 +430,22 @@ type fakeDownloader struct {
 }
 
 func (f *fakeDownloader) Download(ctx context.Context, dest string, params client.DownloadParams) (string, error) {
+	f.called = true
 	f.gotCtx = ctx
 	f.gotDest = dest
 	f.gotParams = params
 	return f.returnPath, f.returnErr
+}
+
+type fakeAsyncDownloader struct {
+	*fakeDownloader
+	asyncCalled bool
+}
+
+func (f *fakeAsyncDownloader) DownloadAsync(ctx context.Context, dest string, params client.DownloadParams) (string, error) {
+	f.asyncCalled = true
+	// reuse capture from base
+	return f.fakeDownloader.Download(ctx, dest, params)
 }
 
 type fakeFactory struct {
@@ -376,7 +459,7 @@ type fakeFactory struct {
 	gotInitialBackoff time.Duration
 	gotMaxBackoff     time.Duration
 
-	downloader Downloader
+	downloader Downloader // can be *fakeDownloader OR *fakeAsyncDownloader
 }
 
 func (f *fakeFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) {

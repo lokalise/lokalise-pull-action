@@ -45,7 +45,6 @@ jobs:
               "export_empty_as": "skip",
               "export_sort": "a_z",
               "replace_breaks": false,
-              "include_tags": ["release-2025-08-19"],
               "language_mapping": [
                 {"original_language_iso": "en_US", "custom_language_iso": "en-US"}
               ]
