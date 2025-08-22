@@ -68,6 +68,7 @@ func (f *LokaliseFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) 
 		client.WithHTTPTimeout(cfg.HTTPTimeout),
 		client.WithBackoff(cfg.InitialSleepTime, cfg.MaxSleepTime),
 		client.WithPollWait(cfg.AsyncPollInitialWait, cfg.AsyncPollMaxWait),
+		client.WithUserAgent("lokalise-pull-action/lokex"),
 	)
 	if err != nil {
 		return nil, err
@@ -100,7 +101,7 @@ func main() {
 		Token:                 os.Args[2],
 		FileFormat:            os.Getenv("FILE_FORMAT"),
 		GitHubRefName:         os.Getenv("GITHUB_REF_NAME"),
-		AdditionalParams:      os.Getenv("CLI_ADD_PARAMS"),
+		AdditionalParams:      os.Getenv("ADDITIONAL_PARAMS"),
 		SkipIncludeTags:       skipIncludeTags,
 		SkipOriginalFilenames: skipOriginalFilenames,
 		AsyncMode:             asyncMode,

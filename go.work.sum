@@ -1,4 +1,2 @@
-github.com/bodrovis/lokex v0.0.0-20250820150308-daafb48a3fea h1:Okp923CepPPoIKU7urrtXhMxF0mTDsmRvv7NV3WXKGc=
-github.com/bodrovis/lokex v0.0.0-20250820150308-daafb48a3fea/go.mod h1:AE3ZGUqDq34cHiw5iBOIVCD9aFHgaDXby6yfoK8JCVE=
-github.com/jarcoal/httpmock v1.4.1/go.mod h1:ftW1xULwo+j0R0JJkJIIi7UKigZUXCLLanykgjwBXL0=
-github.com/joho/godotenv v1.5.1/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
+github.com/bodrovis/lokex v1.0.0 h1:XV06Aq9TfjzOkiyYjPJCv0xP66hiup9E74odvo2WJwM=
+github.com/bodrovis/lokex v1.0.0/go.mod h1:AE3ZGUqDq34cHiw5iBOIVCD9aFHgaDXby6yfoK8JCVE=

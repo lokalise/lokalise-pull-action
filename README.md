@@ -30,7 +30,7 @@ jobs:
           fetch-depth: 0
 
       - name: Pull from Lokalise
-        uses: lokalise/lokalise-pull-action@v3.14.0
+        uses: lokalise/lokalise-pull-action@v4.0.0
         with:
           api_token: ${{ secrets.LOKALISE_API_TOKEN }}
           project_id: LOKALISE_PROJECT_ID
@@ -57,9 +57,9 @@ Before running this action, ensure that your translation keys in Lokalise are pr
 
 #### Tags and branch context
 
-By default, the action filters downloaded keys based on a tag that matches the Git branch name used to trigger the workflow. This is done automatically via the `--include-tags=BRANCH_NAME` command-line argument.
+By default, the action filters downloaded keys based on a tag that matches the Git branch name used to trigger the workflow. This is done automatically via the `"include_tags": [BRANCH_NAME]` API parameter.
 
-For example, if the action is triggered from the `hub` branch on GitHub, it will download only the keys tagged with `hub`: `--include-tags=hub`. If no keys with the specified tag are found, the action will terminate.
+For example, if the action is triggered from the `hub` branch on GitHub, it will download only the keys tagged with `hub`: `"include_tags": ["hub"]`. If no keys with the specified tag are found, the action will terminate.
 
 To disable this automatic filtering or use custom tags, set the `skip_include_tags` parameter to `true`. You can also provide your own tags via the `additional_params` field:
 
@@ -86,7 +86,7 @@ If the filenames do not include the correct directory prefix (like `locales/`), 
 
 To avoid this, double-check that your Lokalise filenames match the expected directory structure.
 
-Note that by default the action adds the `--original-filenames=true` and `--directory-prefix=/` command line arguments. To disable this behavior, set the `skip_original_filenames` to `true`.
+Note that by default the action adds the `"original_filenames": true` and `"directory_prefix": "/"` API parameters. To disable this behavior, set the `skip_original_filenames` to `true`.
 
 ## Configuration
 
@@ -105,9 +105,9 @@ You'll need to provide some parameters for the action. These can be set as envir
 
 - `async_mode` — Download translations in asynchronous mode. Not recommended for small projects but required for larger ones (>= 10 000 key-language pairs). Defaults to `false`.
 - `flat_naming` — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`. Defaults to `false`.
-- `skip_include_tags` — Skip setting the `--include-tags` argument during download. This will download all translation keys for the specified format, regardless of tags.
-- `skip_original_filenames` — Skips setting the `--original-filenames` and `--directory-prefix` arguments during download. You can disable original filenames by setting `--original-filenames=false` explicitly via `additional_params`.
-- `additional_params` — Extra parameters to pass when sending API request. For example, you can use `"indentation": "2sp"` to manage indentation. Defaults to an empty string. Multiple params can be specified:
+- `skip_include_tags` — Skip setting the `"include_tags"` param during download. This will download all translation keys for the specified format, regardless of tags.
+- `skip_original_filenames` — Skips setting the `"original_filenames": true` and `"directory_prefix": "/"` params during download. You can disable original filenames by setting `"original_filenames": false` explicitly via `additional_params`.
+- `additional_params` — Extra parameters to pass when sending [File download API request](https://developers.lokalise.com/reference/download-files). Must be valid JSON. For example, you can use `"indentation": "2sp"` to manage indentation. Defaults to an empty string. Multiple params can be specified:
 
 ```yaml
 additional_params: >
@@ -242,17 +242,14 @@ For example:
 
 When triggered, this action follows these steps:
 
-1. **Install Lokalise CLIv2**:
-   - Ensures that the required Lokalise CLI is available for subsequent operations.
-
-2. **Download translation files**:
+1. **Download translation files**:
    - Retrieves translation files for all languages from the specified Lokalise project.
    - The downloaded keys are filtered by the tag corresponding to the triggering branch. For example, if the branch is named `lokalise-hub`, only keys tagged with `lokalise-hub` in Lokalise will be included in the download bundle.
 
-3. **Detect changes**:
+2. **Detect changes**:
    - Compares the downloaded translation files against the repository’s existing files to detect any updates or modifications.
 
-4. **Create a pull request**:
+3. **Create a pull request**:
    - If changes are detected, the action creates a pull request from a temporary branch to the triggering branch.
    - The temporary branch name is constructed using the prefix specified in the `temp_branch_prefix` parameter.
 
@@ -262,12 +259,12 @@ For more information on assumptions, refer to the [Assumptions and defaults](htt
 
 By default, the following command-line parameters are set when downloading files from Lokalise:
 
-- `--token` — Derived from the `api_token` parameter.
-- `--project-id` — Derived from the `project_id` parameter.
-- `--format` — Derived from the `file_format` parameter.
-- `--original-filenames` — Set to `true`.
-- `--directory-prefix` — Set to `/`.
-- `--include-tags` — Set to the branch name that triggered the workflow.
+- `X-Api-Token` header — Derived from the `api_token` parameter.
+- `project_id` GET param — Derived from the `project_id` parameter.
+- `format` — Derived from the `file_format` parameter.
+- `original_filenames` — Set to `true`.
+- `directory_prefix` — Set to `/`.
+- `include_tags` — Set to the branch name that triggered the workflow.
 
 ## Special notes and known issues
 

@@ -361,14 +361,14 @@ func TestEnvParsingIntoConfig_Smoke(t *testing.T) {
 	t.Setenv("FILE_FORMAT", "json")
 	t.Setenv("GITHUB_REF_NAME", "release-1")
 	// JSON MUST use double quotes
-	t.Setenv("CLI_ADD_PARAMS", `{"foo":"bar","baz_qux":false}`)
+	t.Setenv("ADDITIONAL_PARAMS", `{"foo":"bar","baz_qux":false}`)
 
 	cfg := DownloadConfig{
 		ProjectID:             "pid",
 		Token:                 "tok",
 		FileFormat:            os.Getenv("FILE_FORMAT"),
 		GitHubRefName:         os.Getenv("GITHUB_REF_NAME"),
-		AdditionalParams:      os.Getenv("CLI_ADD_PARAMS"),
+		AdditionalParams:      os.Getenv("ADDITIONAL_PARAMS"),
 		SkipIncludeTags:       false,
 		SkipOriginalFilenames: false,
 		MaxRetries:            5,
@@ -405,14 +405,14 @@ func TestEnvParsingIntoConfig_Smoke(t *testing.T) {
 func TestEnvParsingIntoConfig_BadJSON_Aborts(t *testing.T) {
 	t.Setenv("FILE_FORMAT", "json")
 	t.Setenv("GITHUB_REF_NAME", "release-1")
-	t.Setenv("CLI_ADD_PARAMS", `{"foo": "bar",`) // broken
+	t.Setenv("ADDITIONAL_PARAMS", `{"foo": "bar",`) // broken
 
 	cfg := DownloadConfig{
 		ProjectID:        "pid",
 		Token:            "tok",
 		FileFormat:       os.Getenv("FILE_FORMAT"),
 		GitHubRefName:    os.Getenv("GITHUB_REF_NAME"),
-		AdditionalParams: os.Getenv("CLI_ADD_PARAMS"),
+		AdditionalParams: os.Getenv("ADDITIONAL_PARAMS"),
 	}
 
 	requirePanicExit(t, func() { _ = buildDownloadParams(cfg) })
