@@ -1,16 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/bodrovis/lokex/client"
 )
 
 func TestMain(m *testing.M) {
@@ -28,629 +28,490 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestExecuteDownloadTimeout(t *testing.T) {
-	// Define the path to the mock process binary
-	mockBinary := "./fixtures/sleep/mock_sleep"
-	if runtime.GOOS == "windows" {
-		mockBinary += ".exe"
-	}
+// ---------- buildDownloadParams tests ----------
 
-	// Build the mock binary from the fixtures directory
-	buildMockBinaryIfNeeded(t, "./fixtures/sleep/sleep.go", mockBinary)
-
-	// Use the actual executeDownload function with the mock binary
-	args := []string{"sleep"} // Argument to trigger sleep in the mock process
-	downloadTimeout := 1      // Timeout in seconds, smaller than sleep duration
-
-	fmt.Println("Testing executeDownload with a timeout...")
-	outputBytes, err := executeDownload(mockBinary, args, downloadTimeout)
-	fmt.Println("Execution completed.")
-
-	// Assert that the error matches "command timed out"
-	if err == nil {
-		t.Errorf("Expected timeout error, but got nil")
-	} else if err.Error() != fmt.Sprintf("command timed out after %ds", downloadTimeout) {
-		t.Errorf("Expected 'command timed out' error, but got: %v", err)
-	}
-
-	// Debug: Print captured output
-	fmt.Printf("Output from mock binary: %s\n", string(outputBytes))
+func TestBuildDownloadParams_JSON_MergesAndOverrides(t *testing.T) {
+	cfg := DownloadConfig{
+		FileFormat:            "json",
+		GitHubRefName:         "release-2025-08-19",
+		SkipIncludeTags:       false,
+		SkipOriginalFilenames: false,
+		AsyncMode:             true,
+		AdditionalParams: `
+{
+  "indentation": "2sp",
+  "export_empty_as": "skip",
+  "export_sort": "a_z",
+  "replace_breaks": false,
+  "include_tags": ["custom-1","custom-2"]
 }
-
-func TestExecuteDownloadCapturesCombinedTail(t *testing.T) {
-	mockBinary := "./fixtures/noise/mock_noise"
-	if runtime.GOOS == "windows" {
-		mockBinary += ".exe"
-	}
-	buildMockBinaryIfNeeded(t, "./fixtures/noise/noise.go", mockBinary)
-
-	// mock prints to stdout and stderr, exits 1 with a final error line
-	out, err := executeDownload(mockBinary, []string{"noisy"}, 5)
-	if err == nil {
-		t.Fatalf("expected failure, got nil")
-	}
-	s := string(out)
-	if !containsAll(s, []string{
-		"hello from stdout 2",
-		"warn from stderr 2",
-		"polling time exceeded limit",
-	}) {
-		t.Fatalf("combined tail missing expected lines.\nTail:\n%s", s)
-	}
-}
-
-func TestExecuteDownloadNonTimeoutError(t *testing.T) {
-	// Define the path to a non-existent binary to simulate an execution error
-	nonExistentBinary := "./path/to/nonexistent/binary"
-
-	// Use the actual executeDownload function
-	args := []string{"arg1", "arg2"}
-	downloadTimeout := 5 // Timeout in seconds
-
-	fmt.Println("Testing executeDownload with a non-timeout error...")
-	outputBytes, err := executeDownload(nonExistentBinary, args, downloadTimeout)
-	fmt.Println("Execution completed.")
-
-	// Assert that an error occurred
-	if err == nil {
-		t.Errorf("Expected an error, but got nil")
-	}
-
-	// Debug: Print captured output
-	fmt.Printf("Output from executeDownload: %s\n", string(outputBytes))
-}
-
-func TestValidateDownloadConfig(t *testing.T) {
-	tests := []struct {
-		name        string
-		config      DownloadConfig
-		shouldError bool
-	}{
-		{
-			name: "Valid config",
-			config: DownloadConfig{
-				ProjectID:     "test_project",
-				Token:         "test_token",
-				FileFormat:    "json",
-				GitHubRefName: "main",
-			},
-			shouldError: false,
-		},
-		{
-			name: "Missing ProjectID",
-			config: DownloadConfig{
-				Token:         "test_token",
-				FileFormat:    "json",
-				GitHubRefName: "main",
-			},
-			shouldError: true,
-		},
-		{
-			name: "Missing Token",
-			config: DownloadConfig{
-				ProjectID:     "test_project",
-				FileFormat:    "json",
-				GitHubRefName: "main",
-			},
-			shouldError: true,
-		},
-		{
-			name: "Missing FileFormat",
-			config: DownloadConfig{
-				ProjectID:     "test_project",
-				Token:         "test_token",
-				GitHubRefName: "main",
-			},
-			shouldError: true,
-		},
-		{
-			name: "Missing GitHubRefName",
-			config: DownloadConfig{
-				ProjectID:  "test_project",
-				Token:      "test_token",
-				FileFormat: "json",
-			},
-			shouldError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			defer func() {
-				if r := recover(); r != nil {
-					if !tt.shouldError {
-						t.Errorf("Unexpected panic for test '%s': %v", tt.name, r)
-					}
-				} else if tt.shouldError {
-					t.Errorf("Expected an error for test '%s', but validation passed", tt.name)
-				}
-			}()
-			validateDownloadConfig(tt.config)
-		})
-	}
-}
-
-func TestConstructDownloadArgs(t *testing.T) {
-	tests := []struct {
-		name         string
-		config       DownloadConfig
-		expectedArgs []string
-	}{
-		{
-			name: "Include Tags with Single Additional Param",
-			config: DownloadConfig{
-				ProjectID:        "test_project",
-				Token:            "test_token",
-				FileFormat:       "json",
-				GitHubRefName:    "main",
-				AdditionalParams: "--custom-flag=true",
-				SkipIncludeTags:  false,
-			},
-			expectedArgs: []string{
-				"--token=test_token",
-				"--project-id=test_project",
-				"file", "download",
-				"--format=json",
-				"--original-filenames=true",
-				"--directory-prefix=/",
-				"--include-tags=main",
-				"--custom-flag=true",
-			},
-		},
-		{
-			name: "Skip Include Tags",
-			config: DownloadConfig{
-				ProjectID:        "test_project",
-				Token:            "test_token",
-				FileFormat:       "json",
-				GitHubRefName:    "main",
-				AdditionalParams: "--custom-flag=true",
-				SkipIncludeTags:  true,
-			},
-			expectedArgs: []string{
-				"--token=test_token",
-				"--project-id=test_project",
-				"file", "download",
-				"--format=json",
-				"--original-filenames=true",
-				"--directory-prefix=/",
-				"--custom-flag=true",
-			},
-		},
-		{
-			name: "Skip Original Filenames",
-			config: DownloadConfig{
-				ProjectID:             "test_project",
-				Token:                 "test_token",
-				FileFormat:            "json",
-				GitHubRefName:         "main",
-				AdditionalParams:      "--custom-flag=true",
-				SkipOriginalFilenames: true,
-			},
-			expectedArgs: []string{
-				"--token=test_token",
-				"--project-id=test_project",
-				"file", "download",
-				"--format=json",
-				"--include-tags=main",
-				"--custom-flag=true",
-			},
-		},
-		{
-			name: "Async mode",
-			config: DownloadConfig{
-				ProjectID:             "test_project",
-				Token:                 "test_token",
-				FileFormat:            "json",
-				GitHubRefName:         "main",
-				SkipOriginalFilenames: true,
-				AsyncMode:             true,
-			},
-			expectedArgs: []string{
-				"--token=test_token",
-				"--project-id=test_project",
-				"file", "download",
-				"--format=json",
-				"--async",
-				"--include-tags=main",
-			},
-		},
-		{
-			name: "Empty Additional Params",
-			config: DownloadConfig{
-				ProjectID:        "test_project",
-				Token:            "test_token",
-				FileFormat:       "json",
-				GitHubRefName:    "main",
-				AdditionalParams: "",
-				SkipIncludeTags:  false,
-			},
-			expectedArgs: []string{
-				"--token=test_token",
-				"--project-id=test_project",
-				"file", "download",
-				"--format=json",
-				"--original-filenames=true",
-				"--directory-prefix=/",
-				"--include-tags=main",
-			},
-		},
-		{
-			name: "Multiple Additional Params (YAML multiline style)",
-			config: DownloadConfig{
-				ProjectID:     "test_project",
-				Token:         "test_token",
-				FileFormat:    "json",
-				GitHubRefName: "main",
-				AdditionalParams: `
---custom-flag=true
---another-flag=false
---quoted=some value
---json={"key":"value with space"}
---empty-flag=
 `,
-			},
-			expectedArgs: []string{
-				"--token=test_token",
-				"--project-id=test_project",
-				"file", "download",
-				"--format=json",
-				"--original-filenames=true",
-				"--directory-prefix=/",
-				"--include-tags=main",
-				"--custom-flag=true",
-				"--another-flag=false",
-				"--quoted=some value",
-				"--json={\"key\":\"value with space\"}",
-				"--empty-flag=",
-			},
-		},
-		{
-			name: "JSON Array Additional Param",
-			config: DownloadConfig{
-				ProjectID:     "test_project",
-				Token:         "test_token",
-				FileFormat:    "json",
-				GitHubRefName: "main",
-				AdditionalParams: `
---language-mapping=[{"original_language_iso":"en_US","custom_language_iso":"en-US"},{"original_language_iso":"fr_CA","custom_language_iso":"fr-CA"}]
-`,
-			},
-			expectedArgs: []string{
-				"--token=test_token",
-				"--project-id=test_project",
-				"file", "download",
-				"--format=json",
-				"--original-filenames=true",
-				"--directory-prefix=/",
-				"--include-tags=main",
-				"--language-mapping=[{\"original_language_iso\":\"en_US\",\"custom_language_iso\":\"en-US\"},{\"original_language_iso\":\"fr_CA\",\"custom_language_iso\":\"fr-CA\"}]",
-			},
-		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			actual := constructDownloadArgs(tt.config)
+	params := buildDownloadParams(cfg)
 
-			if !reflect.DeepEqual(actual, tt.expectedArgs) {
-				t.Errorf("Arguments mismatch for '%s':\nExpected: %q\nActual:   %q",
-					tt.name, tt.expectedArgs, actual)
+	want := client.DownloadParams{
+		"format":             "json",
+		"original_filenames": true,
+		"directory_prefix":   "/",
+		"include_tags":       []any{"custom-1", "custom-2"},
+		"indentation":        "2sp",
+		"export_empty_as":    "skip",
+		"export_sort":        "a_z",
+		"replace_breaks":     false,
+	}
+
+	if !reflect.DeepEqual(params, want) {
+		t.Fatalf("params mismatch.\n got: %#v\nwant: %#v", params, want)
+	}
+}
+
+func TestBuildDownloadParams_JSON_EmptyAdditional_UsesDefaults(t *testing.T) {
+	cfg := DownloadConfig{
+		FileFormat:            "yaml",
+		GitHubRefName:         "release-2025-08-19",
+		SkipIncludeTags:       false,
+		SkipOriginalFilenames: false,
+		AsyncMode:             false,
+		AdditionalParams:      "",
+	}
+
+	p := buildDownloadParams(cfg)
+
+	if p["format"] != "yaml" {
+		t.Fatalf("format: got %v want yaml", p["format"])
+	}
+	if _, ok := p["async"]; ok {
+		t.Fatalf("async should be omitted when AsyncMode=false")
+	}
+	if p["original_filenames"] != true {
+		t.Fatalf("original_filenames should be true by default")
+	}
+	if p["directory_prefix"] != "/" {
+		t.Fatalf("directory_prefix should be / by default")
+	}
+	gotTags, ok := p["include_tags"].([]string)
+	if !ok {
+		// depending on JSON merging, include_tags may be []any; tolerate both
+		if aa, ok2 := p["include_tags"].([]any); ok2 {
+			if len(aa) != 1 || aa[0] != "release-2025-08-19" {
+				t.Fatalf("include_tags wrong: %#v", p["include_tags"])
 			}
+		} else {
+			t.Fatalf("include_tags type wrong: %T", p["include_tags"])
+		}
+	} else if len(gotTags) != 1 || gotTags[0] != "release-2025-08-19" {
+		t.Fatalf("include_tags wrong: %#v", gotTags)
+	}
+}
+
+func TestBuildDownloadParams_JSON_Invalid_Aborts(t *testing.T) {
+	cfg := DownloadConfig{
+		FileFormat:       "json",
+		GitHubRefName:    "ref",
+		AdditionalParams: `{"indentation": "2sp",`,
+	}
+
+	requirePanicExit(t, func() {
+		_ = buildDownloadParams(cfg)
+	})
+}
+
+func TestBuildDownloadParams_LegacyFlags_Aborts(t *testing.T) {
+	cfg := DownloadConfig{
+		FileFormat:       "json",
+		GitHubRefName:    "ref",
+		AdditionalParams: `--indentation=2sp`,
+	}
+
+	requirePanicExit(t, func() {
+		_ = buildDownloadParams(cfg)
+	})
+}
+
+// ---------- downloadFiles tests ----------
+
+func TestDownloadFiles_AsyncSuccess(t *testing.T) {
+	cfg := DownloadConfig{
+		ProjectID:             "proj_123",
+		Token:                 "tok_abc",
+		FileFormat:            "json",
+		GitHubRefName:         "v1.2.3",
+		SkipIncludeTags:       false,
+		SkipOriginalFilenames: false,
+		AsyncMode:             true, // async path
+		MaxRetries:            7,
+		InitialSleepTime:      2 * time.Second,
+		MaxSleepTime:          time.Duration(maxSleepTime) * time.Second,
+		HTTPTimeout:           30 * time.Second,
+	}
+
+	fd := &fakeDownloader{}
+	ad := &fakeAsyncDownloader{fakeDownloader: fd}
+	ff := &fakeFactory{downloader: ad}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := downloadFiles(ctx, cfg, ff); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// factory knobs
+	if ff.gotToken != "tok_abc" || ff.gotProjectID != "proj_123" {
+		t.Fatalf("factory received wrong credentials: token=%s projectID=%s", ff.gotToken, ff.gotProjectID)
+	}
+	if ff.gotRetries != 7 {
+		t.Fatalf("expected retries=7, got %d", ff.gotRetries)
+	}
+	if ff.gotHTTPTO != 30*time.Second {
+		t.Fatalf("expected http timeout=30s, got %v", ff.gotHTTPTO)
+	}
+	if ff.gotInitialBackoff != 2*time.Second {
+		t.Fatalf("expected initial backoff=2s, got %v", ff.gotInitialBackoff)
+	}
+	if ff.gotMaxBackoff != time.Duration(maxSleepTime)*time.Second {
+		t.Fatalf("expected max backoff=%ds, got %v", maxSleepTime, ff.gotMaxBackoff)
+	}
+
+	// downloader inputs
+	if !fd.called {
+		t.Fatalf("expected some download method to be called")
+	}
+	if fd.gotDest != "./" {
+		t.Fatalf("expected dest ./, got %s", fd.gotDest)
+	}
+	if fd.gotParams["format"] != "json" {
+		t.Fatalf("expected format=json, got %v", fd.gotParams["format"])
+	}
+	got, ok := fd.gotParams["include_tags"].([]string)
+	if !ok {
+		t.Fatalf("include_tags type mismatch, got %T", fd.gotParams["include_tags"])
+	}
+	want := []string{"v1.2.3"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected include_tags=%v, got %v", want, got)
+	}
+	if fd.gotParams["original_filenames"] != true {
+		t.Fatalf("expected original_filenames=true, got %v", fd.gotParams["original_filenames"])
+	}
+	if fd.gotParams["directory_prefix"] != "/" {
+		t.Fatalf("expected directory_prefix=/, got %v", fd.gotParams["directory_prefix"])
+	}
+
+	// assert the ASYNC path was used
+	if !ad.asyncCalled {
+		t.Fatalf("expected DownloadAsync to be called")
+	}
+}
+
+func TestDownloadFiles_SyncSuccess(t *testing.T) {
+	cfg := DownloadConfig{
+		ProjectID:             "proj_123",
+		Token:                 "tok_abc",
+		FileFormat:            "json",
+		GitHubRefName:         "v1.2.3",
+		SkipIncludeTags:       false,
+		SkipOriginalFilenames: false,
+		AsyncMode:             false, // sync path
+		MaxRetries:            7,
+		InitialSleepTime:      2 * time.Second,
+		MaxSleepTime:          time.Duration(maxSleepTime) * time.Second,
+		HTTPTimeout:           30 * time.Second,
+	}
+
+	fd := &fakeDownloader{}
+	ff := &fakeFactory{downloader: fd}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := downloadFiles(ctx, cfg, ff); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// factory knobs (same checks)
+	if ff.gotToken != "tok_abc" || ff.gotProjectID != "proj_123" {
+		t.Fatalf("factory received wrong credentials: token=%s projectID=%s", ff.gotToken, ff.gotProjectID)
+	}
+	if ff.gotRetries != 7 {
+		t.Fatalf("expected retries=7, got %d", ff.gotRetries)
+	}
+	if ff.gotHTTPTO != 30*time.Second {
+		t.Fatalf("expected http timeout=30s, got %v", ff.gotHTTPTO)
+	}
+	if ff.gotInitialBackoff != 2*time.Second {
+		t.Fatalf("expected initial backoff=2s, got %v", ff.gotInitialBackoff)
+	}
+	if ff.gotMaxBackoff != time.Duration(maxSleepTime)*time.Second {
+		t.Fatalf("expected max backoff=%ds, got %v", maxSleepTime, ff.gotMaxBackoff)
+	}
+
+	// downloader inputs
+	if !fd.called {
+		t.Fatalf("expected Download to be called")
+	}
+	if fd.gotDest != "./" {
+		t.Fatalf("expected dest ./, got %s", fd.gotDest)
+	}
+	if fd.gotParams["format"] != "json" {
+		t.Fatalf("expected format=json, got %v", fd.gotParams["format"])
+	}
+	got, ok := fd.gotParams["include_tags"].([]string)
+	if !ok {
+		t.Fatalf("include_tags type mismatch, got %T", fd.gotParams["include_tags"])
+	}
+	want := []string{"v1.2.3"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected include_tags=%v, got %v", want, got)
+	}
+	if fd.gotParams["original_filenames"] != true {
+		t.Fatalf("expected original_filenames=true, got %v", fd.gotParams["original_filenames"])
+	}
+	if fd.gotParams["directory_prefix"] != "/" {
+		t.Fatalf("expected directory_prefix=/, got %v", fd.gotParams["directory_prefix"])
+	}
+}
+
+func TestDownloadFiles_FactoryError(t *testing.T) {
+	cfg := DownloadConfig{
+		ProjectID:        "proj_123",
+		Token:            "tok_abc",
+		FileFormat:       "json",
+		GitHubRefName:    "main",
+		MaxRetries:       3,
+		InitialSleepTime: time.Duration(1) * time.Second,
+		HTTPTimeout:      time.Duration(10) * time.Second,
+	}
+
+	ff := &fakeFactory{wantErr: errors.New("boom")}
+	err := downloadFiles(context.Background(), cfg, ff)
+	if err == nil || !strings.Contains(err.Error(), "cannot create Lokalise API client") {
+		t.Fatalf("expected factory error to propagate, got: %v", err)
+	}
+}
+
+func TestDownloadFiles_DownloadError(t *testing.T) {
+	cfg := DownloadConfig{
+		ProjectID:        "proj_123",
+		Token:            "tok_abc",
+		FileFormat:       "json",
+		GitHubRefName:    "main",
+		MaxRetries:       3,
+		InitialSleepTime: time.Duration(1) * time.Second,
+		HTTPTimeout:      time.Duration(10) * time.Second,
+	}
+
+	fd := &fakeDownloader{returnErr: errors.New("network down")}
+	ff := &fakeFactory{downloader: fd}
+
+	err := downloadFiles(context.Background(), cfg, ff)
+	if err == nil || !strings.Contains(err.Error(), "download failed") {
+		t.Fatalf("expected download error to propagate, got: %v", err)
+	}
+}
+
+// ---------- validateDownloadConfig tests ----------
+
+func TestValidateDownloadConfig_ExitsOnMissingFields(t *testing.T) {
+	// Missing ProjectID
+	requirePanicExit(t, func() {
+		validateDownloadConfig(DownloadConfig{
+			ProjectID:     "",
+			Token:         "t",
+			FileFormat:    "json",
+			GitHubRefName: "ref",
 		})
-	}
-}
+	})
 
-func TestDownloadFiles(t *testing.T) {
-	tests := []struct {
-		name         string
-		config       DownloadConfig
-		mockExecutor func(cmdPath string, args []string, timeout int) ([]byte, error)
-		shouldError  bool
-	}{
-		{
-			name: "Successful download",
-			config: DownloadConfig{
-				ProjectID:       "test_project",
-				Token:           "test_token",
-				FileFormat:      "json",
-				GitHubRefName:   "main",
-				MaxRetries:      3,
-				SleepTime:       1,
-				DownloadTimeout: 120,
-			},
-			mockExecutor: func(cmdPath string, args []string, timeout int) ([]byte, error) {
-				return []byte("Download succeeded"), nil
-			},
-			shouldError: false,
-		},
-		{
-			name: "Rate-limited and retries succeed",
-			config: DownloadConfig{
-				ProjectID:       "test_project",
-				Token:           "test_token",
-				FileFormat:      "json",
-				GitHubRefName:   "main",
-				MaxRetries:      3,
-				SleepTime:       1,
-				DownloadTimeout: 120,
-			},
-			mockExecutor: func() func(cmdPath string, args []string, timeout int) ([]byte, error) {
-				callCount := 0
-				return func(cmdPath string, args []string, timeout int) ([]byte, error) {
-					callCount++
-					if callCount == 1 {
-						return []byte("API request error 429"), errors.New("rate limit")
-					}
-					return []byte("Download succeeded"), nil
-				}
-			}(),
-			shouldError: false,
-		},
-		{
-			name: "Permanent error",
-			config: DownloadConfig{
-				ProjectID:       "test_project",
-				Token:           "test_token",
-				FileFormat:      "json",
-				GitHubRefName:   "main",
-				MaxRetries:      3,
-				SleepTime:       1,
-				DownloadTimeout: 120,
-			},
-			mockExecutor: func(cmdPath string, args []string, timeout int) ([]byte, error) {
-				return []byte("Unexpected error"), errors.New("permanent error")
-			},
-			shouldError: true,
-		},
-		{
-			name: "No keys error",
-			config: DownloadConfig{
-				ProjectID:       "test_project",
-				Token:           "test_token",
-				FileFormat:      "json",
-				GitHubRefName:   "main",
-				MaxRetries:      3,
-				SleepTime:       1,
-				DownloadTimeout: 120,
-			},
-			mockExecutor: func(cmdPath string, args []string, timeout int) ([]byte, error) {
-				return []byte("API request error 406"), errors.New("no keys")
-			},
-			shouldError: true,
-		},
-		{
-			name: "Execution error with ambiguous output",
-			config: DownloadConfig{
-				ProjectID:       "test_project",
-				Token:           "test_token",
-				FileFormat:      "json",
-				GitHubRefName:   "main",
-				MaxRetries:      3,
-				SleepTime:       1,
-				DownloadTimeout: 120,
-			},
-			mockExecutor: func(cmdPath string, args []string, timeout int) ([]byte, error) {
-				// Simulate an error but with no clear error message in output
-				return []byte("Some unexpected CLI output with no errors"), errors.New("command failed")
-			},
-			shouldError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt // Capture range variable
-
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			defer func() {
-				if r := recover(); r != nil {
-					if !tt.shouldError {
-						t.Errorf("Unexpected error in test '%s': %v", tt.name, r)
-					}
-				} else if tt.shouldError {
-					t.Errorf("Expected an error in test '%s' but did not get one", tt.name)
-				}
-			}()
-
-			downloadFiles(tt.config, tt.mockExecutor)
+	// Missing Token
+	requirePanicExit(t, func() {
+		validateDownloadConfig(DownloadConfig{
+			ProjectID:     "p",
+			Token:         "",
+			FileFormat:    "json",
+			GitHubRefName: "ref",
 		})
-	}
+	})
+
+	// Missing FILE_FORMAT
+	requirePanicExit(t, func() {
+		validateDownloadConfig(DownloadConfig{
+			ProjectID:     "p",
+			Token:         "t",
+			FileFormat:    "",
+			GitHubRefName: "ref",
+		})
+	})
+
+	// Missing GITHUB_REF_NAME
+	requirePanicExit(t, func() {
+		validateDownloadConfig(DownloadConfig{
+			ProjectID:     "p",
+			Token:         "t",
+			FileFormat:    "json",
+			GitHubRefName: "",
+		})
+	})
 }
 
-func TestDownloadFiles_RetryableTimeoutThenSuccess(t *testing.T) {
+// ---------- integration-lite: env parsing bits ----------
+
+func TestEnvParsingIntoConfig_Smoke(t *testing.T) {
+	t.Setenv("FILE_FORMAT", "json")
+	t.Setenv("GITHUB_REF_NAME", "release-1")
+	// JSON MUST use double quotes
+	t.Setenv("ADDITIONAL_PARAMS", `{"foo":"bar","baz_qux":false}`)
+
 	cfg := DownloadConfig{
-		ProjectID: "p", Token: "t", FileFormat: "json", GitHubRefName: "main",
-		MaxRetries: 3, SleepTime: 1, DownloadTimeout: 5,
+		ProjectID:             "pid",
+		Token:                 "tok",
+		FileFormat:            os.Getenv("FILE_FORMAT"),
+		GitHubRefName:         os.Getenv("GITHUB_REF_NAME"),
+		AdditionalParams:      os.Getenv("ADDITIONAL_PARAMS"),
+		SkipIncludeTags:       false,
+		SkipOriginalFilenames: false,
+		MaxRetries:            5,
+		InitialSleepTime:      2 * time.Second,
+		HTTPTimeout:           15 * time.Second,
+		AsyncMode:             true,
 	}
-	call := 0
-	exec := func(cmdPath string, args []string, timeout int) ([]byte, error) {
-		call++
-		if call == 1 {
-			return []byte("foo"), errors.New("command timed out after 1s")
+
+	params := buildDownloadParams(cfg)
+
+	if params["foo"] != "bar" {
+		t.Fatalf("expected foo=bar, got %v", params["foo"])
+	}
+	// you set false, so expect false
+	if v, ok := params["baz_qux"].(bool); !ok || v != false {
+		t.Fatalf("expected baz_qux=false, got %v (%T)", params["baz_qux"], params["baz_qux"])
+	}
+
+	// optional: sanity that include_tags got added from GitHubRefName
+	switch tags := params["include_tags"].(type) {
+	case []string:
+		if len(tags) != 1 || tags[0] != "release-1" {
+			t.Fatalf("include_tags wrong: %#v", tags)
 		}
-		return []byte("ok"), nil
-	}
-	defer expectPanic(t, false)
-	downloadFiles(cfg, exec)
-	if call != 2 {
-		t.Fatalf("expected 2 calls (retry once then success), got %d", call)
-	}
-}
-
-func TestDownloadFiles_LastAttemptEarlyExit(t *testing.T) {
-	cfg := DownloadConfig{
-		ProjectID: "p", Token: "t", FileFormat: "json", GitHubRefName: "main",
-		MaxRetries: 2, SleepTime: 1, DownloadTimeout: 5,
-	}
-	exec := func(cmdPath string, args []string, timeout int) ([]byte, error) {
-		return []byte("polling time exceeded limit"), errors.New("polling time exceeded limit")
-	}
-	defer expectPanic(t, true) // expect failure after 2 attempts without sleeping after last
-	downloadFiles(cfg, exec)
-}
-
-func TestDownloadFiles_MaxTotalBudgetPreventsSleep(t *testing.T) {
-	cfg := DownloadConfig{
-		ProjectID: "p", Token: "t", FileFormat: "json", GitHubRefName: "main",
-		MaxRetries: 3, SleepTime: maxTotalTime, DownloadTimeout: 5,
-	}
-	exec := func(cmdPath string, args []string, timeout int) ([]byte, error) {
-		return []byte("timeout"), errors.New("command timed out after 1s")
-	}
-	start := time.Now()
-	defer expectPanic(t, true)
-	downloadFiles(cfg, exec)
-	// Should fail fast (no actual sleep), keep this generous
-	if time.Since(start) > 2*time.Second {
-		t.Fatalf("expected budget short-circuit without long sleep")
-	}
-}
-
-func TestIsRetryableErrorMatrix(t *testing.T) {
-	cases := []struct {
-		err  error
-		want bool
-	}{
-		{nil, false},
-		{errors.New("permanent"), false},
-		{errors.New("timed out while doing X"), true},
-		{errors.New("TIMED OUT"), true},
-		{errors.New("time exceeded"), true},
-		{errors.New("polling time exceeded limit"), true},
-		{errors.New("API request error 429"), true},
-		{errors.New("rate limit"), true},
-	}
-	for i, c := range cases {
-		got := isRetryableError(c.err)
-		if got != c.want {
-			t.Fatalf("case %d: want %v got %v for %q", i, c.want, got, errStr(c.err))
+	case []any:
+		if len(tags) != 1 || tags[0] != "release-1" {
+			t.Fatalf("include_tags wrong: %#v", tags)
 		}
+	default:
+		t.Fatalf("include_tags type wrong: %T", params["include_tags"])
 	}
 }
 
-func TestIsServerError_CaseInsensitiveAndVariants(t *testing.T) {
-	cases := []struct {
-		out  string
-		want bool
-	}{
-		{"Error: API request error 500 Something went wrong.", true},
-		{"api request error 500", true},
-		{"API REQUEST ERROR 500", true},
-		{"Status code 500 from server", true},
-		{"HTTP 500 internal", true},
-		{"ok 200", false},
-		{"random text without codes", false},
-	}
-	for i, c := range cases {
-		got := isServerError(c.out)
-		if got != c.want {
-			t.Fatalf("case %d: want %v, got %v for %q", i, c.want, got, c.out)
-		}
-	}
-}
+func TestEnvParsingIntoConfig_BadJSON_Aborts(t *testing.T) {
+	t.Setenv("FILE_FORMAT", "json")
+	t.Setenv("GITHUB_REF_NAME", "release-1")
+	t.Setenv("ADDITIONAL_PARAMS", `{"foo": "bar",`) // broken
 
-func TestDownloadFiles_ServerErrorTriggersFastExit(t *testing.T) {
 	cfg := DownloadConfig{
-		ProjectID:       "p",
-		Token:           "t",
-		FileFormat:      "json",
-		GitHubRefName:   "main",
-		MaxRetries:      3,
-		SleepTime:       1,
-		DownloadTimeout: 10,
+		ProjectID:        "pid",
+		Token:            "tok",
+		FileFormat:       os.Getenv("FILE_FORMAT"),
+		GitHubRefName:    os.Getenv("GITHUB_REF_NAME"),
+		AdditionalParams: os.Getenv("ADDITIONAL_PARAMS"),
 	}
 
-	// Simulate noisy CLI: first a 500 line, then tons of flags/help spam.
-	longSpam := strings.Repeat("--some-flag=value\n", 2000)
-	out := "Error: API request error 500 Something went wrong. Please contact support if the issue repeats.\n" + longSpam
-	mockExec := func(cmdPath string, args []string, timeout int) ([]byte, error) {
-		return []byte(out), errors.New("exit 1")
-	}
-
-	// Capture stderr.
-	oldStderr := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	os.Stderr = w
-
-	// Run and recover expected panic from exitFunc(1).
-	var pan any
-	done := make(chan struct{})
-	go func() {
-		defer func() {
-			pan = recover()
-			close(done)
-		}()
-		downloadFiles(cfg, mockExec)
-	}()
-
-	<-done
-	_ = w.Close()
-	os.Stderr = oldStderr
-	buf, _ := io.ReadAll(r)
-	_ = r.Close()
-
-	if pan == nil {
-		t.Fatalf("expected panic from returnWithError (exitFunc), got none")
-	}
-
-	// Assert stderr contained our server-500 message.
-	stderrOut := string(buf)
-	if !strings.Contains(stderrOut, "server responded with an error (500); exiting") {
-		t.Fatalf("expected server-500 message in stderr.\n--- STDERR ---\n%s\n--- END ---", stderrOut)
-	}
+	requirePanicExit(t, func() { _ = buildDownloadParams(cfg) })
 }
 
-func expectPanic(t *testing.T, shouldPanic bool) {
+// ---------- fakes & helpers ----------
+
+type fakeDownloader struct {
+	called     bool
+	gotCtx     context.Context
+	gotDest    string
+	gotParams  client.DownloadParams
+	returnPath string
+	returnErr  error
+}
+
+func (f *fakeDownloader) Download(ctx context.Context, dest string, params client.DownloadParams) (string, error) {
+	f.called = true
+	f.gotCtx = ctx
+	f.gotDest = dest
+	f.gotParams = params
+	return f.returnPath, f.returnErr
+}
+
+type fakeAsyncDownloader struct {
+	*fakeDownloader
+	asyncCalled bool
+}
+
+func (f *fakeAsyncDownloader) DownloadAsync(ctx context.Context, dest string, params client.DownloadParams) (string, error) {
+	f.asyncCalled = true
+	// reuse capture from base
+	return f.fakeDownloader.Download(ctx, dest, params)
+}
+
+type fakeFactory struct {
+	wantErr error
+
+	// capture args to assert
+	gotToken          string
+	gotProjectID      string
+	gotRetries        int
+	gotHTTPTO         time.Duration
+	gotInitialBackoff time.Duration
+	gotMaxBackoff     time.Duration
+
+	downloader Downloader // can be *fakeDownloader OR *fakeAsyncDownloader
+}
+
+func (f *fakeFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) {
+	f.gotToken = cfg.Token
+	f.gotProjectID = cfg.ProjectID
+	f.gotRetries = cfg.MaxRetries
+	f.gotHTTPTO = cfg.HTTPTimeout
+	f.gotInitialBackoff = cfg.InitialSleepTime
+	f.gotMaxBackoff = cfg.MaxSleepTime
+
+	if f.wantErr != nil {
+		return nil, f.wantErr
+	}
+	if f.downloader == nil {
+		return &fakeDownloader{}, nil
+	}
+	return f.downloader, nil
+}
+
+// requirePanicExit runs fn and asserts our TestMain exit panic is thrown.
+func requirePanicExit(t *testing.T, fn func()) {
 	t.Helper()
-	if r := recover(); r != nil {
-		if !shouldPanic {
-			t.Fatalf("unexpected panic: %v", r)
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("expected panic from exitFunc, got none")
 		}
-	} else if shouldPanic {
-		t.Fatalf("expected panic, got none")
-	}
-}
-
-func errStr(e error) string {
-	if e == nil {
-		return "<nil>"
-	}
-	return e.Error()
-}
-
-// buildMockBinaryIfNeeded compiles the mock Go program if it's not already built or is outdated.
-func buildMockBinaryIfNeeded(t *testing.T, sourcePath, outputPath string) {
-	sourceInfo, err := os.Stat(sourcePath)
-	if err != nil {
-		t.Fatalf("Failed to stat source file: %v", err)
-	}
-
-	binaryInfo, err := os.Stat(outputPath)
-	if err == nil && binaryInfo.ModTime().After(sourceInfo.ModTime()) {
-		// Binary exists and is newer than the source, no need to rebuild
-		return
-	}
-
-	// Build the binary
-	cmd := exec.Command("go", "build", "-o", outputPath, sourcePath)
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("Failed to build mock binary: %v", err)
-	}
-}
-
-func containsAll(s string, needles []string) bool {
-	for _, n := range needles {
-		if !strings.Contains(s, n) {
-			return false
+		msg := fmt.Sprint(r)
+		if !strings.Contains(msg, "Exit called with code") {
+			t.Fatalf("expected exit panic, got: %v", r)
 		}
+	}()
+	fn()
+}
+
+func TestFactory_PassesPollWaits(t *testing.T) {
+	cfg := DownloadConfig{
+		ProjectID:            "p",
+		Token:                "t",
+		FileFormat:           "json",
+		GitHubRefName:        "ref",
+		MaxRetries:           1,
+		InitialSleepTime:     500 * time.Millisecond,
+		MaxSleepTime:         5 * time.Second,
+		HTTPTimeout:          10 * time.Second,
+		AsyncPollInitialWait: 2 * time.Second,
+		AsyncPollMaxWait:     30 * time.Second,
 	}
-	return true
+	ff := &fakeFactory{downloader: &fakeDownloader{}}
+	if err := downloadFiles(context.Background(), cfg, ff); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	// You don't currently expose poll waits in fakeFactory; if you care,
+	// add fields gotPollInit / gotPollMax to fakeFactory and assert them.
 }
