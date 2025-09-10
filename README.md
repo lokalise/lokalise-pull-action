@@ -9,6 +9,8 @@ GitHub action to download translation files from [Lokalise TMS](https://lokalise
 
 To upload translation files from GitHub to Lokalise, use the [lokalise-push-action](https://github.com/lokalise/lokalise-push-action).
 
+*To find documentation for the **stable version 3**, [browse the v3 tag](https://github.com/lokalise/lokalise-pull-action/tree/v3).*
+
 ## Usage
 
 Use this action in the following way:
@@ -181,16 +183,19 @@ with open(file_path, "w", encoding="utf-8") as f:
 - `download_timeout` — Timeout in seconds for the whole download and unzip operation. Defaults to `600`.
 
 ### Git identity
+
 - `git_user_name` — Optional Git username for commits. Defaults to the GitHub actor of the workflow run. Handy for using a specific identity (e.g., "Localization Bot").
 - `git_user_email` — Optional Git email for commits. Defaults to a noreply address based on the username (e.g., `username@users.noreply.github.com`). Useful for cleaner commit metadata or bot identities.
 
 ### Commit and branch control
+
 - `git_commit_message` — Custom commit message. Defaults to "Translations update".
 - `override_branch_name` — Static branch name instead of an auto-generated one. Helps update the same PR across runs (e.g., always `lokalise-sync`). If the branch exists, it’s updated rather than recreated.
 - `force_push` — Force push to the remote branch. Use with caution, as it overwrites history. Defaults to `false`.
-- `temp_branch_prefix` — Prefix for temporary branch names (e.g., `lok` → branch starts with `lok`). Defaults to `lok`.
+- `temp_branch_prefix` — Prefix for temporary branch names (e.g., `lok` — branch starts with `lok`). Defaults to `lok`.
 
 ### Pull request details
+
 - `pr_title` — Title for the PR. Defaults to "Translations update".
 - `pr_body` — Body text for the PR. Defaults to "This pull request updates translations from Lokalise".
 - `pr_labels` — Comma-separated labels to apply to the PR.
@@ -198,11 +203,13 @@ with open(file_path, "w", encoding="utf-8") as f:
 - `pr_assignees` — Comma-separated GitHub usernames to assign to the PR. Defaults to none.
 
 ### Review requests
+
 - `pr_reviewers` — Comma-separated GitHub usernames to request as reviewers. Only individual users can be specified.
 - `pr_teams_reviewers` — Comma-separated team slugs (e.g., `backend`, `qa`) from the same org as the repo.  
   + Requires a token with `repo` and `read:org` scopes if the default `GITHUB_TOKEN` is restricted.
 
 ### Authentication
+
 - `custom_github_token` — Optional token for creating/updating pull requests. Defaults to `GITHUB_TOKEN`. Use when elevated permissions are needed (assigning reviewers, interacting with protected branches, cross-repo changes). Keep secret.
 
 ### Platform support
@@ -257,7 +264,7 @@ For more information on assumptions, refer to the [Assumptions and defaults](htt
 
 ### Default parameters for the pull action
 
-By default, the following command-line parameters are set when downloading files from Lokalise:
+By default, the following headers and parameters are set when downloading files from Lokalise:
 
 - `X-Api-Token` header — Derived from the `api_token` parameter.
 - `project_id` GET param — Derived from the `project_id` parameter.
