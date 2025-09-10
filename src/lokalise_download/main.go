@@ -1,17 +1,16 @@
 package main
 
 import (
-	"bufio"
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
-	"github.com/bodrovis/lokalise-actions-common/v2/tailring"
+	"github.com/bodrovis/lokex/client"
 )
 
 // exitFunc is a function variable that defaults to os.Exit.
@@ -19,11 +18,13 @@ import (
 var exitFunc = os.Exit
 
 const (
-	defaultMaxRetries      = 5   // Default number of retries for rate-limited requests
+	defaultMaxRetries      = 3   // Default number of retries for rate-limited requests
 	defaultSleepTime       = 1   // Default initial sleep time in seconds between retries
 	maxSleepTime           = 60  // Maximum sleep time in seconds between retries
-	maxTotalTime           = 300 // Maximum total time in seconds for all retries
-	defaultDownloadTimeout = 120 // Timeout for the download script
+	defaultDownloadTimeout = 600 // Maximum total time in seconds for the whole operation
+	defaultHTTPTimeout     = 120 // Timeout for the HTTP calls
+	defaultPollInitialWait = 1
+	defaultPollMaxWait     = 120
 )
 
 // DownloadConfig holds all the necessary configuration for downloading files
@@ -36,9 +37,43 @@ type DownloadConfig struct {
 	SkipIncludeTags       bool
 	SkipOriginalFilenames bool
 	MaxRetries            int
-	SleepTime             int
-	DownloadTimeout       int
+	InitialSleepTime      time.Duration
+	MaxSleepTime          time.Duration
+	HTTPTimeout           time.Duration
+	DownloadTimeout       time.Duration
 	AsyncMode             bool
+	AsyncPollInitialWait  time.Duration
+	AsyncPollMaxWait      time.Duration
+}
+
+type Downloader interface {
+	Download(ctx context.Context, dest string, params client.DownloadParams) (string, error)
+}
+
+type AsyncDownloader interface {
+	DownloadAsync(ctx context.Context, dest string, params client.DownloadParams) (string, error)
+}
+
+type ClientFactory interface {
+	NewDownloader(cfg DownloadConfig) (Downloader, error)
+}
+
+type LokaliseFactory struct{}
+
+func (f *LokaliseFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) {
+	lokaliseClient, err := client.NewClient(
+		cfg.Token,
+		cfg.ProjectID,
+		client.WithMaxRetries(cfg.MaxRetries),
+		client.WithHTTPTimeout(cfg.HTTPTimeout),
+		client.WithBackoff(cfg.InitialSleepTime, cfg.MaxSleepTime),
+		client.WithPollWait(cfg.AsyncPollInitialWait, cfg.AsyncPollMaxWait),
+		client.WithUserAgent("lokalise-pull-action/lokex"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return client.NewDownloader(lokaliseClient), nil
 }
 
 func main() {
@@ -66,20 +101,28 @@ func main() {
 		Token:                 os.Args[2],
 		FileFormat:            os.Getenv("FILE_FORMAT"),
 		GitHubRefName:         os.Getenv("GITHUB_REF_NAME"),
-		AdditionalParams:      os.Getenv("CLI_ADD_PARAMS"),
+		AdditionalParams:      os.Getenv("ADDITIONAL_PARAMS"),
 		SkipIncludeTags:       skipIncludeTags,
 		SkipOriginalFilenames: skipOriginalFilenames,
 		AsyncMode:             asyncMode,
 		MaxRetries:            parsers.ParseUintEnv("MAX_RETRIES", defaultMaxRetries),
-		SleepTime:             parsers.ParseUintEnv("SLEEP_TIME", defaultSleepTime),
-		DownloadTimeout:       parsers.ParseUintEnv("DOWNLOAD_TIMEOUT", defaultDownloadTimeout),
+		InitialSleepTime:      time.Duration(parsers.ParseUintEnv("SLEEP_TIME", defaultSleepTime)) * time.Second,
+		MaxSleepTime:          time.Duration(maxSleepTime) * time.Second,
+		HTTPTimeout:           time.Duration(parsers.ParseUintEnv("HTTP_TIMEOUT", defaultHTTPTimeout)) * time.Second,
+		DownloadTimeout:       time.Duration(parsers.ParseUintEnv("DOWNLOAD_TIMEOUT", defaultDownloadTimeout)) * time.Second,
+		AsyncPollInitialWait:  time.Duration(parsers.ParseUintEnv("ASYNC_POLL_INITIAL_WAIT", defaultPollInitialWait)) * time.Second,
+		AsyncPollMaxWait:      time.Duration(parsers.ParseUintEnv("ASYNC_POLL_MAX_WAIT", defaultPollMaxWait)) * time.Second,
 	}
 
-	// Validate the configuration
 	validateDownloadConfig(config)
 
-	// Start the download process
-	downloadFiles(config, executeDownload)
+	ctx, cancel := context.WithTimeout(context.Background(), config.DownloadTimeout)
+	defer cancel()
+
+	err = downloadFiles(ctx, config, &LokaliseFactory{})
+	if err != nil {
+		returnWithError(err.Error())
+	}
 }
 
 // validateDownloadConfig ensures the configuration has all necessary fields
@@ -98,199 +141,66 @@ func validateDownloadConfig(config DownloadConfig) {
 	}
 }
 
-// executeDownload runs the lokalise2 CLI to download files with a timeout
-func executeDownload(cmdPath string, args []string, downloadTimeout int) ([]byte, error) {
-	timeout := time.Duration(downloadTimeout) * time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, cmdPath, args...)
-
-	// Separate tails so stderr spam won't evict stdout (and vice versa).
-	rbErr := tailring.NewKB(64) // stderr gets more room
-	rbOut := tailring.NewKB(16) // stdout can be smaller
-
-	cmd.Stdout = tailring.Tee(os.Stdout, rbOut)
-	cmd.Stderr = tailring.Tee(os.Stderr, rbErr)
-
-	err := cmd.Run()
-
-	// Merge for the caller (stderr first so errors are up front).
-	combined := append(rbErr.Bytes(), rbOut.Bytes()...)
-
-	// Timeouts
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return combined, fmt.Errorf("command timed out after %ds", downloadTimeout)
-	}
-
-	// Non-zero exit: wrap with stderr tail so err.Error() always contains the real error.
-	if err != nil {
-		var ee *exec.ExitError
-		exit := ""
-		if errors.As(err, &ee) {
-			exit = fmt.Sprintf(" (exit %d)", ee.ExitCode())
-		}
-		stderrTail := strings.TrimSpace(rbErr.String())
-		if stderrTail != "" {
-			return combined, fmt.Errorf("command failed%s: %s: %w", exit, stderrTail, err)
-		}
-		// fallback if somehow no stderr
-		return combined, fmt.Errorf("command failed%s: %w", exit, err)
-	}
-
-	return combined, nil
-}
-
-// constructDownloadArgs builds the arguments for the lokalise2 CLI tool
-func constructDownloadArgs(config DownloadConfig) []string {
-	args := []string{
-		fmt.Sprintf("--token=%s", config.Token),
-		fmt.Sprintf("--project-id=%s", config.ProjectID),
-		"file", "download",
-		fmt.Sprintf("--format=%s", config.FileFormat),
-	}
-
-	if config.AsyncMode {
-		args = append(args, "--async")
+func buildDownloadParams(config DownloadConfig) client.DownloadParams {
+	params := client.DownloadParams{
+		"format": config.FileFormat,
 	}
 
 	if !config.SkipOriginalFilenames {
-		args = append(args, "--original-filenames=true", "--directory-prefix=/")
+		params["original_filenames"] = true
+		params["directory_prefix"] = "/"
 	}
 
 	if !config.SkipIncludeTags {
-		args = append(args, fmt.Sprintf("--include-tags=%s", config.GitHubRefName))
+		params["include_tags"] = []string{config.GitHubRefName}
 	}
 
-	if config.AdditionalParams != "" {
-		scanner := bufio.NewScanner(strings.NewReader(config.AdditionalParams))
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line != "" {
-				args = append(args, line)
-			}
+	// parse additional params
+	ap := strings.TrimSpace(config.AdditionalParams)
+	if ap != "" {
+		add, err := parseJSONMap(ap)
+		if err != nil {
+			returnWithError("Invalid additional_params (must be JSON object): " + err.Error())
 		}
-		if err := scanner.Err(); err != nil {
-			returnWithError(fmt.Sprintf("Failed to parse additional parameters: %v", err))
-		}
+		maps.Copy(params, add)
 	}
 
-	return args
+	return params
 }
 
-// downloadFiles attempts to download files from Lokalise using the lokalise2 CLI tool.
-// It handles rate limiting by retrying with exponential backoff and checks for specific API errors.
-func downloadFiles(config DownloadConfig, downloadExecutor func(cmdPath string, args []string, timeout int) ([]byte, error)) {
+func parseJSONMap(s string) (map[string]any, error) {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func downloadFiles(ctx context.Context, cfg DownloadConfig, factory ClientFactory) error {
 	fmt.Println("Starting download from Lokalise")
 
-	args := constructDownloadArgs(config)
+	dl, err := factory.NewDownloader(cfg)
+	if err != nil {
+		return fmt.Errorf("cannot create Lokalise API client: %w", err)
+	}
 
-	startTime := time.Now()
-	sleepTime := config.SleepTime
-	maxRetries := config.MaxRetries
+	params := buildDownloadParams(cfg)
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		fmt.Printf("Attempt %d of %d\n", attempt, maxRetries)
-
-		outputBytes, err := downloadExecutor("./bin/lokalise2", args, config.DownloadTimeout)
-		output := string(outputBytes)
-		errStr := ""
-		if err != nil {
-			errStr = err.Error() // includes stderr tail from executeDownload()
-		}
-
-		// 500s should fail fast
-		if isServerError(output) || isServerError(errStr) {
-			returnWithError("server responded with an error (500); exiting")
-		}
-
-		// 406 (no keys) should also bail fast
-		if isNoKeysError(output) || isNoKeysError(errStr) {
-			returnWithError("no keys for export with current settings; exiting")
-		}
-
-		// success?
-		if err == nil {
-			fmt.Println("Successfully downloaded files.")
-			return
-		}
-		// retryable?
-		if isRetryableError(err) {
-			// last attempt? bail, don't sleep
-			if attempt == maxRetries {
-				returnWithError(fmt.Sprintf("Failed to download files after %d attempts. Last error: %v", attempt, err))
+	if cfg.AsyncMode {
+		if ad, ok := dl.(AsyncDownloader); ok {
+			if _, err := ad.DownloadAsync(ctx, "./", params); err != nil {
+				return fmt.Errorf("download failed: %w", err)
 			}
-
-			// will we blow the total budget if we sleep?
-			elapsed := time.Since(startTime)
-			if elapsed+time.Duration(sleepTime)*time.Second >= time.Duration(maxTotalTime)*time.Second {
-				returnWithError(fmt.Sprintf("Max retry time exceeded (%d seconds); exiting after %d attempts.", maxTotalTime, attempt))
-			}
-
-			fmt.Printf("Retryable error on attempt %d (%v); sleeping %ds before retry...\n", attempt, err, sleepTime)
-			time.Sleep(time.Duration(sleepTime) * time.Second)
-			sleepTime = min(sleepTime*2, maxSleepTime)
-			continue
+			return nil
 		}
-
-		fmt.Fprintf(os.Stderr, "Unexpected error during download on attempt %d: %s\n", attempt, output)
-		returnWithError(fmt.Sprintf("Permanent error during download: %v", err))
+		// should never happen in real code
+		return fmt.Errorf("async mode requested, but downloader doesn't support DownloadAsync")
 	}
 
-	returnWithError(fmt.Sprintf("Failed to download files after %d attempts.", maxRetries))
-}
-
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
+	if _, err := dl.Download(ctx, "./", params); err != nil {
+		return fmt.Errorf("download failed: %w", err)
 	}
-
-	if isRateLimitError(err) {
-		return true
-	}
-
-	// Lowercase the message for case-insensitive matching
-	msg := strings.ToLower(err.Error())
-
-	// Timeouts or transient network failures
-	if strings.Contains(msg, "command timed out") ||
-		strings.Contains(msg, "timed out") ||
-		strings.Contains(msg, "context deadline exceeded") ||
-		strings.Contains(msg, "time exceeded") ||
-		strings.Contains(msg, "polling time exceeded limit") {
-		return true
-	}
-
-	return false
-}
-
-func isRateLimitError(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := strings.ToLower(err.Error())
-	return strings.Contains(s, "api request error 429") ||
-		strings.Contains(s, "request error 429") ||
-		strings.Contains(s, "rate limit")
-}
-
-func isServerError(s string) bool {
-	x := strings.ToLower(s)
-	return strings.Contains(x, "api request error 500") ||
-		strings.Contains(x, "status code 500") ||
-		strings.Contains(x, "http 500")
-}
-
-func isNoKeysError(s string) bool {
-	return strings.Contains(strings.ToLower(s), "406 no keys for export")
-}
-
-// min returns the smaller of two integers.
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	return nil
 }
 
 // returnWithError prints an error message to stderr and exits the program with a non-zero status code.
