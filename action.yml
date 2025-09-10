@@ -27,7 +27,7 @@ inputs:
     required: false
     default: ''
   additional_params:
-    description: 'Additional parameters for Lokalise CLI on pull. Find all supported options at https://github.com/lokalise/lokalise-cli-2-go/blob/main/docs/lokalise2_file_download.md'
+    description: 'Additional parameters for Lokalise API on pull. Find all supported options at https://developers.lokalise.com/reference/download-files'
     required: false
     default: ''
   temp_branch_prefix:
@@ -79,21 +79,33 @@ inputs:
     required: false
     default: ''
   max_retries:
-    description: 'Maximum number of retries on rate limit errors'
+    description: 'Maximum number of retries on rate limit and other retryable errors'
     required: false
     default: 3
   sleep_on_retry:
     description: 'Number of seconds to sleep before retrying'
     required: false
     default: 1
-  download_timeout:
-    description: 'Timeout for the download operation (in seconds)'
+  http_timeout:
+    description: 'Timeout for HTTP calls (in seconds)'
     required: false
     default: 120
+  download_timeout:
+    description: 'Timeout for the whole download operation (in seconds)'
+    required: false
+    default: 600
   async_mode:
     description: 'Use async mode for translations download'
     required: false
     default: 'false'
+  async_poll_initial_wait:
+    description: 'Number of seconds to wait before polling the async download process for the first time'
+    required: false
+    default: 1
+  async_poll_max_wait:
+    description: 'Timeout for polling the async download process'
+    required: false
+    default: 120
   os_platform:
     description: 'Target platform for the binary (linux_amd64, linux_arm64, mac_amd64, mac_arm64)'
     required: false
@@ -157,31 +169,27 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Install Lokalise CLIv2
-      # lokalise/install-lokalise-cli-v2@v2.0.0
-      uses: lokalise/install-lokalise-cli-v2@e3dab54bcb8e779dab39712a65ee01a4d399871d
-      with:
-        target-version: 3.1.4
-        add-to-path: false
-
     - name: Pull translation files from Lokalise
       id: pull-files
       shell: bash
       env:
-        CLI_ADD_PARAMS: ${{ inputs.additional_params }}
+        ADDITIONAL_PARAMS: ${{ inputs.additional_params }}
         MAX_RETRIES: ${{ inputs.max_retries }}
         SLEEP_TIME: ${{ inputs.sleep_on_retry }}
         FILE_FORMAT: ${{ inputs.file_format }}
         FILE_EXT: ${{ inputs.file_ext }}
-        TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
-        BASE_LANG: "${{ inputs.base_lang }}"
-        ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
-        FLAT_NAMING: "${{ inputs.flat_naming }}"
-        DOWNLOAD_TIMEOUT: "${{ inputs.download_timeout }}"
-        SKIP_INCLUDE_TAGS: "${{ inputs.skip_include_tags }}"
-        SKIP_ORIGINAL_FILENAMES: "${{ inputs.skip_original_filenames }}"
-        PLATFORM: "${{ inputs.os_platform }}"
-        ASYNC_MODE: "${{ inputs.async_mode }}"
+        TRANSLATIONS_PATH: ${{ inputs.translations_path }}
+        BASE_LANG: ${{ inputs.base_lang }}
+        ALWAYS_PULL_BASE: ${{ inputs.always_pull_base }}
+        FLAT_NAMING: ${{ inputs.flat_naming }}
+        HTTP_TIMEOUT: ${{ inputs.http_timeout }}
+        DOWNLOAD_TIMEOUT: ${{ inputs.download_timeout }}
+        SKIP_INCLUDE_TAGS: ${{ inputs.skip_include_tags }}
+        SKIP_ORIGINAL_FILENAMES: ${{ inputs.skip_original_filenames }}
+        PLATFORM: ${{ inputs.os_platform }}
+        ASYNC_MODE: ${{ inputs.async_mode }}
+        ASYNC_POLL_INITIAL_WAIT: ${{ inputs.async_poll_initial_wait }}
+        ASYNC_POLL_MAX_WAIT: ${{ inputs.async_poll_max_wait }}
       run: |
         set -euo pipefail
 
