@@ -101,7 +101,17 @@ You'll need to provide some parameters for the action. These can be set as envir
 - `translations_path` — One or more paths to your translation files. Do not provide the actual filenames here. For example, if your translations are stored in the `locales` folder at the project root, use `locales`. Defaults to `locales`.
 - `file_format` — Defines the format of your translation files, such as `json` for JSON files. Defaults to `json`. This format determines how translation files are processed and also influences the file extension used when searching for them. However, some specific formats, such as `json_structured`, may still be downloaded with a generic `.json` extension. If you're using such a format, make sure to set the `file_ext` parameter explicitly to match the correct extension for your files.
 - `base_lang` — Your project base language, such as `en` for English. Defaults to `en`.
-- `file_ext` (*not strictly mandatory but still recommended*) — Custom file extension to use when searching for translation files (without leading dot, for example `json` or `yml`). By default, the extension is inferred from the `file_format` value. However, for certain formats (e.g., `json_structured`), the downloaded files may still have a generic extension. In such cases, this parameter allows specifying the correct extension manually to ensure proper file matching.
+- `file_ext` (*not strictly mandatory but recommended*) — One or more custom file extensions to use when searching for translation files (without leading dot, e.g. `json` or `yml`). By default, the extension is inferred from the `file_format` value. However, for certain formats (e.g. `json_structured`) or mixed bundles (e.g. iOS, which uses both `.strings` and `.stringsdict`), the downloaded files may still have a generic extension or require multiple extensions. In such cases, this parameter allows specifying the correct extension(s) manually to ensure proper file matching.
+
+```yaml
+file_ext: json
+
+# Or (useful when the bundle contains miltiple extensions)
+
+file_ext: |
+  strings
+  stringsdict
+```
 
 ### Download options
 

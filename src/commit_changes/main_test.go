@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -58,7 +59,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				GitHubSHA:          "123456",
 				GitHubRefName:      "main",
 				TempBranchPrefix:   "temp",
-				FileExt:            "json",
+				FileExt:            []string{"json"},
 				BaseLang:           "en",
 				FlatNaming:         true,
 				AlwaysPullBase:     false,
@@ -90,7 +91,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				GitHubSHA:          "123456",
 				GitHubRefName:      "main",
 				TempBranchPrefix:   "temp",
-				FileExt:            "json",
+				FileExt:            []string{"json"},
 				BaseLang:           "en",
 				FlatNaming:         true,
 				AlwaysPullBase:     false,
@@ -120,7 +121,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				GitHubSHA:        "123456",
 				GitHubRefName:    "main",
 				TempBranchPrefix: "temp",
-				FileExt:          "json",
+				FileExt:          []string{"json"},
 				BaseLang:         "en",
 				FlatNaming:       true,
 				AlwaysPullBase:   false,
@@ -158,6 +159,32 @@ func TestEnvVarsToConfig(t *testing.T) {
 			},
 			expectError:     true,
 			expectedErrText: "FLAT_NAMING",
+		},
+		{
+			name: "FILE_EXT multiple values",
+			envVars: map[string]string{
+				"GITHUB_ACTOR":       "test_actor",
+				"GITHUB_SHA":         "123456",
+				"GITHUB_REF_NAME":    "main",
+				"TEMP_BRANCH_PREFIX": "temp",
+				"TRANSLATIONS_PATH":  "translations/",
+				"FILE_EXT":           "strings\nstringsdict",
+				"BASE_LANG":          "en",
+				"FLAT_NAMING":        "false",
+				"ALWAYS_PULL_BASE":   "true",
+			},
+			expectedConfig: &Config{
+				GitHubActor:      "test_actor",
+				GitHubSHA:        "123456",
+				GitHubRefName:    "main",
+				TempBranchPrefix: "temp",
+				FileExt:          []string{"strings", "stringsdict"},
+				BaseLang:         "en",
+				FlatNaming:       false,
+				AlwaysPullBase:   true,
+				GitCommitMessage: "Translations update",
+			},
+			expectError: false,
 		},
 	}
 
@@ -206,7 +233,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				t.Errorf("Expected config but got nil")
 				return
 			}
-			if *config != *tt.expectedConfig {
+			if !reflect.DeepEqual(config, tt.expectedConfig) {
 				t.Errorf("Expected config %+v but got %+v", *tt.expectedConfig, *config)
 			}
 		})
@@ -428,7 +455,7 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Flat naming with AlwaysPullBase = true, single path",
 			config: &Config{
-				FileExt:        "json",
+				FileExt:        []string{"json"},
 				BaseLang:       "en",
 				FlatNaming:     true,
 				AlwaysPullBase: true,
@@ -442,7 +469,7 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Flat naming with AlwaysPullBase = true, multiple paths",
 			config: &Config{
-				FileExt:        "json",
+				FileExt:        []string{"json"},
 				BaseLang:       "en",
 				FlatNaming:     true,
 				AlwaysPullBase: true,
@@ -461,7 +488,7 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Flat naming with AlwaysPullBase = false, multiple paths",
 			config: &Config{
-				FileExt:        "json",
+				FileExt:        []string{"json"},
 				BaseLang:       "en",
 				FlatNaming:     true,
 				AlwaysPullBase: false,
@@ -482,7 +509,7 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Nested naming with AlwaysPullBase = true, multiple paths",
 			config: &Config{
-				FileExt:        "json",
+				FileExt:        []string{"json"},
 				BaseLang:       "en",
 				FlatNaming:     false,
 				AlwaysPullBase: true,
@@ -499,7 +526,7 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Nested naming with AlwaysPullBase = false, multiple paths",
 			config: &Config{
-				FileExt:        "json",
+				FileExt:        []string{"json"},
 				BaseLang:       "en",
 				FlatNaming:     false,
 				AlwaysPullBase: false,
@@ -518,13 +545,89 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Empty translations path",
 			config: &Config{
-				FileExt:        "json",
+				FileExt:        []string{"json"},
 				BaseLang:       "en",
 				FlatNaming:     true,
 				AlwaysPullBase: true,
 			},
 			mockPaths:    []string{},
 			expectedArgs: []string{},
+		},
+		{
+			name: "Flat naming + multi-ext (iOS) + AlwaysPullBase = false, single path",
+			config: &Config{
+				FileExt:        []string{"strings", "stringsdict"},
+				BaseLang:       "en",
+				FlatNaming:     true,
+				AlwaysPullBase: false,
+			},
+			mockPaths: []string{filepath.Join("ios", "Localizations")},
+			expectedArgs: []string{
+				// strings
+				filepath.Join("ios", "Localizations", "*.strings"),
+				":!" + filepath.Join("ios", "Localizations", "en.strings"),
+				":!" + filepath.Join("ios", "Localizations", "**", "*.strings"),
+				// stringsdict
+				filepath.Join("ios", "Localizations", "*.stringsdict"),
+				":!" + filepath.Join("ios", "Localizations", "en.stringsdict"),
+				":!" + filepath.Join("ios", "Localizations", "**", "*.stringsdict"),
+			},
+		},
+		{
+			name: "Nested naming + multi-ext (iOS) + AlwaysPullBase = true, multiple paths",
+			config: &Config{
+				FileExt:        []string{"strings", "stringsdict"},
+				BaseLang:       "en",
+				FlatNaming:     false,
+				AlwaysPullBase: true,
+			},
+			mockPaths: []string{
+				filepath.Join("ios", "ModuleA"),
+				filepath.Join("ios", "ModuleB"),
+			},
+			expectedArgs: []string{
+				// ModuleA both exts
+				filepath.Join("ios", "ModuleA", "**", "*.strings"),
+				filepath.Join("ios", "ModuleA", "**", "*.stringsdict"),
+				// ModuleB both exts
+				filepath.Join("ios", "ModuleB", "**", "*.strings"),
+				filepath.Join("ios", "ModuleB", "**", "*.stringsdict"),
+			},
+		},
+		{
+			name: "Nested naming + multi-ext (iOS) + AlwaysPullBase = false (exclude base dir once per path)",
+			config: &Config{
+				FileExt:        []string{"strings", "stringsdict"},
+				BaseLang:       "en",
+				FlatNaming:     false,
+				AlwaysPullBase: false,
+			},
+			mockPaths: []string{
+				filepath.Join("ios", "App"),
+			},
+			expectedArgs: []string{
+				filepath.Join("ios", "App", "**", "*.strings"),
+				filepath.Join("ios", "App", "**", "*.stringsdict"),
+				":!" + filepath.Join("ios", "App", "en", "**"),
+			},
+		},
+		{
+			name: "Flat naming + normalization + dedupe ('.json', ' json ', 'json')",
+			config: &Config{
+				FileExt:        []string{".json", " json ", "json"},
+				BaseLang:       "en",
+				FlatNaming:     true,
+				AlwaysPullBase: false,
+			},
+			mockPaths: []string{
+				filepath.Join("pathX"),
+			},
+			// Expect only one set of patterns for 'json'
+			expectedArgs: []string{
+				filepath.Join("pathX", "*.json"),
+				":!" + filepath.Join("pathX", "en.json"),
+				":!" + filepath.Join("pathX", "**", "*.json"),
+			},
 		},
 	}
 
