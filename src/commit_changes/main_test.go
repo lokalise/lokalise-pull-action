@@ -191,22 +191,9 @@ func TestEnvVarsToConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set up environment variables
+
 			for key, value := range tt.envVars {
-				os.Setenv(key, value)
-			}
-
-			// Clear environment variables not in the test case
-			allEnvVars := []string{
-				"GITHUB_ACTOR", "GITHUB_SHA", "GITHUB_REF_NAME", "TEMP_BRANCH_PREFIX",
-				"TRANSLATIONS_PATH", "FILE_FORMAT", "FILE_EXT", "BASE_LANG",
-				"FLAT_NAMING", "ALWAYS_PULL_BASE", "GIT_USER_NAME", "GIT_USER_EMAIL",
-				"OVERRIDE_BRANCH_NAME", "GIT_COMMIT_MESSAGE",
-			}
-
-			for _, key := range allEnvVars {
-				if _, ok := tt.envVars[key]; !ok {
-					os.Unsetenv(key)
-				}
+				t.Setenv(key, value)
 			}
 
 			// Execute the function

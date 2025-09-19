@@ -173,6 +173,7 @@ runs:
       id: pull-files
       shell: bash
       env:
+        FILE_EXT: ${{ inputs.file_ext }}
         ADDITIONAL_PARAMS: ${{ inputs.additional_params }}
         MAX_RETRIES: ${{ inputs.max_retries }}
         SLEEP_TIME: ${{ inputs.sleep_on_retry }}

@@ -265,6 +265,7 @@ func buildGitAddArgs(config *Config) []string {
 			continue
 		}
 		e = strings.TrimPrefix(e, ".")
+		e = strings.ToLower(e)
 		if _, ok := seen[e]; ok {
 			continue
 		}
