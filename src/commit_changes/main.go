@@ -155,13 +155,30 @@ func envVarsToConfig() (*Config, error) {
 
 	fileExts := parsers.ParseStringArrayEnv("FILE_EXT")
 	if len(fileExts) == 0 {
-		inferred := os.Getenv("FILE_FORMAT")
-		if inferred != "" {
+		if inferred := os.Getenv("FILE_FORMAT"); inferred != "" {
 			fileExts = []string{inferred}
 		}
 	}
 	if len(fileExts) == 0 {
 		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_EXT or FILE_FORMAT environment variables are set")
+	}
+
+	// normalize + dedupe here
+	seen := make(map[string]struct{})
+	norm := make([]string, 0, len(fileExts))
+	for _, ext := range fileExts {
+		e := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
+		if e == "" {
+			continue
+		}
+		if _, ok := seen[e]; ok {
+			continue
+		}
+		seen[e] = struct{}{}
+		norm = append(norm, e)
+	}
+	if len(norm) == 0 {
+		return nil, fmt.Errorf("no valid file extensions after normalization")
 	}
 
 	commitMsg := os.Getenv("GIT_COMMIT_MESSAGE")
@@ -175,7 +192,7 @@ func envVarsToConfig() (*Config, error) {
 		GitHubSHA:          envValues["GITHUB_SHA"],
 		GitHubRefName:      envValues["GITHUB_REF_NAME"],
 		TempBranchPrefix:   envValues["TEMP_BRANCH_PREFIX"],
-		FileExt:            fileExts,
+		FileExt:            norm,
 		BaseLang:           envValues["BASE_LANG"],
 		FlatNaming:         envBoolValues["FLAT_NAMING"],
 		AlwaysPullBase:     envBoolValues["ALWAYS_PULL_BASE"],
@@ -255,29 +272,7 @@ func buildGitAddArgs(config *Config) []string {
 	flatNaming := config.FlatNaming
 	alwaysPullBase := config.AlwaysPullBase
 	baseLang := config.BaseLang
-
-	// normalize/dedupe extensions
-	seen := make(map[string]struct{})
-	var fileExts []string
-	for _, ext := range config.FileExt {
-		e := strings.TrimSpace(ext)
-		if e == "" {
-			continue
-		}
-		e = strings.TrimPrefix(e, ".")
-		e = strings.ToLower(e)
-		if _, ok := seen[e]; ok {
-			continue
-		}
-
-		seen[e] = struct{}{}
-		fileExts = append(fileExts, e)
-	}
-
-	if len(fileExts) == 0 {
-		// should be prevented by earlier inference, but keep a hard guard
-		return []string{}
-	}
+	fileExts := config.FileExt
 
 	var addArgs []string
 	for _, path := range translationsPaths {

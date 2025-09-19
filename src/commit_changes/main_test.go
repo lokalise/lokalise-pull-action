@@ -71,6 +71,32 @@ func TestEnvVarsToConfig(t *testing.T) {
 			expectError: false,
 		},
 		{
+			name: "FILE_EXT normalization and dedupe",
+			envVars: map[string]string{
+				"GITHUB_ACTOR":       "test_actor",
+				"GITHUB_SHA":         "123456",
+				"GITHUB_REF_NAME":    "main",
+				"TEMP_BRANCH_PREFIX": "temp",
+				"TRANSLATIONS_PATH":  "translations/",
+				"FILE_EXT":           "\n .JSON \n  yaml  \n .json \n", // messy input
+				"BASE_LANG":          "en",
+				"FLAT_NAMING":        "false",
+				"ALWAYS_PULL_BASE":   "true",
+			},
+			expectedConfig: &Config{
+				GitHubActor:      "test_actor",
+				GitHubSHA:        "123456",
+				GitHubRefName:    "main",
+				TempBranchPrefix: "temp",
+				FileExt:          []string{"json", "yaml"}, // normalized, deduped, lowercased
+				BaseLang:         "en",
+				FlatNaming:       false,
+				AlwaysPullBase:   true,
+				GitCommitMessage: "Translations update",
+			},
+			expectError: false,
+		},
+		{
 			name: "Empty commit msg",
 			envVars: map[string]string{
 				"GITHUB_ACTOR":         "test_actor",
@@ -596,24 +622,6 @@ func TestBuildGitAddArgs(t *testing.T) {
 				filepath.Join("ios", "App", "**", "*.strings"),
 				filepath.Join("ios", "App", "**", "*.stringsdict"),
 				":!" + filepath.Join("ios", "App", "en", "**"),
-			},
-		},
-		{
-			name: "Flat naming + normalization + dedupe ('.json', ' json ', 'json')",
-			config: &Config{
-				FileExt:        []string{".json", " json ", "json"},
-				BaseLang:       "en",
-				FlatNaming:     true,
-				AlwaysPullBase: false,
-			},
-			mockPaths: []string{
-				filepath.Join("pathX"),
-			},
-			// Expect only one set of patterns for 'json'
-			expectedArgs: []string{
-				filepath.Join("pathX", "*.json"),
-				":!" + filepath.Join("pathX", "en.json"),
-				":!" + filepath.Join("pathX", "**", "*.json"),
 			},
 		},
 	}
