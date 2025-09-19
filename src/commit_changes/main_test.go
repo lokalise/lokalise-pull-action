@@ -216,16 +216,36 @@ func TestEnvVarsToConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set up environment variables
+			// scrub env so CI-provided vars don't bleed into tests
+			allEnvVars := []string{
+				"GITHUB_ACTOR",
+				"GITHUB_SHA",
+				"GITHUB_REF_NAME",
+				"TEMP_BRANCH_PREFIX",
+				"TRANSLATIONS_PATH",
+				"BASE_LANG",
+				"FLAT_NAMING",
+				"ALWAYS_PULL_BASE",
+				"FORCE_PUSH",
+				"GIT_USER_NAME",
+				"GIT_USER_EMAIL",
+				"OVERRIDE_BRANCH_NAME",
+				"GIT_COMMIT_MESSAGE",
+				"FILE_FORMAT",
+				"FILE_EXT",
+			}
+			for _, k := range allEnvVars {
+				t.Setenv(k, "") // treat as missing
+			}
 
+			// now set only what this test needs
 			for key, value := range tt.envVars {
 				t.Setenv(key, value)
 			}
 
-			// Execute the function
+			// Execute
 			config, err := envVarsToConfig()
 
-			// Check if an error was expected
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("Expected error but got nil")
@@ -235,13 +255,11 @@ func TestEnvVarsToConfig(t *testing.T) {
 				return
 			}
 
-			// Ensure no error was returned
 			if err != nil {
 				t.Errorf("Unexpected error: %v", err)
 				return
 			}
 
-			// Validate the resulting config
 			if config == nil {
 				t.Errorf("Expected config but got nil")
 				return
