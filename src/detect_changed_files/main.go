@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/bodrovis/lokalise-actions-common/v2/githuboutput"
-
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 )
 
@@ -48,7 +47,7 @@ func (d DefaultCommandRunner) Run(name string, args ...string) ([]string, error)
 }
 
 type Config struct {
-	FileExt        string
+	FileExt        []string
 	FlatNaming     bool
 	AlwaysPullBase bool
 	BaseLang       string
@@ -128,20 +127,25 @@ func gitLsFiles(config *Config, runner CommandRunner) ([]string, error) {
 	return runner.Run("git", args...)
 }
 
-// buildGitStatusArgs constructs git command arguments based on the naming convention and paths.
-// It builds glob patterns to match translation files.
-func buildGitStatusArgs(paths []string, fileExt string, flatNaming bool, gitCmd ...string) []string {
-	var patterns []string
+// buildGitStatusArgs constructs git command arguments based on naming convention and paths.
+// It builds glob patterns to match translation files for ALL provided extensions.
+// Returns: <gitCmd...> "--" <patterns...>
+func buildGitStatusArgs(paths []string, fileExt []string, flatNaming bool, gitCmd ...string) []string {
+	patterns := make([]string, 0, len(paths)*len(fileExt))
 	for _, path := range paths {
-		var pattern string
-		if flatNaming {
-			// For flat naming, match files like "path/*.fileExt"
-			pattern = filepath.Join(path, fmt.Sprintf("*.%s", fileExt))
-		} else {
-			// For nested directories, match files like "path/**/*.fileExt"
-			pattern = filepath.Join(path, "**", fmt.Sprintf("*.%s", fileExt))
+		for _, ext := range fileExt {
+			ext = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
+			if ext == "" {
+				continue
+			}
+			if flatNaming {
+				// For flat naming, match files like "path/*.ext"
+				patterns = append(patterns, filepath.ToSlash(filepath.Join(path, fmt.Sprintf("*.%s", ext))))
+			} else {
+				// For nested directories, match files like "path/**/*.ext"
+				patterns = append(patterns, filepath.ToSlash(filepath.Join(path, "**", fmt.Sprintf("*.%s", ext))))
+			}
 		}
-		patterns = append(patterns, pattern)
 	}
 	args := append(gitCmd, "--")
 	args = append(args, patterns...)
@@ -152,10 +156,10 @@ func buildGitStatusArgs(paths []string, fileExt string, flatNaming bool, gitCmd 
 func deduplicateFiles(statusFiles, untrackedFiles []string) []string {
 	fileSet := make(map[string]struct{})
 	for _, file := range statusFiles {
-		fileSet[file] = struct{}{}
+		fileSet[filepath.ToSlash(file)] = struct{}{}
 	}
 	for _, file := range untrackedFiles {
-		fileSet[file] = struct{}{}
+		fileSet[filepath.ToSlash(file)] = struct{}{}
 	}
 	// Collect the keys from the map to get the deduplicated list
 	allFiles := make([]string, 0, len(fileSet))
@@ -167,23 +171,31 @@ func deduplicateFiles(statusFiles, untrackedFiles []string) []string {
 }
 
 // buildExcludePatterns builds exclusion patterns based on settings.
-// Returns a slice of regular expression strings.
+// Returns a slice of regular expression objects.
 func buildExcludePatterns(config *Config) ([]*regexp.Regexp, error) {
-	var excludePatterns []*regexp.Regexp
+	excludePatterns := make([]*regexp.Regexp, 0, len(config.Paths)*(1+len(config.FileExt)))
 
 	for _, path := range config.Paths {
 		path = filepath.ToSlash(path)
 
 		if config.FlatNaming {
+			// In flat naming we exclude baseLang file per extension if AlwaysPullBase=false
 			if !config.AlwaysPullBase {
-				baseLangFile := filepath.ToSlash(filepath.Join(path, fmt.Sprintf("%s.%s", config.BaseLang, config.FileExt)))
-				patternStr := fmt.Sprintf("^%s$", regexp.QuoteMeta(baseLangFile))
-				pattern, err := regexp.Compile(patternStr)
-				if err != nil {
-					return nil, fmt.Errorf("failed to compile regex '%s': %v", patternStr, err)
+				for _, ext := range config.FileExt {
+					ext = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
+					if ext == "" {
+						continue
+					}
+					baseLangFile := filepath.ToSlash(filepath.Join(path, fmt.Sprintf("%s.%s", config.BaseLang, ext)))
+					patternStr := fmt.Sprintf("^%s$", regexp.QuoteMeta(baseLangFile))
+					pattern, err := regexp.Compile(patternStr)
+					if err != nil {
+						return nil, fmt.Errorf("failed to compile regex '%s': %v", patternStr, err)
+					}
+					excludePatterns = append(excludePatterns, pattern)
 				}
-				excludePatterns = append(excludePatterns, pattern)
 			}
+			// Exclude subdirectories entirely in flat naming
 			patternStr := fmt.Sprintf("^%s/[^/]+/.*", regexp.QuoteMeta(path))
 			pattern, err := regexp.Compile(patternStr)
 			if err != nil {
@@ -191,6 +203,7 @@ func buildExcludePatterns(config *Config) ([]*regexp.Regexp, error) {
 			}
 			excludePatterns = append(excludePatterns, pattern)
 		} else {
+			// In nested naming we exclude the baseLang directory if AlwaysPullBase=false
 			if !config.AlwaysPullBase {
 				baseLangDir := filepath.ToSlash(filepath.Join(path, config.BaseLang))
 				patternStr := fmt.Sprintf("^%s/.*", regexp.QuoteMeta(baseLangDir))
@@ -246,13 +259,33 @@ func prepareConfig() (*Config, error) {
 		return nil, fmt.Errorf("no valid paths found in TRANSLATIONS_PATH")
 	}
 
-	// File extension is based on the explicitly set value or inferred from the file format
-	fileExt := os.Getenv("FILE_EXT")
-	if fileExt == "" {
-		fileExt = os.Getenv("FILE_FORMAT")
+	// Parse FILE_EXT as newline-separated list; fall back to FILE_FORMAT if empty.
+	fileExt := parsers.ParseStringArrayEnv("FILE_EXT")
+	if len(fileExt) == 0 {
+		if inferred := os.Getenv("FILE_FORMAT"); inferred != "" {
+			fileExt = []string{inferred}
+		}
 	}
-	if fileExt == "" {
+	if len(fileExt) == 0 {
 		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_FORMAT or FILE_EXT environment variables are set")
+	}
+
+	// Normalize and dedupe extensions
+	seen := make(map[string]struct{})
+	norm := make([]string, 0, len(fileExt))
+	for _, ext := range fileExt {
+		e := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
+		if e == "" {
+			continue
+		}
+		if _, ok := seen[e]; ok {
+			continue
+		}
+		seen[e] = struct{}{}
+		norm = append(norm, e)
+	}
+	if len(norm) == 0 {
+		return nil, fmt.Errorf("no valid file extensions after normalization")
 	}
 
 	baseLang := os.Getenv("BASE_LANG")
@@ -261,7 +294,7 @@ func prepareConfig() (*Config, error) {
 	}
 
 	return &Config{
-		FileExt:        fileExt,
+		FileExt:        norm,
 		FlatNaming:     flatNaming,
 		AlwaysPullBase: alwaysPullBase,
 		BaseLang:       baseLang,

@@ -27,6 +27,12 @@ func (m MockCommandRunner) Run(name string, args ...string) ([]string, error) {
 	return nil, fmt.Errorf("command '%s' not mocked", key)
 }
 
+func cmdKey(gitCmd []string, patterns []string) string {
+	all := append(append([]string{}, gitCmd...), "--")
+	all = append(all, patterns...)
+	return filepath.ToSlash(strings.TrimSpace("git " + strings.Join(all, " ")))
+}
+
 func TestPrepareConfig(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -35,7 +41,7 @@ func TestPrepareConfig(t *testing.T) {
 		expectedConfig *Config
 	}{
 		{
-			name: "Valid config",
+			name: "Valid config via FILE_FORMAT fallback",
 			envVars: map[string]string{
 				"TRANSLATIONS_PATH": "path/to/translations",
 				"FILE_FORMAT":       "json",
@@ -44,7 +50,7 @@ func TestPrepareConfig(t *testing.T) {
 				"ALWAYS_PULL_BASE":  "false",
 			},
 			expectedConfig: &Config{
-				FileExt:        "json",
+				FileExt:        []string{"json"},
 				FlatNaming:     true,
 				AlwaysPullBase: false,
 				BaseLang:       "en",
@@ -52,7 +58,7 @@ func TestPrepareConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "FILE_EXT and FILE_FORMAT set",
+			name: "FILE_EXT overrides FILE_FORMAT (single ext)",
 			envVars: map[string]string{
 				"TRANSLATIONS_PATH": "path/to/translations",
 				"FILE_FORMAT":       "structured_json",
@@ -62,7 +68,41 @@ func TestPrepareConfig(t *testing.T) {
 				"ALWAYS_PULL_BASE":  "false",
 			},
 			expectedConfig: &Config{
-				FileExt:        "json",
+				FileExt:        []string{"json"},
+				FlatNaming:     true,
+				AlwaysPullBase: false,
+				BaseLang:       "en",
+				Paths:          []string{"path/to/translations"},
+			},
+		},
+		{
+			name: "FILE_EXT multi-line (iOS bundle)",
+			envVars: map[string]string{
+				"TRANSLATIONS_PATH": "path/to/translations",
+				"FILE_EXT":          "strings\nstringsdict",
+				"BASE_LANG":         "en",
+				"FLAT_NAMING":       "false",
+				"ALWAYS_PULL_BASE":  "true",
+			},
+			expectedConfig: &Config{
+				FileExt:        []string{"strings", "stringsdict"},
+				FlatNaming:     false,
+				AlwaysPullBase: true,
+				BaseLang:       "en",
+				Paths:          []string{"path/to/translations"},
+			},
+		},
+		{
+			name: "FILE_EXT normalization (leading dot, spaces, casing) and dedupe",
+			envVars: map[string]string{
+				"TRANSLATIONS_PATH": "path/to/translations",
+				"FILE_EXT":          ".JSON\n json \nJsOn", // should normalize to just "json"
+				"BASE_LANG":         "en",
+				"FLAT_NAMING":       "true",
+				"ALWAYS_PULL_BASE":  "false",
+			},
+			expectedConfig: &Config{
+				FileExt:        []string{"json"},
 				FlatNaming:     true,
 				AlwaysPullBase: false,
 				BaseLang:       "en",
@@ -90,35 +130,47 @@ func TestPrepareConfig(t *testing.T) {
 			},
 			expectedError: "invalid FLAT_NAMING value",
 		},
+		{
+			name: "No valid extensions after normalization",
+			envVars: map[string]string{
+				"TRANSLATIONS_PATH": "path/to/translations",
+				"FILE_EXT":          " \n . \n\t", // all collapse to empty after trim/strip dot
+				"BASE_LANG":         "en",
+				"FLAT_NAMING":       "true",
+				"ALWAYS_PULL_BASE":  "false",
+			},
+			expectedError: "no valid file extensions after normalization",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set up environment variables
-			for key, value := range tt.envVars {
-				os.Setenv(key, value)
+			// set envs
+			for k, v := range tt.envVars {
+				os.Setenv(k, v)
 			}
 			defer func() {
-				for key := range tt.envVars {
-					os.Unsetenv(key)
+				for k := range tt.envVars {
+					os.Unsetenv(k)
 				}
 			}()
 
-			// Call the function
-			config, err := prepareConfig()
+			// call
+			cfg, err := prepareConfig()
 
-			// Verify the result
 			if tt.expectedError != "" {
 				if err == nil || !containsSubstring(err.Error(), tt.expectedError) {
-					t.Errorf("Expected error '%s', got '%v'", tt.expectedError, err)
+					t.Errorf("Expected error containing %q, got %v", tt.expectedError, err)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				}
-				if !reflect.DeepEqual(config, tt.expectedConfig) {
-					t.Errorf("Expected config %+v, got %+v", tt.expectedConfig, config)
-				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if !reflect.DeepEqual(cfg, tt.expectedConfig) {
+				t.Errorf("Expected config %+v, got %+v", tt.expectedConfig, cfg)
 			}
 		})
 	}
@@ -128,14 +180,14 @@ func TestBuildGitStatusArgs(t *testing.T) {
 	tests := []struct {
 		name       string
 		paths      []string
-		fileExt    string
+		fileExt    []string
 		flatNaming bool
 		expected   []string
 	}{
 		{
-			name:       "Flat naming",
+			name:       "Flat naming (single ext, multiple paths)",
 			paths:      []string{"path1", "path2"},
-			fileExt:    "json",
+			fileExt:    []string{"json"},
 			flatNaming: true,
 			expected: []string{
 				"diff", "--name-only", "HEAD", "--",
@@ -144,15 +196,46 @@ func TestBuildGitStatusArgs(t *testing.T) {
 			},
 		},
 		{
-			name:       "Nested naming",
+			name:       "Nested naming (single ext, multiple paths)",
 			paths:      []string{"path1", "path2"},
-			fileExt:    "json",
+			fileExt:    []string{"json"},
 			flatNaming: false,
 			expected: []string{
 				"diff", "--name-only", "HEAD", "--",
 				filepath.ToSlash(filepath.Join("path1", "**", "*.json")),
 				filepath.ToSlash(filepath.Join("path2", "**", "*.json")),
 			},
+		},
+		{
+			name:       "Flat naming (multi-ext iOS bundle)",
+			paths:      []string{"ios/LocA", "ios/LocB"},
+			fileExt:    []string{"strings", "stringsdict"},
+			flatNaming: true,
+			expected: []string{
+				"diff", "--name-only", "HEAD", "--",
+				filepath.ToSlash(filepath.Join("ios/LocA", "*.strings")),
+				filepath.ToSlash(filepath.Join("ios/LocA", "*.stringsdict")),
+				filepath.ToSlash(filepath.Join("ios/LocB", "*.strings")),
+				filepath.ToSlash(filepath.Join("ios/LocB", "*.stringsdict")),
+			},
+		},
+		{
+			name:       "Nested naming (multi-ext iOS bundle, mixed case + spaces + leading dot)",
+			paths:      []string{"ios/App"},
+			fileExt:    []string{".STRINGS", " stringsdict "}, // should normalize to strings / stringsdict
+			flatNaming: false,
+			expected: []string{
+				"diff", "--name-only", "HEAD", "--",
+				filepath.ToSlash(filepath.Join("ios/App", "**", "*.strings")),
+				filepath.ToSlash(filepath.Join("ios/App", "**", "*.stringsdict")),
+			},
+		},
+		{
+			name:       "Empty extensions yields only git args and --",
+			paths:      []string{"path1"},
+			fileExt:    []string{}, // no patterns added
+			flatNaming: true,
+			expected:   []string{"diff", "--name-only", "HEAD", "--"},
 		},
 	}
 
@@ -226,12 +309,51 @@ func TestFilterFiles(t *testing.T) {
 			expected:        []string{"file1.json", "file2.json"},
 		},
 		{
-			name:  "With exclusions",
+			name:  "With exclusions (subdir prefix)",
 			files: []string{"file1.json", "file2.json", "base/file3.json"},
 			excludePatterns: []*regexp.Regexp{
 				regexp.MustCompile("^base/.*"),
 			},
 			expected: []string{"file1.json", "file2.json"},
+		},
+		{
+			name: "Multiple exclude patterns (exact file + directory)",
+			files: []string{
+				"loc/en.json",
+				"loc/en/extra.json",
+				"loc/de.json",
+				"loc/fr/strings.json",
+			},
+			excludePatterns: []*regexp.Regexp{
+				regexp.MustCompile(`^loc/en\.json$`), // exact
+				regexp.MustCompile(`^loc/en/.*`),     // dir
+			},
+			expected: []string{
+				"loc/de.json",
+				"loc/fr/strings.json",
+			},
+		},
+		{
+			name:            "Empty files list",
+			files:           []string{},
+			excludePatterns: []*regexp.Regexp{regexp.MustCompile(`^whatever/.*`)},
+			expected:        []string{},
+		},
+		{
+			name:  "Exclude everything",
+			files: []string{"a.json", "b.json"},
+			excludePatterns: []*regexp.Regexp{
+				regexp.MustCompile(`^.*$`),
+			},
+			expected: []string{},
+		},
+		{
+			name:  "Order is preserved for non-excluded files",
+			files: []string{"1.json", "kill.json", "2.json", "keep/3.json"},
+			excludePatterns: []*regexp.Regexp{
+				regexp.MustCompile(`^kill\.json$`),
+			},
+			expected: []string{"1.json", "2.json", "keep/3.json"},
 		},
 	}
 
@@ -240,6 +362,9 @@ func TestFilterFiles(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := filterFiles(tt.files, tt.excludePatterns)
+			if got == nil {
+				got = []string{}
+			}
 			if !reflect.DeepEqual(got, tt.expected) {
 				t.Errorf("filterFiles() = %v, want %v", got, tt.expected)
 			}
@@ -248,22 +373,30 @@ func TestFilterFiles(t *testing.T) {
 }
 
 func TestDetectChangedFiles(t *testing.T) {
+	paths := []string{"path/to/translations"}
+	fileExts := []string{"json"}
+	flat := true
+
+	diffArgs := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only", "HEAD")
+	lsArgs := buildGitStatusArgs(paths, fileExts, flat, "ls-files", "--others", "--exclude-standard")
+
 	mockRunner := MockCommandRunner{
 		Output: map[string][]string{
-			filepath.ToSlash("git diff --name-only HEAD -- path/to/translations/*.json"): {
+			cmdKey(diffArgs[:3], diffArgs[4:]): {
 				filepath.ToSlash("path/to/translations/file1.json"),
 				filepath.ToSlash("path/to/translations/file2.json"),
 			},
-			filepath.ToSlash("git ls-files --others --exclude-standard -- path/to/translations/*.json"): {
+			cmdKey(lsArgs[:3], lsArgs[4:]): {
 				filepath.ToSlash("path/to/translations/file3.json"),
 			},
 		},
 	}
 
 	config := &Config{
-		Paths:      []string{"path/to/translations"},
-		FileExt:    "json",
-		FlatNaming: true,
+		Paths:      paths,
+		FileExt:    fileExts,
+		FlatNaming: flat,
+		// AlwaysPullBase defaults false is fine here; no baseLang excludes applied in detect step
 	}
 
 	changed, err := detectChangedFiles(config, mockRunner)
@@ -276,17 +409,24 @@ func TestDetectChangedFiles(t *testing.T) {
 }
 
 func TestDetectChangedFiles_NoChanges(t *testing.T) {
+	paths := []string{"path/to/translations"}
+	fileExts := []string{"json"}
+	flat := true
+
+	diffArgs := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only", "HEAD")
+	lsArgs := buildGitStatusArgs(paths, fileExts, flat, "ls-files", "--others", "--exclude-standard")
+
 	mockRunner := MockCommandRunner{
 		Output: map[string][]string{
-			filepath.ToSlash("git diff --name-only HEAD -- path/to/translations/*.json"):                {},
-			filepath.ToSlash("git ls-files --others --exclude-standard -- path/to/translations/*.json"): {},
+			cmdKey(diffArgs[:3], diffArgs[4:]): {},
+			cmdKey(lsArgs[:3], lsArgs[4:]):     {},
 		},
 	}
 
 	config := &Config{
-		Paths:      []string{"path/to/translations"},
-		FileExt:    "json",
-		FlatNaming: true,
+		Paths:      paths,
+		FileExt:    fileExts,
+		FlatNaming: flat,
 	}
 
 	changed, err := detectChangedFiles(config, mockRunner)
@@ -298,20 +438,29 @@ func TestDetectChangedFiles_NoChanges(t *testing.T) {
 	}
 }
 
-func TestDetectChangedFiles_AllChangesExcluded(t *testing.T) {
+func TestDetectChangedFiles_AllChangesExcluded_Flat_PerExt(t *testing.T) {
+	// flat naming: exclude baseLang file per extension if AlwaysPullBase=false
+	paths := []string{"ios/Loc"}
+	fileExts := []string{"strings", "stringsdict"}
+	flat := true
+
+	diffArgs := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only", "HEAD")
+	lsArgs := buildGitStatusArgs(paths, fileExts, flat, "ls-files", "--others", "--exclude-standard")
+
 	mockRunner := MockCommandRunner{
 		Output: map[string][]string{
-			filepath.ToSlash("git diff --name-only HEAD -- path/to/translations/*.json"): {
-				filepath.ToSlash("path/to/translations/en.json"), // BaseLang file
+			cmdKey(diffArgs[:3], diffArgs[4:]): {
+				filepath.ToSlash("ios/Loc/en.strings"),
+				filepath.ToSlash("ios/Loc/en.stringsdict"),
 			},
-			filepath.ToSlash("git ls-files --others --exclude-standard -- path/to/translations/*.json"): {},
+			cmdKey(lsArgs[:3], lsArgs[4:]): {},
 		},
 	}
 
 	config := &Config{
-		Paths:          []string{"path/to/translations"},
-		FileExt:        "json",
-		FlatNaming:     true,
+		Paths:          paths,
+		FileExt:        fileExts,
+		FlatNaming:     flat,
 		AlwaysPullBase: false,
 		BaseLang:       "en",
 	}
@@ -325,17 +474,63 @@ func TestDetectChangedFiles_AllChangesExcluded(t *testing.T) {
 	}
 }
 
-func TestDetectChangedFiles_GitDiffError(t *testing.T) {
+func TestDetectChangedFiles_Nested_BaseDirExcluded(t *testing.T) {
+	// nested naming: exclude baseLang dir if AlwaysPullBase=false
+	paths := []string{"ios/App"}
+	fileExts := []string{"strings", "stringsdict"}
+	flat := false
+
+	diffArgs := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only", "HEAD")
+	lsArgs := buildGitStatusArgs(paths, fileExts, flat, "ls-files", "--others", "--exclude-standard")
+
 	mockRunner := MockCommandRunner{
-		Err: map[string]error{
-			filepath.ToSlash("git diff --name-only HEAD -- path/to/translations/*.json"): fmt.Errorf("git diff error"),
+		Output: map[string][]string{
+			cmdKey(diffArgs[:3], diffArgs[4:]): {
+				filepath.ToSlash("ios/App/en/Localizable.strings"),
+				filepath.ToSlash("ios/App/en/Plurals.stringsdict"),
+				filepath.ToSlash("ios/App/de/Localizable.strings"),
+			},
+			cmdKey(lsArgs[:3], lsArgs[4:]): {
+				filepath.ToSlash("ios/App/en/Untracked.strings"),
+			},
 		},
 	}
 
 	config := &Config{
-		Paths:      []string{"path/to/translations"},
-		FileExt:    "json",
-		FlatNaming: true,
+		Paths:          paths,
+		FileExt:        fileExts,
+		FlatNaming:     flat,
+		AlwaysPullBase: false,
+		BaseLang:       "en",
+	}
+
+	changed, err := detectChangedFiles(config, mockRunner)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	// en/* excluded; de/* remains → should be changes
+	if !changed {
+		t.Errorf("Expected changes (non-base dir files remain), but got none")
+	}
+}
+
+func TestDetectChangedFiles_GitDiffError(t *testing.T) {
+	paths := []string{"path/to/translations"}
+	fileExts := []string{"json"}
+	flat := true
+
+	diffArgs := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only", "HEAD")
+
+	mockRunner := MockCommandRunner{
+		Err: map[string]error{
+			cmdKey(diffArgs[:3], diffArgs[4:]): fmt.Errorf("git diff error"),
+		},
+	}
+
+	config := &Config{
+		Paths:      paths,
+		FileExt:    fileExts,
+		FlatNaming: flat,
 	}
 
 	_, err := detectChangedFiles(config, mockRunner)
@@ -345,19 +540,26 @@ func TestDetectChangedFiles_GitDiffError(t *testing.T) {
 }
 
 func TestDetectChangedFiles_GitLsFilesError(t *testing.T) {
+	paths := []string{"path/to/translations"}
+	fileExts := []string{"json"}
+	flat := true
+
+	diffArgs := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only", "HEAD")
+	lsArgs := buildGitStatusArgs(paths, fileExts, flat, "ls-files", "--others", "--exclude-standard")
+
 	mockRunner := MockCommandRunner{
 		Output: map[string][]string{
-			filepath.ToSlash("git diff --name-only HEAD -- path/to/translations/*.json"): {},
+			cmdKey(diffArgs[:3], diffArgs[4:]): {},
 		},
 		Err: map[string]error{
-			filepath.ToSlash("git ls-files --others --exclude-standard -- path/to/translations/*.json"): fmt.Errorf("git ls-files error"),
+			cmdKey(lsArgs[:3], lsArgs[4:]): fmt.Errorf("git ls-files error"),
 		},
 	}
 
 	config := &Config{
-		Paths:      []string{"path/to/translations"},
-		FileExt:    "json",
-		FlatNaming: true,
+		Paths:      paths,
+		FileExt:    fileExts,
+		FlatNaming: flat,
 	}
 
 	_, err := detectChangedFiles(config, mockRunner)
@@ -374,10 +576,10 @@ func TestBuildExcludePatterns(t *testing.T) {
 		expectError      bool
 	}{
 		{
-			name: "Flat naming, AlwaysPullBase = false",
+			name: "Flat naming, AlwaysPullBase = false (single ext)",
 			config: &Config{
 				Paths:          []string{"path/to/translations"},
-				FileExt:        "json",
+				FileExt:        []string{"json"},
 				FlatNaming:     true,
 				AlwaysPullBase: false,
 				BaseLang:       "en",
@@ -389,10 +591,10 @@ func TestBuildExcludePatterns(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "Nested naming, AlwaysPullBase = false",
+			name: "Nested naming, AlwaysPullBase = false (single ext)",
 			config: &Config{
 				Paths:          []string{"path/to/translations"},
-				FileExt:        "json",
+				FileExt:        []string{"json"},
 				FlatNaming:     false,
 				AlwaysPullBase: false,
 				BaseLang:       "en",
@@ -403,16 +605,67 @@ func TestBuildExcludePatterns(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "Flat naming, AlwaysPullBase = true",
+			name: "Flat naming, AlwaysPullBase = true (single ext)",
 			config: &Config{
 				Paths:          []string{"path/to/translations"},
-				FileExt:        "json",
+				FileExt:        []string{"json"},
 				FlatNaming:     true,
 				AlwaysPullBase: true,
 				BaseLang:       "en",
 			},
 			expectedPatterns: []string{
 				"^path/to/translations/[^/]+/.*",
+			},
+			expectError: false,
+		},
+
+		// --- NEW CASES ---
+
+		{
+			name: "Flat naming, AlwaysPullBase = false (multi-ext iOS)",
+			config: &Config{
+				Paths:          []string{"ios/Loc"},
+				FileExt:        []string{"strings", "stringsdict"},
+				FlatNaming:     true,
+				AlwaysPullBase: false,
+				BaseLang:       "en",
+			},
+			// per-ext base file excludes, then subdir exclude
+			expectedPatterns: []string{
+				"^ios/Loc/en\\.strings$",
+				"^ios/Loc/en\\.stringsdict$",
+				"^ios/Loc/[^/]+/.*",
+			},
+			expectError: false,
+		},
+		{
+			name: "Nested naming, AlwaysPullBase = false (multi-ext iOS) — only base dir excluded once",
+			config: &Config{
+				Paths:          []string{"ios/App"},
+				FileExt:        []string{"strings", "stringsdict"},
+				FlatNaming:     false,
+				AlwaysPullBase: false,
+				BaseLang:       "en",
+			},
+			// exclude base dir (not per-ext)
+			expectedPatterns: []string{
+				"^ios/App/en/.*",
+			},
+			expectError: false,
+		},
+		{
+			name: "Nested naming, two paths, AlwaysPullBase = false",
+			config: &Config{
+				Paths:          []string{"module/A/loc", "module/B/loc"},
+				FileExt:        []string{"yml"},
+				FlatNaming:     false,
+				AlwaysPullBase: false,
+				BaseLang:       "en",
+			},
+			// one exclude per path
+			expectedPatterns: []string{
+				"^module/A/loc/en/.*",
+				"^module/B/loc/en/.*",
 			},
 			expectError: false,
 		},
@@ -423,6 +676,7 @@ func TestBuildExcludePatterns(t *testing.T) {
 
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+
 			// Normalize expected patterns to use forward slashes
 			normalizePatterns := func(patterns []string) []string {
 				var normalized []string
@@ -438,22 +692,24 @@ func TestBuildExcludePatterns(t *testing.T) {
 				if err == nil {
 					t.Errorf("Expected error but got nil")
 				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				} else {
-					// Convert the compiled regex patterns back to strings to compare
-					var patternStrings []string
-					for _, p := range patterns {
-						patternStrings = append(patternStrings, p.String())
-					}
-					// Normalize actual patterns
-					normalizedPatternStrings := normalizePatterns(patternStrings)
+				return
+			}
 
-					if !reflect.DeepEqual(normalizedPatternStrings, normalizedExpectedPatterns) {
-						t.Errorf("Expected patterns %v, got %v", normalizedExpectedPatterns, normalizedPatternStrings)
-					}
-				}
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			// Convert the compiled regex patterns back to strings to compare
+			var patternStrings []string
+			for _, p := range patterns {
+				patternStrings = append(patternStrings, p.String())
+			}
+			// Normalize actual patterns
+			normalizedPatternStrings := normalizePatterns(patternStrings)
+
+			if !reflect.DeepEqual(normalizedPatternStrings, normalizedExpectedPatterns) {
+				t.Errorf("Expected patterns %v, got %v", normalizedExpectedPatterns, normalizedPatternStrings)
 			}
 		})
 	}

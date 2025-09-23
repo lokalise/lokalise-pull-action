@@ -49,7 +49,7 @@ type Config struct {
 	GitHubSHA          string
 	GitHubRefName      string
 	TempBranchPrefix   string
-	FileExt            string
+	FileExt            []string
 	BaseLang           string
 	FlatNaming         bool
 	AlwaysPullBase     bool
@@ -153,12 +153,32 @@ func envVarsToConfig() (*Config, error) {
 		envBoolValues[key] = value
 	}
 
-	fileExt := os.Getenv("FILE_EXT")
-	if fileExt == "" {
-		fileExt = os.Getenv("FILE_FORMAT")
+	fileExts := parsers.ParseStringArrayEnv("FILE_EXT")
+	if len(fileExts) == 0 {
+		if inferred := os.Getenv("FILE_FORMAT"); inferred != "" {
+			fileExts = []string{inferred}
+		}
 	}
-	if fileExt == "" {
+	if len(fileExts) == 0 {
 		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_EXT or FILE_FORMAT environment variables are set")
+	}
+
+	// normalize + dedupe here
+	seen := make(map[string]struct{})
+	norm := make([]string, 0, len(fileExts))
+	for _, ext := range fileExts {
+		e := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
+		if e == "" {
+			continue
+		}
+		if _, ok := seen[e]; ok {
+			continue
+		}
+		seen[e] = struct{}{}
+		norm = append(norm, e)
+	}
+	if len(norm) == 0 {
+		return nil, fmt.Errorf("no valid file extensions after normalization")
 	}
 
 	commitMsg := os.Getenv("GIT_COMMIT_MESSAGE")
@@ -172,7 +192,7 @@ func envVarsToConfig() (*Config, error) {
 		GitHubSHA:          envValues["GITHUB_SHA"],
 		GitHubRefName:      envValues["GITHUB_REF_NAME"],
 		TempBranchPrefix:   envValues["TEMP_BRANCH_PREFIX"],
-		FileExt:            fileExt,
+		FileExt:            norm,
 		BaseLang:           envValues["BASE_LANG"],
 		FlatNaming:         envBoolValues["FLAT_NAMING"],
 		AlwaysPullBase:     envBoolValues["ALWAYS_PULL_BASE"],
@@ -251,29 +271,31 @@ func buildGitAddArgs(config *Config) []string {
 	translationsPaths := parsers.ParseStringArrayEnv("TRANSLATIONS_PATH")
 	flatNaming := config.FlatNaming
 	alwaysPullBase := config.AlwaysPullBase
-	fileExt := config.FileExt
 	baseLang := config.BaseLang
+	fileExts := config.FileExt
 
 	var addArgs []string
 	for _, path := range translationsPaths {
 		if flatNaming {
-			// Add files matching 'path/*.fileExt'
-			addArgs = append(addArgs, filepath.Join(path, fmt.Sprintf("*.%s", fileExt)))
-			if !alwaysPullBase {
-				// Exclude base language file
-				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, fmt.Sprintf("%s.%s", baseLang, fileExt))))
+			// top-level only: path/*.ext (+ per-ext baseLang exclude, + exclude subdirs)
+			for _, ext := range fileExts {
+				addArgs = append(addArgs, filepath.Join(path, fmt.Sprintf("*.%s", ext)))
+				if !alwaysPullBase && baseLang != "" {
+					addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, fmt.Sprintf("%s.%s", baseLang, ext))))
+				}
+				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, "**", fmt.Sprintf("*.%s", ext))))
 			}
-			// Exclude files in subdirectories
-			addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, "**", fmt.Sprintf("*.%s", fileExt))))
 		} else {
-			// Add files matching 'path/**/*.fileExt'
-			addArgs = append(addArgs, filepath.Join(path, "**", fmt.Sprintf("*.%s", fileExt)))
-			if !alwaysPullBase {
-				// Exclude files under 'path/baseLang/**'
+			// nested: path/**/*.ext (+ global baseLang dir exclude)
+			for _, ext := range fileExts {
+				addArgs = append(addArgs, filepath.Join(path, "**", fmt.Sprintf("*.%s", ext)))
+			}
+			if !alwaysPullBase && baseLang != "" {
 				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, baseLang, "**")))
 			}
 		}
 	}
+
 	return addArgs
 }
 
