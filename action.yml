@@ -309,20 +309,38 @@ runs:
           const path = require('path');
           const createOrUpdatePR = require(path.join(process.env.GITHUB_ACTION_PATH, 'js/create-update-pr.js'));
           const result = await createOrUpdatePR({ github, context });
-          core.setOutput('pr_created', result.created || false);
+          const created = !!result.created;
+          const updated = !created && !!result.pr;
+          const exists  = !!result.pr;
+
+          core.setOutput('pr_created', created);
+          core.setOutput('pr_updated', updated);
+          core.setOutput('pr_exists', exists);
           core.setOutput('pr_number', result.pr?.number || '');
           core.setOutput('pr_id', result.pr?.id || '');
-          return !!result.created;
+          core.setOutput('pr_url', result.pr?.html_url || '');
 
-    - name: Verify PR created
+          const action = created ? 'created' : (updated ? 'updated' : 'none');
+          core.setOutput('pr_action', action);
+
+          // Return something human-readable with result-encoding:string
+          return action;
+
+    - name: Verify PR presence
       id: check-pr-created
       shell: bash
       run: |
-        echo "Verifying created PR..."
-        if [ "${{ steps.create-update-pr.outputs.pr_created }}" != "true" ]; then
-          echo "Failed to create PR."
-          echo "pr_created=false" >> $GITHUB_OUTPUT
+        echo "PR action: ${{ steps.create-update-pr.outputs.pr_action }}"
+        echo "PR number: ${{ steps.create-update-pr.outputs.pr_number }}"
+        echo "PR url:    ${{ steps.create-update-pr.outputs.pr_url }}"
+
+        if [ "${{ steps.create-update-pr.outputs.pr_exists }}" = "true" ]; then
+          echo "PR is present (created or updated)."
+          echo "pr_created=${{ steps.create-update-pr.outputs.pr_created }}" >> $GITHUB_OUTPUT
+          echo "pr_updated=${{ steps.create-update-pr.outputs.pr_updated }}" >> $GITHUB_OUTPUT
+          echo "pr_exists=true" >> $GITHUB_OUTPUT
         else
-          echo "PR has been created."
-          echo "pr_created=true" >> $GITHUB_OUTPUT
+          echo "No PR was created or updated."
+          echo "pr_exists=false" >> $GITHUB_OUTPUT
+          exit 1
         fi

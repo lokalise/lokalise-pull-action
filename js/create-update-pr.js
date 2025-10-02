@@ -24,7 +24,7 @@ module.exports = async ({ github, context }) => {
 
     // synthetic PR refs? bail to default
     const looksLikeSynthetic = /^(\d+)\/(merge|head)$/.test(baseRef) || baseRef === "merge" || baseRef === "head";
-    
+
     if (!baseRef || looksLikeSynthetic) {
       const { data: repoInfo } = await github.rest.repos.get({ owner: repo.owner, repo: repo.repo });
       baseRef = repoInfo.default_branch;
@@ -119,7 +119,7 @@ module.exports = async ({ github, context }) => {
         }
       }
 
-      return { created: false, pr: { number: prNumber, id: existing.id } };
+      return { created: false, pr: { number: prNumber, id: existing.id, html_url: existing.html_url } };
     }
 
     /* ─────────── CREATE PR ─────────── */
@@ -174,7 +174,7 @@ module.exports = async ({ github, context }) => {
     }
 
     console.log(`Created new PR: ${newPr.html_url}`);
-    return { created: true, pr: { number: newPr.number, id: newPr.id } };
+    return { created: true, pr: { number: newPr.number, id: newPr.id, html_url: newPr.html_url } };
   } catch (error) {
     console.error(`Failed to create or update pull request: ${error.message}`);
     return { created: false, pr: null };
