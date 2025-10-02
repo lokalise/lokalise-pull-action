@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"os"
@@ -96,8 +97,6 @@ func commitAndPushChanges(runner CommandRunner) (string, error) {
 		return "", err
 	}
 	fmt.Printf("Using base branch: %s\n", realBase)
-
-	_, _ = runner.Capture("git", "fetch", "--no-tags", "--prune", "origin", realBase)
 
 	// Generate a sanitized branch name
 	branchName, err := generateBranchName(config)
@@ -261,24 +260,31 @@ func generateBranchName(config *Config) (string, error) {
 	return sanitizeString(branchName, 255), nil
 }
 
-// checkoutBranch creates and checks out the branch, or switches to it if it already exists
+// checkoutBranch creates and checks out the branch, or switches to it if it already exists.
+// If branchName == headRef (PR update), base off origin/headRef.
+// Otherwise, create/reset from origin/baseRef.
 func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) error {
-	// If we’re updating the existing PR branch, track that remote branch.
+	// helper to fetch a single remote branch robustly (works with shallow clones)
+	fetch := func(ref string) {
+		// +refs/heads/<ref>:refs/remotes/origin/<ref> guarantees we fetch exactly what we need
+		_, _ = runner.Capture("git", "fetch", "--no-tags", "--prune", "origin",
+			fmt.Sprintf("+refs/heads/%[1]s:refs/remotes/origin/%[1]s", ref))
+	}
+
+	// updating existing PR head?
 	if headRef != "" && branchName == headRef {
-		// fetch head
-		_, _ = runner.Capture("git", "fetch", "--no-tags", "--prune", "origin", headRef)
+		fetch(headRef)
 		if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+headRef); err == nil {
 			return nil
 		}
-		// fallback to local copy of headRef
 		if err := runner.Run("git", "checkout", "-B", branchName, headRef); err == nil {
 			return nil
 		}
-		// last resort: just try switching
 		return runner.Run("git", "checkout", branchName)
 	}
 
-	// Original behavior: new lok_* branch from base
+	// creating/resetting temp branch off base
+	fetch(baseRef)
 	if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+baseRef); err == nil {
 		return nil
 	}
@@ -371,29 +377,31 @@ func resolveRealBase(runner CommandRunner, cfg *Config) (string, error) {
 	// fallback: detect remote default (HEAD) branch
 	out, _ := runner.Capture("git", "remote", "show", "origin")
 	// look for: "  HEAD branch: main"
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "HEAD branch: ") {
-			def := strings.TrimSpace(strings.TrimPrefix(line, "HEAD branch: "))
+	scanner := bufio.NewScanner(strings.NewReader(out))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if def, ok := strings.CutPrefix(line, "HEAD branch: "); ok {
+			def = strings.TrimSpace(def)
 			if def != "" {
 				fmt.Printf("BASE_REF synthetic/empty, using remote HEAD: %s\n", def)
 				return def, nil
 			}
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: scanning remote output failed: %v\n", err)
+	}
+
 	// last resort
 	return "main", nil
 }
 
 func isSyntheticRef(ref string) bool {
 	ref = strings.TrimSpace(ref)
-	if ref == "" {
+	if ref == "" || ref == "merge" || ref == "head" {
 		return true
 	}
-	if ref == "merge" || ref == "head" {
-		return true
-	}
-	if strings.HasPrefix(ref, "refs/pull/") {
+	if strings.HasPrefix(ref, "refs/pull/") || strings.HasPrefix(ref, "pull/") {
 		return true
 	}
 	if strings.HasSuffix(ref, "/merge") || strings.HasSuffix(ref, "/head") {

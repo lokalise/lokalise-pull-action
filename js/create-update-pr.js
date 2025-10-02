@@ -131,6 +131,7 @@ module.exports = async ({ github, context }) => {
       base: baseRef,
       body: prBody,
       draft: prDraft,
+      maintainer_can_modify: true,
     });
 
     // labels
