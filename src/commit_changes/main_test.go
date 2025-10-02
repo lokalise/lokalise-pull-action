@@ -999,16 +999,15 @@ func TestIsSyntheticRef(t *testing.T) {
 	}
 }
 
-func TestEnvVarsToConfig_BaseRefNormalization(t *testing.T) {
-	// scrub
-	keys := []string{"GITHUB_ACTOR", "GITHUB_SHA", "BASE_REF", "TEMP_BRANCH_PREFIX", "TRANSLATIONS_PATH", "BASE_LANG", "FLAT_NAMING", "ALWAYS_PULL_BASE", "FORCE_PUSH"}
-	for _, k := range keys {
+func TestEnvVarsToConfig_HeadRefNormalization(t *testing.T) {
+	scrub := []string{"GITHUB_ACTOR", "GITHUB_SHA", "BASE_REF", "HEAD_REF", "TEMP_BRANCH_PREFIX", "TRANSLATIONS_PATH", "BASE_LANG", "FLAT_NAMING", "ALWAYS_PULL_BASE", "FORCE_PUSH", "FILE_FORMAT"}
+	for _, k := range scrub {
 		t.Setenv(k, "")
 	}
-
 	t.Setenv("GITHUB_ACTOR", "actor")
 	t.Setenv("GITHUB_SHA", "abcdef")
-	t.Setenv("BASE_REF", "refs/heads/release/2025-10")
+	t.Setenv("BASE_REF", "main")
+	t.Setenv("HEAD_REF", "refs/heads/feature/foo")
 	t.Setenv("TEMP_BRANCH_PREFIX", "lok")
 	t.Setenv("TRANSLATIONS_PATH", "messages")
 	t.Setenv("FILE_FORMAT", "json")
@@ -1021,8 +1020,8 @@ func TestEnvVarsToConfig_BaseRefNormalization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if cfg.BaseRef != "release/2025-10" {
-		t.Fatalf("want release/2025-10, got %s", cfg.BaseRef)
+	if cfg.HeadRef != "feature/foo" {
+		t.Fatalf("want feature/foo, got %s", cfg.HeadRef)
 	}
 }
 
@@ -1046,6 +1045,36 @@ func TestEnvVarsToConfig_NoExtsFails(t *testing.T) {
 	_, err := envVarsToConfig()
 	if err == nil || !strings.Contains(err.Error(), "cannot infer file extension") {
 		t.Fatalf("expected missing ext error, got %v", err)
+	}
+}
+
+func TestIsSyntheticRef_PullAlias(t *testing.T) {
+	if !isSyntheticRef("pull/99/merge") {
+		t.Errorf("expected synthetic")
+	}
+}
+
+func TestCheckoutBranch_FetchesCorrectRefspec(t *testing.T) {
+	fetched := ""
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			if name == "git" && args[0] == "fetch" {
+				fetched = strings.Join(args, " ")
+			}
+			return "", nil
+		},
+		RunFunc: func(name string, args ...string) error {
+			if name == "git" && len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "new_branch" && args[3] == "origin/main" {
+				return nil
+			}
+			return fmt.Errorf("unexpected: %v", args)
+		},
+	}
+	if err := checkoutBranch("new_branch", "main", "", runner); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fetched, "+refs/heads/main:refs/remotes/origin/main") {
+		t.Errorf("unexpected fetch refspec: %q", fetched)
 	}
 }
 
