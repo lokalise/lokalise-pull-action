@@ -251,6 +251,7 @@ runs:
       id: create-commit
       if: steps.pull-files.outputs.has_changes == 'true'
       env:
+        BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
         FILE_FORMAT: ${{ inputs.file_format }}
         FILE_EXT: ${{ inputs.file_ext }}
         TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
@@ -289,7 +290,7 @@ runs:
       if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'
       env:
         BRANCH_NAME: ${{ steps.create-commit.outputs.branch_name }}
-        BASE_REF: ${{ github.ref_name }}
+        BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
         PR_LABELS: ${{ inputs.pr_labels }}
         PR_TITLE: ${{ inputs.pr_title }}
         PR_BODY: ${{ inputs.pr_body }}
@@ -307,10 +308,10 @@ runs:
           const path = require('path');
           const createOrUpdatePR = require(path.join(process.env.GITHUB_ACTION_PATH, 'js/create-update-pr.js'));
           const result = await createOrUpdatePR({ github, context });
-          core.setOutput('pr_created', result.created);
-          core.setOutput('pr_number', result.pr.number);
-          core.setOutput('pr_id', result.pr.id);
-          return result.created;
+          core.setOutput('pr_created', result.created || false);
+          core.setOutput('pr_number', result.pr?.number || '');
+          core.setOutput('pr_id', result.pr?.id || '');
+          return !!result.created;
 
     - name: Verify PR created
       id: check-pr-created

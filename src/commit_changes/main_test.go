@@ -40,9 +40,9 @@ func TestEnvVarsToConfig(t *testing.T) {
 		{
 			name: "Valid environment variables",
 			envVars: map[string]string{
+				"BASE_REF":             "main",
 				"GITHUB_ACTOR":         "test_actor",
 				"GITHUB_SHA":           "123456",
-				"GITHUB_REF_NAME":      "main",
 				"TEMP_BRANCH_PREFIX":   "temp",
 				"TRANSLATIONS_PATH":    "translations/",
 				"FILE_FORMAT":          "json",
@@ -57,7 +57,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 			expectedConfig: &Config{
 				GitHubActor:        "test_actor",
 				GitHubSHA:          "123456",
-				GitHubRefName:      "main",
+				BaseRef:            "main",
 				TempBranchPrefix:   "temp",
 				FileExt:            []string{"json"},
 				BaseLang:           "en",
@@ -73,9 +73,9 @@ func TestEnvVarsToConfig(t *testing.T) {
 		{
 			name: "FILE_EXT normalization and dedupe",
 			envVars: map[string]string{
+				"BASE_REF":           "main",
 				"GITHUB_ACTOR":       "test_actor",
 				"GITHUB_SHA":         "123456",
-				"GITHUB_REF_NAME":    "main",
 				"TEMP_BRANCH_PREFIX": "temp",
 				"TRANSLATIONS_PATH":  "translations/",
 				"FILE_EXT":           "\n .JSON \n  yaml  \n .json \n", // messy input
@@ -86,7 +86,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 			expectedConfig: &Config{
 				GitHubActor:      "test_actor",
 				GitHubSHA:        "123456",
-				GitHubRefName:    "main",
+				BaseRef:          "main",
 				TempBranchPrefix: "temp",
 				FileExt:          []string{"json", "yaml"}, // normalized, deduped, lowercased
 				BaseLang:         "en",
@@ -101,7 +101,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 			envVars: map[string]string{
 				"GITHUB_ACTOR":         "test_actor",
 				"GITHUB_SHA":           "123456",
-				"GITHUB_REF_NAME":      "main",
+				"BASE_REF":             "main",
 				"TEMP_BRANCH_PREFIX":   "temp",
 				"TRANSLATIONS_PATH":    "translations/",
 				"FILE_FORMAT":          "json",
@@ -115,7 +115,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 			expectedConfig: &Config{
 				GitHubActor:        "test_actor",
 				GitHubSHA:          "123456",
-				GitHubRefName:      "main",
+				BaseRef:            "main",
 				TempBranchPrefix:   "temp",
 				FileExt:            []string{"json"},
 				BaseLang:           "en",
@@ -133,7 +133,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 			envVars: map[string]string{
 				"GITHUB_ACTOR":       "test_actor",
 				"GITHUB_SHA":         "123456",
-				"GITHUB_REF_NAME":    "main",
+				"BASE_REF":           "main",
 				"TEMP_BRANCH_PREFIX": "temp",
 				"TRANSLATIONS_PATH":  "translations/",
 				"FILE_FORMAT":        "structured_json",
@@ -145,7 +145,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 			expectedConfig: &Config{
 				GitHubActor:      "test_actor",
 				GitHubSHA:        "123456",
-				GitHubRefName:    "main",
+				BaseRef:          "main",
 				TempBranchPrefix: "temp",
 				FileExt:          []string{"json"},
 				BaseLang:         "en",
@@ -159,7 +159,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 			name: "Missing required environment variable",
 			envVars: map[string]string{
 				"GITHUB_SHA":         "123456",
-				"GITHUB_REF_NAME":    "main",
+				"BASE_REF":           "main",
 				"TEMP_BRANCH_PREFIX": "temp",
 				"TRANSLATIONS_PATH":  "translations/",
 				"FILE_FORMAT":        "json",
@@ -175,7 +175,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 			envVars: map[string]string{
 				"GITHUB_ACTOR":       "test_actor",
 				"GITHUB_SHA":         "123456",
-				"GITHUB_REF_NAME":    "main",
+				"BASE_REF":           "main",
 				"TEMP_BRANCH_PREFIX": "temp",
 				"TRANSLATIONS_PATH":  "translations/",
 				"FILE_FORMAT":        "json",
@@ -191,7 +191,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 			envVars: map[string]string{
 				"GITHUB_ACTOR":       "test_actor",
 				"GITHUB_SHA":         "123456",
-				"GITHUB_REF_NAME":    "main",
+				"BASE_REF":           "main",
 				"TEMP_BRANCH_PREFIX": "temp",
 				"TRANSLATIONS_PATH":  "translations/",
 				"FILE_EXT":           "strings\nstringsdict",
@@ -202,7 +202,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 			expectedConfig: &Config{
 				GitHubActor:      "test_actor",
 				GitHubSHA:        "123456",
-				GitHubRefName:    "main",
+				BaseRef:          "main",
 				TempBranchPrefix: "temp",
 				FileExt:          []string{"strings", "stringsdict"},
 				BaseLang:         "en",
@@ -220,7 +220,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 			allEnvVars := []string{
 				"GITHUB_ACTOR",
 				"GITHUB_SHA",
-				"GITHUB_REF_NAME",
+				"BASE_REF",
 				"TEMP_BRANCH_PREFIX",
 				"TRANSLATIONS_PATH",
 				"BASE_LANG",
@@ -400,37 +400,74 @@ func TestSetGitUser_WithCustomValues(t *testing.T) {
 }
 
 func TestCheckoutBranch(t *testing.T) {
-	runner := &MockCommandRunner{
-		RunFunc: func(name string, args ...string) error {
-			if name == "git" {
-				if args[0] == "fetch" && args[1] == "origin" {
-					// Allow fetch for any branch name
+	t.Run("creates from origin base", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			RunFunc: func(name string, args ...string) error {
+				if name != "git" {
+					return fmt.Errorf("unexpected binary: %s", name)
+				}
+				switch {
+				// first attempt should be: git checkout -B new_branch origin/main
+				case len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "new_branch" && args[3] == "origin/main":
 					return nil
+				default:
+					return fmt.Errorf("unexpected command: git %v", args)
 				}
-				if args[0] == "checkout" && args[1] == "-b" {
-					if args[2] == "new_branch" {
-						return nil // Simulate branch creation
-					}
-				}
-				if args[0] == "checkout" && args[1] == "existing_branch" {
-					return nil // Simulate switching to existing branch
-				}
-			}
-			return fmt.Errorf("unexpected command: %s %v", name, args)
-		},
-	}
+			},
+		}
+		if err := checkoutBranch("new_branch", "main", runner); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 
-	// Test branch creation
-	err := checkoutBranch("new_branch", runner)
-	if err != nil {
-		t.Errorf("Unexpected error for new branch: %v", err)
-	}
+	t.Run("falls back to local base", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			RunFunc: func(name string, args ...string) error {
+				if name != "git" {
+					return fmt.Errorf("unexpected binary: %s", name)
+				}
+				switch {
+				// first attempt (remote) fails
+				case len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "branch_from_local" && args[3] == "origin/dev":
+					return fmt.Errorf("remote branch missing")
+				// second attempt should be local base: git checkout -B branch_from_local dev
+				case len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "branch_from_local" && args[3] == "dev":
+					return nil
+				default:
+					return fmt.Errorf("unexpected command: git %v", args)
+				}
+			},
+		}
+		if err := checkoutBranch("branch_from_local", "dev", runner); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 
-	// Test switching to existing branch
-	err = checkoutBranch("existing_branch", runner)
-	if err != nil {
-		t.Errorf("Unexpected error for existing branch: %v", err)
-	}
+	t.Run("switches to existing branch", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			RunFunc: func(name string, args ...string) error {
+				if name != "git" {
+					return fmt.Errorf("unexpected binary: %s", name)
+				}
+				switch {
+				// fail remote create
+				case len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "existing_branch" && args[3] == "origin/main":
+					return fmt.Errorf("already exists")
+				// fail local create
+				case len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "existing_branch" && args[3] == "main":
+					return fmt.Errorf("already exists")
+				// succeed switching
+				case len(args) == 2 && args[0] == "checkout" && args[1] == "existing_branch":
+					return nil
+				default:
+					return fmt.Errorf("unexpected command: git %v", args)
+				}
+			},
+		}
+		if err := checkoutBranch("existing_branch", "main", runner); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }
 
 func TestCommitAndPush(t *testing.T) {
@@ -678,7 +715,7 @@ func TestGenerateBranchName(t *testing.T) {
 			name: "Valid inputs",
 			config: &Config{
 				GitHubSHA:        "1234567890abcdef",
-				GitHubRefName:    "feature_branch",
+				BaseRef:          "feature_branch",
 				TempBranchPrefix: "temp",
 			},
 			expectedError: false,
@@ -688,7 +725,7 @@ func TestGenerateBranchName(t *testing.T) {
 			name: "Valid inputs with branch override",
 			config: &Config{
 				GitHubSHA:          "1234567890abcdef",
-				GitHubRefName:      "feature_branch",
+				BaseRef:            "feature_branch",
 				TempBranchPrefix:   "temp",
 				OverrideBranchName: "custom_branch",
 			},
@@ -699,26 +736,26 @@ func TestGenerateBranchName(t *testing.T) {
 			name: "GITHUB_SHA too short",
 			config: &Config{
 				GitHubSHA:        "123",
-				GitHubRefName:    "main",
+				BaseRef:          "main",
 				TempBranchPrefix: "temp",
 			},
 			expectedError: true,
 		},
 		{
-			name: "GITHUB_REF_NAME with invalid characters",
+			name: "BASE_REF with invalid characters",
 			config: &Config{
 				GitHubSHA:        "abcdef123456",
-				GitHubRefName:    "feature/branch!@#",
+				BaseRef:          "feature/branch!@#",
 				TempBranchPrefix: "temp",
 			},
 			expectedError: false,
 			expectedStart: "temp_feature/branch_abcdef_",
 		},
 		{
-			name: "GITHUB_REF_NAME exceeding 50 characters",
+			name: "BASE_REF exceeding 50 characters",
 			config: &Config{
 				GitHubSHA:        "abcdef123456",
-				GitHubRefName:    strings.Repeat("a", 60),
+				BaseRef:          strings.Repeat("a", 60),
 				TempBranchPrefix: "temp",
 			},
 			expectedError: false,
@@ -852,6 +889,137 @@ func TestCommitAndPush_PushError(t *testing.T) {
 		t.Errorf("Expected error, but got nil")
 	} else if !strings.Contains(err.Error(), "push failed") {
 		t.Errorf("Expected push error, but got %v", err)
+	}
+}
+
+func TestResolveRealBase_UsesProvidedBase(t *testing.T) {
+	runner := &MockCommandRunner{} // no calls expected
+	cfg := &Config{BaseRef: "feature/xyz"}
+
+	got, err := resolveRealBase(runner, cfg)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != "feature/xyz" {
+		t.Fatalf("want feature/xyz, got %s", got)
+	}
+}
+
+func TestResolveRealBase_FallbackToRemoteHEAD(t *testing.T) {
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			if name == "git" && len(args) >= 2 && args[0] == "remote" && args[1] == "show" {
+				// minimal realistic snippet
+				return `
+* remote origin
+  Fetch URL: git@github.com:org/repo.git
+  HEAD branch: develop
+  Remote branches:
+    develop tracked
+    main    tracked
+`, nil
+			}
+			return "", fmt.Errorf("unexpected capture: %s %v", name, args)
+		},
+	}
+	cfg := &Config{BaseRef: "123/merge"} // synthetic
+
+	got, err := resolveRealBase(runner, cfg)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != "develop" {
+		t.Fatalf("want develop, got %s", got)
+	}
+}
+
+func TestResolveRealBase_FallbackToMainWhenUnknown(t *testing.T) {
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			// simulate git output that doesn't include "HEAD branch:"
+			return "some weird output", nil
+		},
+	}
+	cfg := &Config{BaseRef: ""} // empty → synthetic
+
+	got, err := resolveRealBase(runner, cfg)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != "main" {
+		t.Fatalf("want main, got %s", got)
+	}
+}
+
+func TestIsSyntheticRef(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"", true},
+		{"merge", true},
+		{"head", true},
+		{"123/merge", true},
+		{"123/head", true},
+		{"refs/pull/45/merge", true},
+		{"refs/pull/45/head", true},
+		{"feature/foo", false},
+		{"main", false},
+	}
+	for _, c := range cases {
+		if got := isSyntheticRef(c.in); got != c.want {
+			t.Errorf("isSyntheticRef(%q) = %v; want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestEnvVarsToConfig_BaseRefNormalization(t *testing.T) {
+	// scrub
+	keys := []string{"GITHUB_ACTOR", "GITHUB_SHA", "BASE_REF", "TEMP_BRANCH_PREFIX", "TRANSLATIONS_PATH", "BASE_LANG", "FLAT_NAMING", "ALWAYS_PULL_BASE", "FORCE_PUSH"}
+	for _, k := range keys {
+		t.Setenv(k, "")
+	}
+
+	t.Setenv("GITHUB_ACTOR", "actor")
+	t.Setenv("GITHUB_SHA", "abcdef")
+	t.Setenv("BASE_REF", "refs/heads/release/2025-10")
+	t.Setenv("TEMP_BRANCH_PREFIX", "lok")
+	t.Setenv("TRANSLATIONS_PATH", "messages")
+	t.Setenv("FILE_FORMAT", "json")
+	t.Setenv("BASE_LANG", "en")
+	t.Setenv("FLAT_NAMING", "true")
+	t.Setenv("ALWAYS_PULL_BASE", "false")
+	t.Setenv("FORCE_PUSH", "false")
+
+	cfg, err := envVarsToConfig()
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if cfg.BaseRef != "release/2025-10" {
+		t.Fatalf("want release/2025-10, got %s", cfg.BaseRef)
+	}
+}
+
+func TestEnvVarsToConfig_NoExtsFails(t *testing.T) {
+	// scrub
+	keys := []string{"GITHUB_ACTOR", "GITHUB_SHA", "BASE_REF", "TEMP_BRANCH_PREFIX", "TRANSLATIONS_PATH", "BASE_LANG", "FLAT_NAMING", "ALWAYS_PULL_BASE", "FORCE_PUSH", "FILE_FORMAT", "FILE_EXT"}
+	for _, k := range keys {
+		t.Setenv(k, "")
+	}
+
+	t.Setenv("GITHUB_ACTOR", "actor")
+	t.Setenv("GITHUB_SHA", "abcdef")
+	t.Setenv("BASE_REF", "main")
+	t.Setenv("TEMP_BRANCH_PREFIX", "lok")
+	t.Setenv("TRANSLATIONS_PATH", "messages")
+	t.Setenv("BASE_LANG", "en")
+	t.Setenv("FLAT_NAMING", "true")
+	t.Setenv("ALWAYS_PULL_BASE", "false")
+	t.Setenv("FORCE_PUSH", "false")
+
+	_, err := envVarsToConfig()
+	if err == nil || !strings.Contains(err.Error(), "cannot infer file extension") {
+		t.Fatalf("expected missing ext error, got %v", err)
 	}
 }
 

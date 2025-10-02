@@ -1,39 +1,61 @@
 // create-update-pr.js
 module.exports = async ({ github, context }) => {
-  const { repo } = context;
   console.log("Creating or updating PR...");
 
-  try {
-    const branchName = process.env.BRANCH_NAME;
-    const baseRef = process.env.BASE_REF;
-    const prTitle = process.env.PR_TITLE;
-    const prBody = process.env.PR_BODY;
+  const { repo } = context;
 
-    if (!branchName || !baseRef) {
-      throw new Error("Required environment variables are missing");
+  try {
+    let baseRef = (process.env.BASE_REF || "").trim();
+    const branchName = (process.env.BRANCH_NAME || "").trim();
+    const prTitle = process.env.PR_TITLE || "Lokalise: sync translations";
+    const prBody = process.env.PR_BODY || "";
+    const prDraft = String(process.env.PR_DRAFT || "false").toLowerCase() === "true";
+
+    const prLabels = (process.env.PR_LABELS || "").split(",").map(s => s.trim()).filter(Boolean);
+    const prReviewers = (process.env.PR_REVIEWERS || "").split(",").map(s => s.trim()).filter(Boolean);
+    const prTeams = (process.env.PR_TEAMS_REVIEWERS || "").split(",").map(s => s.trim()).filter(Boolean);
+    const prAssignees = (process.env.PR_ASSIGNEES || "").split(",").map(s => s.trim()).filter(Boolean);
+
+    if (!branchName) {
+      throw new Error("BRANCH_NAME is missing");
     }
 
-    const prLabels = (process.env.PR_LABELS || "")
-      .split(",").map(s => s.trim()).filter(Boolean);
+    baseRef = baseRef.replace(/^refs\/heads\//, "");
 
-    const prReviewers = (process.env.PR_REVIEWERS || "")
-      .split(",").map(s => s.trim()).filter(Boolean);
+    // synthetic PR refs? bail to default
+    const looksLikeSynthetic = /^(\d+)\/(merge|head)$/.test(baseRef) || baseRef === "merge" || baseRef === "head";
+    
+    if (!baseRef || looksLikeSynthetic) {
+      const { data: repoInfo } = await github.rest.repos.get({ owner: repo.owner, repo: repo.repo });
+      baseRef = repoInfo.default_branch;
+      console.log(`BASE_REF was invalid/synthetic, using default branch: ${baseRef}`);
+    }
 
-    const prTeams = (process.env.PR_TEAMS_REVIEWERS || "")
-      .split(",").map(s => s.trim()).filter(Boolean);
+    // Head owner/repo detection (fork-aware, but harmless for same-repo)
+    const payload = context.payload || {};
+    const headRepoFullName =
+      payload.pull_request?.head?.repo?.full_name ||
+      `${repo.owner}/${repo.repo}`;
+    const headOwner = headRepoFullName.split("/")[0];
 
-    const prAssignees = (process.env.PR_ASSIGNEES || "")
-      .split(",").map(s => s.trim()).filter(Boolean);
+    // For listing PRs, GitHub requires "owner:branch" in head filter
+    const headForList = `${headOwner}:${branchName}`;
+    // For creating PR, same-repo can be just "branch", fork must be "owner:branch"
+    const sameRepo = headRepoFullName === `${repo.owner}/${repo.repo}`;
+    const headForCreate = sameRepo ? branchName : headForList;
 
-    const prDraft = String(process.env.PR_DRAFT || "false").toLowerCase() === "true";
+    console.log(`Resolved base: ${baseRef}`);
+    console.log(`Resolved head (list): ${headForList}`);
+    console.log(`Resolved head (create): ${headForCreate}`);
 
     /* ─────────── CHECK FOR EXISTING PR ─────────── */
     const { data: pullRequests } = await github.rest.pulls.list({
       owner: repo.owner,
       repo: repo.repo,
-      head: `${repo.owner}:${branchName}`,
-      base: baseRef,
       state: "open",
+      head: headForList,
+      base: baseRef,
+      per_page: 1,
     });
 
     if (pullRequests.length > 0) {
@@ -105,7 +127,7 @@ module.exports = async ({ github, context }) => {
       owner: repo.owner,
       repo: repo.repo,
       title: prTitle,
-      head: branchName,
+      head: headForCreate,
       base: baseRef,
       body: prBody,
       draft: prDraft,
@@ -155,6 +177,6 @@ module.exports = async ({ github, context }) => {
     return { created: true, pr: { number: newPr.number, id: newPr.id } };
   } catch (error) {
     console.error(`Failed to create or update pull request: ${error.message}`);
-    return { created: false };
+    return { created: false, pr: null };
   }
 };

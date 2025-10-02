@@ -47,7 +47,6 @@ func (d DefaultCommandRunner) Capture(name string, args ...string) (string, erro
 type Config struct {
 	GitHubActor        string
 	GitHubSHA          string
-	GitHubRefName      string
 	TempBranchPrefix   string
 	FileExt            []string
 	BaseLang           string
@@ -58,6 +57,7 @@ type Config struct {
 	GitCommitMessage   string
 	OverrideBranchName string
 	ForcePush          bool
+	BaseRef            string
 }
 
 func main() {
@@ -90,6 +90,14 @@ func commitAndPushChanges(runner CommandRunner) (string, error) {
 		return "", err
 	}
 
+	realBase, err := resolveRealBase(runner, config)
+	if err != nil {
+		return "", err
+	}
+	fmt.Printf("Using base branch: %s\n", realBase)
+
+	_, _ = runner.Capture("git", "fetch", "--no-tags", "--prune", "origin", realBase)
+
 	// Generate a sanitized branch name
 	branchName, err := generateBranchName(config)
 	if err != nil {
@@ -97,7 +105,7 @@ func commitAndPushChanges(runner CommandRunner) (string, error) {
 	}
 
 	// Checkout a new branch or switch to it if it already exists
-	if err := checkoutBranch(branchName, runner); err != nil {
+	if err := checkoutBranch(branchName, realBase, runner); err != nil {
 		return "", err
 	}
 
@@ -121,7 +129,6 @@ func envVarsToConfig() (*Config, error) {
 	requiredEnvVars := []string{
 		"GITHUB_ACTOR",
 		"GITHUB_SHA",
-		"GITHUB_REF_NAME",
 		"TEMP_BRANCH_PREFIX",
 		"TRANSLATIONS_PATH",
 		"BASE_LANG",
@@ -152,6 +159,9 @@ func envVarsToConfig() (*Config, error) {
 		}
 		envBoolValues[key] = value
 	}
+
+	baseRef := strings.TrimSpace(os.Getenv("BASE_REF"))
+	baseRef = strings.TrimPrefix(baseRef, "refs/heads/")
 
 	fileExts := parsers.ParseStringArrayEnv("FILE_EXT")
 	if len(fileExts) == 0 {
@@ -190,7 +200,6 @@ func envVarsToConfig() (*Config, error) {
 	return &Config{
 		GitHubActor:        envValues["GITHUB_ACTOR"],
 		GitHubSHA:          envValues["GITHUB_SHA"],
-		GitHubRefName:      envValues["GITHUB_REF_NAME"],
 		TempBranchPrefix:   envValues["TEMP_BRANCH_PREFIX"],
 		FileExt:            norm,
 		BaseLang:           envValues["BASE_LANG"],
@@ -201,6 +210,7 @@ func envVarsToConfig() (*Config, error) {
 		GitCommitMessage:   commitMsg,
 		OverrideBranchName: os.Getenv("OVERRIDE_BRANCH_NAME"),
 		ForcePush:          envBoolValues["FORCE_PUSH"],
+		BaseRef:            baseRef,
 	}, nil
 }
 
@@ -239,7 +249,7 @@ func generateBranchName(config *Config) (string, error) {
 	}
 	shortSHA := githubSHA[:6]
 
-	githubRefName := config.GitHubRefName
+	githubRefName := config.BaseRef
 	safeRefName := sanitizeString(githubRefName, 50)
 
 	tempBranchPrefix := config.TempBranchPrefix
@@ -249,16 +259,16 @@ func generateBranchName(config *Config) (string, error) {
 }
 
 // checkoutBranch creates and checks out the branch, or switches to it if it already exists
-func checkoutBranch(branchName string, runner CommandRunner) error {
-	// Try to fetch the branch if it exists remotely, suppressing errors/output
-	_, _ = runner.Capture("git", "fetch", "origin", branchName)
-
-	// Try to create a new branch
-	if err := runner.Run("git", "checkout", "-b", branchName); err == nil {
+func checkoutBranch(branchName, baseRef string, runner CommandRunner) error {
+	// try to create from origin/base
+	if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+baseRef); err == nil {
 		return nil
 	}
-
-	// If branch already exists, switch to it
+	// fallback to local base then
+	if err := runner.Run("git", "checkout", "-B", branchName, baseRef); err == nil {
+		return nil
+	}
+	// if branch exists locally, just switch to it
 	fmt.Printf("Branch '%s' already exists. Switching to it...\n", branchName)
 	if err := runner.Run("git", "checkout", branchName); err != nil {
 		return fmt.Errorf("failed to checkout existing branch %s: %v", branchName, err)
@@ -338,4 +348,44 @@ func sanitizeString(input string, maxLength int) string {
 		return result[:maxLength]
 	}
 	return result
+}
+
+func resolveRealBase(runner CommandRunner, cfg *Config) (string, error) {
+	base := cfg.BaseRef
+	if !isSyntheticRef(base) {
+		return base, nil
+	}
+
+	// fallback: detect remote default (HEAD) branch
+	out, _ := runner.Capture("git", "remote", "show", "origin")
+	// look for: "  HEAD branch: main"
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "HEAD branch: ") {
+			def := strings.TrimSpace(strings.TrimPrefix(line, "HEAD branch: "))
+			if def != "" {
+				fmt.Printf("BASE_REF synthetic/empty, using remote HEAD: %s\n", def)
+				return def, nil
+			}
+		}
+	}
+	// last resort
+	return "main", nil
+}
+
+func isSyntheticRef(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return true
+	}
+	if ref == "merge" || ref == "head" {
+		return true
+	}
+	if strings.HasPrefix(ref, "refs/pull/") {
+		return true
+	}
+	if strings.HasSuffix(ref, "/merge") || strings.HasSuffix(ref, "/head") {
+		return true
+	}
+	return false
 }
