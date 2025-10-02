@@ -58,6 +58,7 @@ type Config struct {
 	OverrideBranchName string
 	ForcePush          bool
 	BaseRef            string
+	HeadRef            string
 }
 
 func main() {
@@ -105,7 +106,7 @@ func commitAndPushChanges(runner CommandRunner) (string, error) {
 	}
 
 	// Checkout a new branch or switch to it if it already exists
-	if err := checkoutBranch(branchName, realBase, runner); err != nil {
+	if err := checkoutBranch(branchName, realBase, config.HeadRef, runner); err != nil {
 		return "", err
 	}
 
@@ -162,6 +163,7 @@ func envVarsToConfig() (*Config, error) {
 
 	baseRef := strings.TrimSpace(os.Getenv("BASE_REF"))
 	baseRef = strings.TrimPrefix(baseRef, "refs/heads/")
+	headRef := strings.TrimPrefix(strings.TrimSpace(os.Getenv("HEAD_REF")), "refs/heads/")
 
 	fileExts := parsers.ParseStringArrayEnv("FILE_EXT")
 	if len(fileExts) == 0 {
@@ -211,6 +213,7 @@ func envVarsToConfig() (*Config, error) {
 		OverrideBranchName: os.Getenv("OVERRIDE_BRANCH_NAME"),
 		ForcePush:          envBoolValues["FORCE_PUSH"],
 		BaseRef:            baseRef,
+		HeadRef:            headRef,
 	}, nil
 }
 
@@ -259,21 +262,30 @@ func generateBranchName(config *Config) (string, error) {
 }
 
 // checkoutBranch creates and checks out the branch, or switches to it if it already exists
-func checkoutBranch(branchName, baseRef string, runner CommandRunner) error {
-	// try to create from origin/base
+func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) error {
+	// If we’re updating the existing PR branch, track that remote branch.
+	if headRef != "" && branchName == headRef {
+		// fetch head
+		_, _ = runner.Capture("git", "fetch", "--no-tags", "--prune", "origin", headRef)
+		if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+headRef); err == nil {
+			return nil
+		}
+		// fallback to local copy of headRef
+		if err := runner.Run("git", "checkout", "-B", branchName, headRef); err == nil {
+			return nil
+		}
+		// last resort: just try switching
+		return runner.Run("git", "checkout", branchName)
+	}
+
+	// Original behavior: new lok_* branch from base
 	if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+baseRef); err == nil {
 		return nil
 	}
-	// fallback to local base then
 	if err := runner.Run("git", "checkout", "-B", branchName, baseRef); err == nil {
 		return nil
 	}
-	// if branch exists locally, just switch to it
-	fmt.Printf("Branch '%s' already exists. Switching to it...\n", branchName)
-	if err := runner.Run("git", "checkout", branchName); err != nil {
-		return fmt.Errorf("failed to checkout existing branch %s: %v", branchName, err)
-	}
-	return nil
+	return runner.Run("git", "checkout", branchName)
 }
 
 // buildGitAddArgs constructs the arguments for 'git add' based on the naming convention

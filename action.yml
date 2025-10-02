@@ -252,6 +252,7 @@ runs:
       if: steps.pull-files.outputs.has_changes == 'true'
       env:
         BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+        HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
         FILE_FORMAT: ${{ inputs.file_format }}
         FILE_EXT: ${{ inputs.file_ext }}
         TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
@@ -263,7 +264,7 @@ runs:
         GIT_USER_NAME: "${{ inputs.git_user_name }}"
         GIT_USER_EMAIL: "${{ inputs.git_user_email }}"
         GIT_COMMIT_MESSAGE: "${{ inputs.git_commit_message }}"
-        OVERRIDE_BRANCH_NAME: "${{ inputs.override_branch_name }}"
+        OVERRIDE_BRANCH_NAME: ${{ github.event.pull_request.head.ref || inputs.override_branch_name }}
         FORCE_PUSH: "${{ inputs.force_push }}"
       shell: bash
       run: |

@@ -415,7 +415,8 @@ func TestCheckoutBranch(t *testing.T) {
 				}
 			},
 		}
-		if err := checkoutBranch("new_branch", "main", runner); err != nil {
+		// headRef is empty -> create from base
+		if err := checkoutBranch("new_branch", "main", "", runner); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -438,7 +439,8 @@ func TestCheckoutBranch(t *testing.T) {
 				}
 			},
 		}
-		if err := checkoutBranch("branch_from_local", "dev", runner); err != nil {
+		// headRef is empty -> fallback path uses local base
+		if err := checkoutBranch("branch_from_local", "dev", "", runner); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -464,7 +466,31 @@ func TestCheckoutBranch(t *testing.T) {
 				}
 			},
 		}
-		if err := checkoutBranch("existing_branch", "main", runner); err != nil {
+		// headRef empty -> fall back to switching to existing branch
+		if err := checkoutBranch("existing_branch", "main", "", runner); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("updates existing PR head branch (uses headRef)", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			RunFunc: func(name string, args ...string) error {
+				if name != "git" {
+					return fmt.Errorf("unexpected binary: %s", name)
+				}
+				// expect: checkout -B new_br origin/new_br
+				if len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "new_br" && args[3] == "origin/new_br" {
+					return nil
+				}
+				return fmt.Errorf("unexpected command: git %v", args)
+			},
+			CaptureFunc: func(name string, args ...string) (string, error) {
+				// allow fetch noise if you call it in your code before checkout
+				return "", nil
+			},
+		}
+		// headRef equals branchName -> base off origin/headRef, not baseRef
+		if err := checkoutBranch("new_br", "main", "new_br", runner); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
