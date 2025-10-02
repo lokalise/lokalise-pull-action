@@ -173,23 +173,23 @@ runs:
       id: pull-files
       shell: bash
       env:
-        FILE_EXT: ${{ inputs.file_ext }}
-        ADDITIONAL_PARAMS: ${{ inputs.additional_params }}
-        MAX_RETRIES: ${{ inputs.max_retries }}
-        SLEEP_TIME: ${{ inputs.sleep_on_retry }}
-        FILE_FORMAT: ${{ inputs.file_format }}
-        TRANSLATIONS_PATH: ${{ inputs.translations_path }}
-        BASE_LANG: ${{ inputs.base_lang }}
-        ALWAYS_PULL_BASE: ${{ inputs.always_pull_base }}
-        FLAT_NAMING: ${{ inputs.flat_naming }}
-        HTTP_TIMEOUT: ${{ inputs.http_timeout }}
-        DOWNLOAD_TIMEOUT: ${{ inputs.download_timeout }}
-        SKIP_INCLUDE_TAGS: ${{ inputs.skip_include_tags }}
-        SKIP_ORIGINAL_FILENAMES: ${{ inputs.skip_original_filenames }}
-        PLATFORM: ${{ inputs.os_platform }}
-        ASYNC_MODE: ${{ inputs.async_mode }}
-        ASYNC_POLL_INITIAL_WAIT: ${{ inputs.async_poll_initial_wait }}
-        ASYNC_POLL_MAX_WAIT: ${{ inputs.async_poll_max_wait }}
+        FILE_EXT: "${{ inputs.file_ext }}"
+        ADDITIONAL_PARAMS: "${{ inputs.additional_params }}"
+        MAX_RETRIES: "${{ inputs.max_retries }}"
+        SLEEP_TIME: "${{ inputs.sleep_on_retry }}"
+        FILE_FORMAT: "${{ inputs.file_format }}"
+        TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
+        BASE_LANG: "${{ inputs.base_lang }}"
+        ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
+        FLAT_NAMING: "${{ inputs.flat_naming }}"
+        HTTP_TIMEOUT: "${{ inputs.http_timeout }}"
+        DOWNLOAD_TIMEOUT: "${{ inputs.download_timeout }}"
+        SKIP_INCLUDE_TAGS: "${{ inputs.skip_include_tags }}"
+        SKIP_ORIGINAL_FILENAMES: "${{ inputs.skip_original_filenames }}"
+        PLATFORM: "${{ inputs.os_platform }}"
+        ASYNC_MODE: "${{ inputs.async_mode }}"
+        ASYNC_POLL_INITIAL_WAIT: "${{ inputs.async_poll_initial_wait }}"
+        ASYNC_POLL_MAX_WAIT: "${{ inputs.async_poll_max_wait }}"
       run: |
         set -euo pipefail
 
@@ -222,8 +222,8 @@ runs:
     - name: Run post-processing command
       if: inputs.post_process_command != ''
       env:
-        FILE_FORMAT: ${{ inputs.file_format }}
-        FILE_EXT: ${{ inputs.file_ext }}
+        FILE_FORMAT: "${{ inputs.file_format }}"
+        FILE_EXT: "${{ inputs.file_ext }}"
         TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
         BASE_LANG: "${{ inputs.base_lang }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
@@ -251,10 +251,10 @@ runs:
       id: create-commit
       if: steps.pull-files.outputs.has_changes == 'true'
       env:
-        BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
-        HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
-        FILE_FORMAT: ${{ inputs.file_format }}
-        FILE_EXT: ${{ inputs.file_ext }}
+        BASE_REF: "${{ github.event.pull_request.base.ref || github.ref_name }}"
+        HEAD_REF: "${{ github.event.pull_request.head.ref || '' }}"
+        FILE_FORMAT: "${{ inputs.file_format }}"
+        FILE_EXT: "${{ inputs.file_ext }}"
         TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
         BASE_LANG: "${{ inputs.base_lang }}"
         ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
@@ -264,7 +264,7 @@ runs:
         GIT_USER_NAME: "${{ inputs.git_user_name }}"
         GIT_USER_EMAIL: "${{ inputs.git_user_email }}"
         GIT_COMMIT_MESSAGE: "${{ inputs.git_commit_message }}"
-        OVERRIDE_BRANCH_NAME: ${{ github.event.pull_request.head.ref || inputs.override_branch_name }}
+        OVERRIDE_BRANCH_NAME: "${{ github.event.pull_request.head.ref || inputs.override_branch_name }}"
         FORCE_PUSH: "${{ inputs.force_push }}"
       shell: bash
       run: |
@@ -290,15 +290,15 @@ runs:
     - name: Create or Update Pull Request
       if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'
       env:
-        BRANCH_NAME: ${{ steps.create-commit.outputs.branch_name }}
-        BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
-        PR_LABELS: ${{ inputs.pr_labels }}
-        PR_TITLE: ${{ inputs.pr_title }}
-        PR_BODY: ${{ inputs.pr_body }}
-        PR_TEAMS_REVIEWERS: ${{ inputs.pr_teams_reviewers }}
-        PR_REVIEWERS: ${{ inputs.pr_reviewers }}
-        PR_DRAFT: ${{ inputs.pr_draft }}
-        PR_ASSIGNEES: ${{ inputs.pr_assignees }}
+        BRANCH_NAME: "${{ steps.create-commit.outputs.branch_name }}"
+        BASE_REF: "${{ github.event.pull_request.base.ref || github.ref_name }}"
+        PR_LABELS: "${{ inputs.pr_labels }}"
+        PR_TITLE: "${{ inputs.pr_title }}"
+        PR_BODY: "${{ inputs.pr_body }}"
+        PR_TEAMS_REVIEWERS: "${{ inputs.pr_teams_reviewers }}"
+        PR_REVIEWERS: "${{ inputs.pr_reviewers }}"
+        PR_DRAFT: "${{ inputs.pr_draft }}"
+        PR_ASSIGNEES: "${{ inputs.pr_assignees }}"
       id: create-update-pr
       # actions/github-script@v8.0.0
       uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
