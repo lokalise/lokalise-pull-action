@@ -55,14 +55,12 @@ type Config struct {
 }
 
 func main() {
-	// Prepare configuration
 	config, err := prepareConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error preparing configuration:", err)
 		os.Exit(1)
 	}
 
-	// Detect changes
 	changed, err := detectChangedFiles(config, DefaultCommandRunner{})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error detecting changes:", err)
@@ -78,7 +76,6 @@ func main() {
 		fmt.Println("No changes detected in translation files.")
 	}
 
-	// Write the result to GitHub Actions output
 	if !githuboutput.WriteToGitHubOutput("has_changes", outputValue) {
 		fmt.Fprintln(os.Stderr, "Failed to write to GitHub output.")
 		os.Exit(1)
@@ -132,6 +129,7 @@ func gitLsFiles(config *Config, runner CommandRunner) ([]string, error) {
 // Returns: <gitCmd...> "--" <patterns...>
 func buildGitStatusArgs(paths []string, fileExt []string, flatNaming bool, gitCmd ...string) []string {
 	patterns := make([]string, 0, len(paths)*len(fileExt))
+
 	for _, path := range paths {
 		for _, ext := range fileExt {
 			ext = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
@@ -147,6 +145,7 @@ func buildGitStatusArgs(paths []string, fileExt []string, flatNaming bool, gitCm
 			}
 		}
 	}
+
 	args := append(gitCmd, "--")
 	args = append(args, patterns...)
 	return args
@@ -155,18 +154,22 @@ func buildGitStatusArgs(paths []string, fileExt []string, flatNaming bool, gitCm
 // deduplicateFiles combines and deduplicates two slices of files.
 func deduplicateFiles(statusFiles, untrackedFiles []string) []string {
 	fileSet := make(map[string]struct{})
+
 	for _, file := range statusFiles {
 		fileSet[filepath.ToSlash(file)] = struct{}{}
 	}
+
 	for _, file := range untrackedFiles {
 		fileSet[filepath.ToSlash(file)] = struct{}{}
 	}
+
 	// Collect the keys from the map to get the deduplicated list
 	allFiles := make([]string, 0, len(fileSet))
 	for file := range fileSet {
 		allFiles = append(allFiles, file)
 	}
 	slices.Sort(allFiles)
+
 	return allFiles
 }
 
@@ -228,16 +231,19 @@ func filterFiles(files []string, excludePatterns []*regexp.Regexp) []string {
 	for _, file := range files {
 		file = filepath.ToSlash(file)
 		exclude := false
+
 		for _, pattern := range excludePatterns {
 			if pattern.MatchString(file) {
 				exclude = true
 				break
 			}
 		}
+
 		if !exclude {
 			filtered = append(filtered, file)
 		}
 	}
+
 	return filtered
 }
 

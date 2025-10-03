@@ -154,17 +154,36 @@ branding:
 
 outputs:
   created_branch:
-    description: 'The branch that was created and used for the pull request'
+    description: "Branch used for the PR (new temp branch on manual runs, PR head on PR runs)"
     value: ${{ steps.create-commit.outputs.branch_name }}
+
+  pr_exists:
+    description: "True if a PR exists after this run (created or updated)"
+    value: ${{ steps.create-update-pr.outputs.pr_exists }}
+
   pr_created:
-    description: 'A boolean value specifying whether the pull request with translation updates has been created'
-    value: ${{ steps.check-pr-created.outputs.pr_created }}
+    description: "True if a brand-new PR was created by this run"
+    value: ${{ steps.create-update-pr.outputs.pr_created }}
+
+  pr_updated:
+    description: "True if an existing PR was updated by this run"
+    value: ${{ steps.create-update-pr.outputs.pr_updated }}
+
+  pr_action:
+    description: "Either 'created', 'updated', or 'none'"
+    value: ${{ steps.create-update-pr.outputs.pr_action }}
+
   pr_number:
-    description: 'Number of the created pull request'
+    description: "Pull request number (created or existing)"
     value: ${{ steps.create-update-pr.outputs.pr_number }}
+
   pr_id:
-    description: 'ID of the created pull request'
+    description: "Pull request ID (created or existing)"
     value: ${{ steps.create-update-pr.outputs.pr_id }}
+
+  pr_url:
+    description: "Pull request URL (created or existing)"
+    value: ${{ steps.create-update-pr.outputs.pr_url }}
 
 runs:
   using: "composite"
@@ -323,11 +342,11 @@ runs:
           const action = created ? 'created' : (updated ? 'updated' : 'none');
           core.setOutput('pr_action', action);
 
-          // Return something human-readable with result-encoding:string
           return action;
 
     - name: Verify PR presence
       id: check-pr-created
+      if: ${{ steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true' }}
       shell: bash
       run: |
         echo "PR action: ${{ steps.create-update-pr.outputs.pr_action }}"
@@ -336,11 +355,6 @@ runs:
 
         if [ "${{ steps.create-update-pr.outputs.pr_exists }}" = "true" ]; then
           echo "PR is present (created or updated)."
-          echo "pr_created=${{ steps.create-update-pr.outputs.pr_created }}" >> $GITHUB_OUTPUT
-          echo "pr_updated=${{ steps.create-update-pr.outputs.pr_updated }}" >> $GITHUB_OUTPUT
-          echo "pr_exists=true" >> $GITHUB_OUTPUT
         else
           echo "No PR was created or updated."
-          echo "pr_exists=false" >> $GITHUB_OUTPUT
-          exit 1
         fi

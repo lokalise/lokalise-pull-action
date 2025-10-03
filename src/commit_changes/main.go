@@ -160,8 +160,7 @@ func envVarsToConfig() (*Config, error) {
 		envBoolValues[key] = value
 	}
 
-	baseRef := strings.TrimSpace(os.Getenv("BASE_REF"))
-	baseRef = strings.TrimPrefix(baseRef, "refs/heads/")
+	baseRef := strings.TrimPrefix(strings.TrimSpace(os.Getenv("BASE_REF")), "refs/heads/")
 	headRef := strings.TrimPrefix(strings.TrimSpace(os.Getenv("HEAD_REF")), "refs/heads/")
 
 	fileExts := parsers.ParseStringArrayEnv("FILE_EXT")
@@ -174,7 +173,7 @@ func envVarsToConfig() (*Config, error) {
 		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_EXT or FILE_FORMAT environment variables are set")
 	}
 
-	// normalize + dedupe here
+	// normalize + dedup here
 	seen := make(map[string]struct{})
 	norm := make([]string, 0, len(fileExts))
 	for _, ext := range fileExts {

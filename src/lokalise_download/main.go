@@ -77,7 +77,6 @@ func (f *LokaliseFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) 
 }
 
 func main() {
-	// Ensure the required command-line arguments are provided
 	if len(os.Args) < 3 {
 		returnWithError("Usage: lokalise_download <project_id> <token>")
 	}
@@ -155,7 +154,6 @@ func buildDownloadParams(config DownloadConfig) client.DownloadParams {
 		params["include_tags"] = []string{config.GitHubRefName}
 	}
 
-	// parse additional params
 	ap := strings.TrimSpace(config.AdditionalParams)
 	if ap != "" {
 		add, err := parseJSONMap(ap)

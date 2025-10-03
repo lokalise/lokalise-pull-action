@@ -145,17 +145,19 @@ func TestPrepareConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// set envs
 			for k, v := range tt.envVars {
-				os.Setenv(k, v)
+				if err := os.Setenv(k, v); err != nil {
+					t.Fatalf("failed to set env: %v", err)
+				}
 			}
 			defer func() {
 				for k := range tt.envVars {
-					os.Unsetenv(k)
+					if err := os.Unsetenv(k); err != nil {
+						t.Fatalf("failed to set env: %v", err)
+					}
 				}
 			}()
 
-			// call
 			cfg, err := prepareConfig()
 
 			if tt.expectedError != "" {
@@ -233,19 +235,17 @@ func TestBuildGitStatusArgs(t *testing.T) {
 		{
 			name:       "Empty extensions yields only git args and --",
 			paths:      []string{"path1"},
-			fileExt:    []string{}, // no patterns added
+			fileExt:    []string{},
 			flatNaming: true,
 			expected:   []string{"diff", "--name-only", "HEAD", "--"},
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := buildGitStatusArgs(tt.paths, tt.fileExt, tt.flatNaming, "diff", "--name-only", "HEAD")
 
-			// Normalize `got` and `expected` paths for comparison
 			normalize := func(paths []string) []string {
 				for i := range paths {
 					paths[i] = filepath.ToSlash(paths[i])
@@ -284,7 +284,6 @@ func TestDeduplicateFiles(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := deduplicateFiles(tt.statusFiles, tt.untrackedFiles)
@@ -358,7 +357,6 @@ func TestFilterFiles(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := filterFiles(tt.files, tt.excludePatterns)
@@ -618,9 +616,6 @@ func TestBuildExcludePatterns(t *testing.T) {
 			},
 			expectError: false,
 		},
-
-		// --- NEW CASES ---
-
 		{
 			name: "Flat naming, AlwaysPullBase = false (multi-ext iOS)",
 			config: &Config{
@@ -672,12 +667,9 @@ func TestBuildExcludePatterns(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			// Normalize expected patterns to use forward slashes
 			normalizePatterns := func(patterns []string) []string {
 				var normalized []string
 				for _, p := range patterns {
@@ -700,12 +692,11 @@ func TestBuildExcludePatterns(t *testing.T) {
 				return
 			}
 
-			// Convert the compiled regex patterns back to strings to compare
 			var patternStrings []string
 			for _, p := range patterns {
 				patternStrings = append(patternStrings, p.String())
 			}
-			// Normalize actual patterns
+
 			normalizedPatternStrings := normalizePatterns(patternStrings)
 
 			if !reflect.DeepEqual(normalizedPatternStrings, normalizedExpectedPatterns) {
