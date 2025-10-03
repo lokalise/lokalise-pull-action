@@ -346,15 +346,32 @@ runs:
 
     - name: Verify PR presence
       id: check-pr-created
-      if: ${{ steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true' }}
       shell: bash
       run: |
+        set -e
+
+        if [ "${{ steps.pull-files.outputs.has_changes }}" != "true" ]; then
+          echo "No changes detected, nothing to commit."
+          exit 0
+        fi
+
+        if [ "${{ steps.create-commit.outputs.commit_created }}" != "true" ]; then
+          echo "Changes detected but no commit was created (e.g., filtered/excluded)."
+          exit 0
+        fi
+
         echo "PR action: ${{ steps.create-update-pr.outputs.pr_action }}"
         echo "PR number: ${{ steps.create-update-pr.outputs.pr_number }}"
         echo "PR url:    ${{ steps.create-update-pr.outputs.pr_url }}"
 
         if [ "${{ steps.create-update-pr.outputs.pr_exists }}" = "true" ]; then
-          echo "PR is present (created or updated)."
+          if [ "${{ steps.create-update-pr.outputs.pr_created }}" = "true" ]; then
+            echo "PR was created."
+          elif [ "${{ steps.create-update-pr.outputs.pr_updated }}" = "true" ]; then
+            echo "PR was updated."
+          else
+            echo "PR exists, but neither created nor updated flags are true (noop?)."
+          fi
         else
-          echo "No PR was created or updated."
+          echo "Commit created but no PR exists (unexpected)."
         fi
