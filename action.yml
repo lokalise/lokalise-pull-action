@@ -5,7 +5,6 @@ inputs:
   api_token:
     description: 'API token for Lokalise with read/write permissions'
     required: true
-    secret: true
   project_id:
     description: 'Project ID for Lokalise'
     required: true
@@ -81,19 +80,19 @@ inputs:
   max_retries:
     description: 'Maximum number of retries on rate limit and other retryable errors'
     required: false
-    default: 3
+    default: '3'
   sleep_on_retry:
     description: 'Number of seconds to sleep before retrying'
     required: false
-    default: 1
+    default: '1'
   http_timeout:
     description: 'Timeout for HTTP calls (in seconds)'
     required: false
-    default: 120
+    default: '120'
   download_timeout:
     description: 'Timeout for the whole download operation (in seconds)'
     required: false
-    default: 600
+    default: '600'
   async_mode:
     description: 'Use async mode for translations download'
     required: false
@@ -101,11 +100,11 @@ inputs:
   async_poll_initial_wait:
     description: 'Number of seconds to wait before polling the async download process for the first time'
     required: false
-    default: 1
+    default: '1'
   async_poll_max_wait:
     description: 'Timeout for polling the async download process'
     required: false
-    default: 120
+    default: '120'
   os_platform:
     description: 'Target platform for the binary (linux_amd64, linux_arm64, mac_amd64, mac_arm64)'
     required: false
@@ -124,7 +123,6 @@ inputs:
     default: 'Translations update'
   custom_github_token:
     description: 'Optional GitHub token to use for API operations instead of the default GITHUB_TOKEN. Useful for custom permissions or elevated scopes.'
-    secret: true
     required: false
     default: ''
   override_branch_name:
@@ -144,10 +142,6 @@ inputs:
     required: false
     default: 'false'
 
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
 branding:
   icon: 'download-cloud'
   color: 'orange'
@@ -192,6 +186,8 @@ runs:
       id: pull-files
       shell: bash
       env:
+        LOKALISE_API_KEY: "${{ inputs.api_token }}"
+        LOKALISE_PROJECT_ID: "${{ inputs.project_id }}"
         FILE_EXT: "${{ inputs.file_ext }}"
         ADDITIONAL_PARAMS: "${{ inputs.additional_params }}"
         MAX_RETRIES: "${{ inputs.max_retries }}"
@@ -220,7 +216,7 @@ runs:
           exit 1
         fi
         chmod +x "$CMD_PATH"
-        "$CMD_PATH" "${{ inputs.project_id }}" "${{ inputs.api_token }}" || {
+        "$CMD_PATH" || {
           echo "Error: lokalise_download script failed with exit code $?"
           exit 1
         }
@@ -256,6 +252,7 @@ runs:
         set +e
         eval "${{ inputs.post_process_command }}"
         EXIT_CODE=$?
+        set -e
 
         if [[ "$STRICT" == "true" && "$EXIT_CODE" -ne 0 ]]; then
           echo "Post-processing failed with exit code $EXIT_CODE and strict mode is enabled. Exiting."
@@ -304,7 +301,7 @@ runs:
           exit 1
         }
 
-        echo "Changes have been commited!"
+        echo "Changes have been committed!"
 
     - name: Create or Update Pull Request
       if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'

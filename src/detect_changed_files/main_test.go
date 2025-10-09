@@ -473,16 +473,18 @@ func TestDetectChangedFiles_AllChangesExcluded_Flat_PerExt(t *testing.T) {
 }
 
 func TestDetectChangedFiles_Nested_BaseDirExcluded(t *testing.T) {
-	// nested naming: exclude baseLang dir if AlwaysPullBase=false
 	paths := []string{"ios/App"}
 	fileExts := []string{"strings", "stringsdict"}
 	flat := false
+
+	revParseKey := filepath.ToSlash("git rev-parse --verify HEAD")
 
 	diffArgs := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only", "HEAD")
 	lsArgs := buildGitStatusArgs(paths, fileExts, flat, "ls-files", "--others", "--exclude-standard")
 
 	mockRunner := MockCommandRunner{
 		Output: map[string][]string{
+			revParseKey: {},
 			cmdKey(diffArgs[:3], diffArgs[4:]): {
 				filepath.ToSlash("ios/App/en/Localizable.strings"),
 				filepath.ToSlash("ios/App/en/Plurals.stringsdict"),
@@ -504,11 +506,10 @@ func TestDetectChangedFiles_Nested_BaseDirExcluded(t *testing.T) {
 
 	changed, err := detectChangedFiles(config, mockRunner)
 	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
-	// en/* excluded; de/* remains → should be changes
 	if !changed {
-		t.Errorf("Expected changes (non-base dir files remain), but got none")
+		t.Fatalf("Expected changes (non-base dir files remain), but got none")
 	}
 }
 
@@ -517,10 +518,16 @@ func TestDetectChangedFiles_GitDiffError(t *testing.T) {
 	fileExts := []string{"json"}
 	flat := true
 
+	revParseKey := filepath.ToSlash("git rev-parse --verify HEAD")
+
 	diffArgs := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only", "HEAD")
 
 	mockRunner := MockCommandRunner{
+		Output: map[string][]string{
+			revParseKey: {}, // no output, but success
+		},
 		Err: map[string]error{
+			// same as before: error on the actual diff HEAD call
 			cmdKey(diffArgs[:3], diffArgs[4:]): fmt.Errorf("git diff error"),
 		},
 	}
@@ -529,11 +536,89 @@ func TestDetectChangedFiles_GitDiffError(t *testing.T) {
 		Paths:      paths,
 		FileExt:    fileExts,
 		FlatNaming: flat,
+		// other fields not needed for this error path
 	}
 
 	_, err := detectChangedFiles(config, mockRunner)
 	if err == nil || !strings.Contains(err.Error(), "git diff error") {
 		t.Errorf("Expected git diff error, but got %v", err)
+	}
+}
+
+func TestGitDiff_NoHead_Fallbacks(t *testing.T) {
+	paths := []string{"locales"}
+	fileExts := []string{"json"}
+	flat := true
+
+	revParseKey := filepath.ToSlash("git rev-parse --verify HEAD")
+
+	argsCached := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only", "--cached")
+	argsWT := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only")
+	argsLS := buildGitStatusArgs(paths, fileExts, flat, "ls-files", "--others", "--exclude-standard")
+
+	mock := MockCommandRunner{
+		Err: map[string]error{
+			revParseKey: fmt.Errorf("bad revision 'HEAD'"),
+		},
+		Output: map[string][]string{
+			cmdKey(argsCached[:3], argsCached[4:]): {"locales/en.json"},
+			cmdKey(argsWT[:3], argsWT[4:]):         {},
+			cmdKey(argsLS[:3], argsLS[4:]):         {},
+		},
+	}
+
+	cfg := &Config{
+		Paths:          paths,
+		FileExt:        fileExts,
+		FlatNaming:     flat,
+		AlwaysPullBase: true,
+		BaseLang:       "en",
+	}
+
+	changed, err := detectChangedFiles(cfg, mock)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !changed {
+		t.Fatalf("expected changes to be detected")
+	}
+}
+
+func TestGitDiff_NoHead_NoChanges(t *testing.T) {
+	paths := []string{"locales"}
+	fileExts := []string{"json"}
+	flat := true
+
+	revParseKey := filepath.ToSlash("git rev-parse --verify HEAD")
+	argsCached := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only", "--cached")
+	argsWT := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only")
+	argsLS := buildGitStatusArgs(paths, fileExts, flat, "ls-files", "--others", "--exclude-standard")
+
+	mock := MockCommandRunner{
+		Err: map[string]error{
+			revParseKey: fmt.Errorf("bad revision 'HEAD'"),
+		},
+		Output: map[string][]string{
+			cmdKey(argsCached[:3], argsCached[4:]): {},
+			cmdKey(argsWT[:3], argsWT[4:]):         {},
+			cmdKey(argsLS[:3], argsLS[4:]):         {},
+		},
+	}
+
+	cfg := &Config{
+		Paths:          paths,
+		FileExt:        fileExts,
+		FlatNaming:     flat,
+		AlwaysPullBase: true,
+		BaseLang:       "en",
+	}
+
+	changed, err := detectChangedFiles(cfg, mock)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if changed {
+		t.Fatalf("expected no changes")
 	}
 }
 

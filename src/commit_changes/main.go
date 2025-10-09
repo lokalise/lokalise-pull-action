@@ -60,6 +60,7 @@ type Config struct {
 	ForcePush          bool
 	BaseRef            string
 	HeadRef            string
+	TranslationPaths   []string
 }
 
 func main() {
@@ -92,6 +93,7 @@ func commitAndPushChanges(runner CommandRunner) (string, error) {
 		return "", err
 	}
 
+	// Guard from synthetic and other weird refs
 	realBase, err := resolveRealBase(runner, config)
 	if err != nil {
 		return "", err
@@ -116,7 +118,7 @@ func commitAndPushChanges(runner CommandRunner) (string, error) {
 	}
 
 	// Run 'git add' with the constructed arguments
-	if err := runner.Run("git", append([]string{"add"}, addArgs...)...); err != nil {
+	if err := runner.Run("git", append([]string{"add", "--"}, addArgs...)...); err != nil {
 		return "", fmt.Errorf("failed to add files: %v", err)
 	}
 
@@ -212,6 +214,7 @@ func envVarsToConfig() (*Config, error) {
 		ForcePush:          envBoolValues["FORCE_PUSH"],
 		BaseRef:            baseRef,
 		HeadRef:            headRef,
+		TranslationPaths:   parsers.ParseStringArrayEnv("TRANSLATIONS_PATH"),
 	}, nil
 }
 
@@ -295,7 +298,7 @@ func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) e
 
 // buildGitAddArgs constructs the arguments for 'git add' based on the naming convention
 func buildGitAddArgs(config *Config) []string {
-	translationsPaths := parsers.ParseStringArrayEnv("TRANSLATIONS_PATH")
+	translationsPaths := config.TranslationPaths
 	flatNaming := config.FlatNaming
 	alwaysPullBase := config.AlwaysPullBase
 	baseLang := config.BaseLang
@@ -327,30 +330,33 @@ func buildGitAddArgs(config *Config) []string {
 }
 
 func commitAndPush(branchName string, runner CommandRunner, config *Config) error {
-	// Attempt to commit the changes
+	out, err := runner.Capture("git", "diff", "--name-only", "--cached")
+	if err != nil {
+		return fmt.Errorf("failed to inspect staged changes: %v\nOutput: %s", err, out)
+	}
+	if strings.TrimSpace(out) == "" {
+		return ErrNoChanges
+	}
+
 	output, err := runner.Capture("git", "commit", "-m", config.GitCommitMessage)
 	if err == nil {
-		// Commit succeeded, push the branch
 		if config.ForcePush {
 			return runner.Run("git", "push", "--force", "origin", branchName)
 		}
 		return runner.Run("git", "push", "origin", branchName)
-	}
-	if strings.Contains(output, "nothing to commit") {
-		return ErrNoChanges
 	}
 	return fmt.Errorf("failed to commit changes: %v\nOutput: %s", err, output)
 }
 
 // sanitizeString removes unwanted characters from a string and truncates it to maxLength
 func sanitizeString(input string, maxLength int) string {
-	// Only allow letters, numbers, underscores, hyphens, and forward slashes
+	// Only allow letters, numbers, underscores, hyphens, forward slashes, and dots
 	allowed := func(r rune) bool {
 		return (r >= 'a' && r <= 'z') ||
 			(r >= 'A' && r <= 'Z') ||
 			(r >= '0' && r <= '9') ||
 			r == '_' || r == '-' ||
-			r == '/'
+			r == '/' || r == '.'
 	}
 
 	var sanitized strings.Builder

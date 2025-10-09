@@ -266,6 +266,18 @@ For example:
     echo "PR url:        ${{ steps.lokalise-pull.outputs.pr_url }}"
 ```
 
+### Required permissions
+
+By default, this action requires the following permissions:
+
+```yaml
+permissions:
+  contents: write
+  pull-requests: write
+```
+
+Also, `issues: write` might be needed if you're providing the `pr_labels` parameter.
+
 ### How this action works
 
 When triggered, this action follows these steps:

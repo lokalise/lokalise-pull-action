@@ -114,8 +114,42 @@ func detectChangedFiles(config *Config, runner CommandRunner) (bool, error) {
 
 // gitDiff runs `git diff --name-only HEAD -- <patterns>` to detect modified files.
 func gitDiff(config *Config, runner CommandRunner) ([]string, error) {
-	args := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only", "HEAD")
-	return runner.Run("git", args...)
+	// Check if HEAD exists
+	if _, err := runner.Run("git", "rev-parse", "--verify", "HEAD"); err == nil {
+		args := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only", "HEAD")
+		return runner.Run("git", args...)
+	}
+
+	// HEAD missing. This is quite unexpected but might happen (initial commit / orphan). Combine staged and unstaged diffs.
+	var all []string
+
+	argsCached := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only", "--cached")
+	if out, err := runner.Run("git", argsCached...); err == nil {
+		all = append(all, out...)
+	}
+
+	// unstaged (worktree vs index)
+	argsWT := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only")
+	if out, err := runner.Run("git", argsWT...); err == nil {
+		all = append(all, out...)
+	}
+
+	// dedup before returning
+	seen := make(map[string]struct{}, len(all))
+	out := make([]string, 0, len(all))
+	for _, f := range all {
+		f = filepath.ToSlash(strings.TrimSpace(f))
+		if f == "" {
+			continue
+		}
+		if _, ok := seen[f]; ok {
+			continue
+		}
+		seen[f] = struct{}{}
+		out = append(out, f)
+	}
+
+	return out, nil
 }
 
 // gitLsFiles runs `git ls-files --others --exclude-standard -- <patterns>` to detect untracked files.
@@ -156,11 +190,11 @@ func deduplicateFiles(statusFiles, untrackedFiles []string) []string {
 	fileSet := make(map[string]struct{})
 
 	for _, file := range statusFiles {
-		fileSet[filepath.ToSlash(file)] = struct{}{}
+		fileSet[filepath.ToSlash(strings.TrimSpace(file))] = struct{}{}
 	}
 
 	for _, file := range untrackedFiles {
-		fileSet[filepath.ToSlash(file)] = struct{}{}
+		fileSet[filepath.ToSlash(strings.TrimSpace(file))] = struct{}{}
 	}
 
 	// Collect the keys from the map to get the deduplicated list

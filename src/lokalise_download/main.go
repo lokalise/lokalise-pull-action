@@ -77,10 +77,19 @@ func (f *LokaliseFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) 
 }
 
 func main() {
-	if len(os.Args) < 3 {
-		returnWithError("Usage: lokalise_download <project_id> <token>")
-	}
+	config := prepareConfig()
+	validateDownloadConfig(config)
 
+	ctx, cancel := context.WithTimeout(context.Background(), config.DownloadTimeout)
+	defer cancel()
+
+	err := downloadFiles(ctx, config, &LokaliseFactory{})
+	if err != nil {
+		returnWithError(err.Error())
+	}
+}
+
+func prepareConfig() DownloadConfig {
 	skipIncludeTags, err := parsers.ParseBoolEnv("SKIP_INCLUDE_TAGS")
 	if err != nil {
 		skipIncludeTags = false
@@ -94,13 +103,21 @@ func main() {
 		asyncMode = false
 	}
 
+	refName := strings.TrimSpace(os.Getenv("GITHUB_REF_NAME"))
+	if refName == "" {
+		// fallback for some PR contexts
+		if v := strings.TrimSpace(os.Getenv("GITHUB_HEAD_REF")); v != "" {
+			refName = v
+		}
+	}
+
 	// Create the download configuration
-	config := DownloadConfig{
-		ProjectID:             os.Args[1],
-		Token:                 os.Args[2],
-		FileFormat:            os.Getenv("FILE_FORMAT"),
-		GitHubRefName:         os.Getenv("GITHUB_REF_NAME"),
-		AdditionalParams:      os.Getenv("ADDITIONAL_PARAMS"),
+	return DownloadConfig{
+		ProjectID:             strings.TrimSpace(os.Getenv("LOKALISE_PROJECT_ID")),
+		Token:                 strings.TrimSpace(os.Getenv("LOKALISE_API_KEY")),
+		FileFormat:            strings.TrimSpace(os.Getenv("FILE_FORMAT")),
+		GitHubRefName:         refName,
+		AdditionalParams:      strings.TrimSpace(os.Getenv("ADDITIONAL_PARAMS")),
 		SkipIncludeTags:       skipIncludeTags,
 		SkipOriginalFilenames: skipOriginalFilenames,
 		AsyncMode:             asyncMode,
@@ -111,16 +128,6 @@ func main() {
 		DownloadTimeout:       time.Duration(parsers.ParseUintEnv("DOWNLOAD_TIMEOUT", defaultDownloadTimeout)) * time.Second,
 		AsyncPollInitialWait:  time.Duration(parsers.ParseUintEnv("ASYNC_POLL_INITIAL_WAIT", defaultPollInitialWait)) * time.Second,
 		AsyncPollMaxWait:      time.Duration(parsers.ParseUintEnv("ASYNC_POLL_MAX_WAIT", defaultPollMaxWait)) * time.Second,
-	}
-
-	validateDownloadConfig(config)
-
-	ctx, cancel := context.WithTimeout(context.Background(), config.DownloadTimeout)
-	defer cancel()
-
-	err = downloadFiles(ctx, config, &LokaliseFactory{})
-	if err != nil {
-		returnWithError(err.Error())
 	}
 }
 
@@ -135,8 +142,8 @@ func validateDownloadConfig(config DownloadConfig) {
 	if config.FileFormat == "" {
 		returnWithError("FILE_FORMAT environment variable is required.")
 	}
-	if config.GitHubRefName == "" {
-		returnWithError("GITHUB_REF_NAME environment variable is required.")
+	if !config.SkipIncludeTags && config.GitHubRefName == "" {
+		returnWithError("GITHUB_REF_NAME is required when include_tags are enabled. Set SKIP_INCLUDE_TAGS=true to disable tag filtering.")
 	}
 }
 
@@ -191,7 +198,7 @@ func downloadFiles(ctx context.Context, cfg DownloadConfig, factory ClientFactor
 			}
 			return nil
 		}
-		// should never happen in real code
+		// should never happen in real code but I guess you'll never know
 		return fmt.Errorf("async mode requested, but downloader doesn't support DownloadAsync")
 	}
 
