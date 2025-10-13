@@ -18,13 +18,6 @@ import (
 // Rationale: makes CLI testable without forking a process.
 var exitFunc = os.Exit
 
-// logDebug is a function variable used for debug output.
-// By default it writes to stdout, but tests can override it to suppress noise.
-var logDebug = func(format string, a ...any) {
-	fmt.Printf(format, a...)
-	fmt.Println()
-}
-
 // Defaults for retry/backoff and timeouts. These are sane, production-leaning values.
 // Note: actual HTTP/backoff implementation is delegated to lokex client.
 const (
@@ -213,13 +206,6 @@ func buildDownloadParams(config DownloadConfig) client.DownloadParams {
 		// Merges without clobbering the original map reference.
 		// Caller-specified values win over our defaults if keys overlap.
 		maps.Copy(params, add)
-	}
-
-	// For CI visibility: print exactly what we’re sending to Lokalise.
-	if data, err := json.MarshalIndent(params, "", "  "); err == nil {
-		logDebug("Debug: final Lokalise download parameters:\n%s", string(data))
-	} else {
-		logDebug("Debug: failed to marshal download params: %v", err)
 	}
 
 	return params
