@@ -13,15 +13,22 @@ import (
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 )
 
-// This program checks for changes in translation files and writes the result to GitHub Actions output.
-// It supports both flat and nested naming conventions and applies exclusion rules based on environment variables.
+// This program inspects git state to decide whether translation files changed.
+// It supports both "flat" layouts (e.g., locales/en.json) and nested layouts
+// (e.g., locales/en/app.json), and can optionally exclude base language files.
+// Result is written as a GitHub Actions output variable `has_changes`.
 
+// CommandRunner abstracts shell execution for testability (inject a fake runner).
 type CommandRunner interface {
 	Run(name string, args ...string) ([]string, error)
 }
 
+// DefaultCommandRunner executes commands via os/exec and returns non-empty stdout lines.
 type DefaultCommandRunner struct{}
 
+// Run executes the command and returns trimmed, non-empty lines of combined stdout/stderr.
+// Rationale: git may emit warnings; we still want the file list from stdout.
+// If exit code != 0 we bubble up the error with captured output for debugging CI logs.
 func (d DefaultCommandRunner) Run(name string, args ...string) ([]string, error) {
 	cmd := exec.Command(name, args...)
 	outputBytes, err := cmd.CombinedOutput()
@@ -32,10 +39,11 @@ func (d DefaultCommandRunner) Run(name string, args ...string) ([]string, error)
 	}
 
 	if outputStr == "" {
-		return nil, nil // No output means no files changed
+		return nil, nil // no changes / no matches
 	}
 
 	lines := strings.Split(outputStr, "\n")
+
 	var results []string
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -43,15 +51,17 @@ func (d DefaultCommandRunner) Run(name string, args ...string) ([]string, error)
 			results = append(results, line)
 		}
 	}
+
 	return results, nil
 }
 
+// Config aggregates inputs parsed from env.
 type Config struct {
-	FileExt        []string
-	FlatNaming     bool
-	AlwaysPullBase bool
-	BaseLang       string
-	Paths          []string
+	FileExt        []string // normalized lowercased extensions without dots (e.g., "json", "strings")
+	FlatNaming     bool     // true: locales/en.json; false: locales/en/*.json, locales/fr/*.json
+	AlwaysPullBase bool     // if false, base language files/dirs are excluded from change detection
+	BaseLang       string   // e.g., "en", "fr_FR"
+	Paths          []string // one or more translation roots, e.g., ["locales"]
 }
 
 func main() {
@@ -82,69 +92,77 @@ func main() {
 	}
 }
 
-// detectChangedFiles checks for changes in translation files and applies exclusion rules.
-// It returns true if any files have changed after applying the exclusion patterns.
+// detectChangedFiles collects modified + untracked files matching the given patterns,
+// applies exclusion rules (base language, nested vs flat), and returns true if anything remains.
 func detectChangedFiles(config *Config, runner CommandRunner) (bool, error) {
-	// Get changed and untracked files
+	// Modified/staged vs HEAD (or best-effort fallback if HEAD absent).
 	statusFiles, err := gitDiff(config, runner)
 	if err != nil {
 		return false, fmt.Errorf("error detecting changed files: %v", err)
 	}
 
+	// Untracked files (e.g., new language files created by the download).
 	untrackedFiles, err := gitLsFiles(config, runner)
 	if err != nil {
 		return false, fmt.Errorf("error detecting untracked files: %v", err)
 	}
 
-	// Combine and deduplicate files
+	// Merge and dedupe to avoid double-counting the same path.
 	allChangedFiles := deduplicateFiles(statusFiles, untrackedFiles)
 
-	// Build exclusion patterns
+	// Precompute exclusion regexes based on layout and base language policy.
 	excludePatterns, err := buildExcludePatterns(config)
 	if err != nil {
 		return false, fmt.Errorf("error building exclusion patterns: %v", err)
 	}
 
-	// Filter the files based on the exclusion patterns
+	// Apply exclusions (e.g., ignore locales/en/* when AlwaysPullBase=false in nested mode).
 	filteredFiles := filterFiles(allChangedFiles, excludePatterns)
 
-	// Return true if any files remain after filtering
 	return len(filteredFiles) > 0, nil
 }
 
-// gitDiff runs `git diff --name-only HEAD -- <patterns>` to detect modified files.
+// gitDiff runs `git diff --name-only HEAD -- <patterns>`.
+// If HEAD is missing (e.g., initial commit/orphan), it falls back to combining
+// staged (`--cached`) and unstaged diffs.
+// Notes:
+// - We pass explicit pathspecs to limit to translation files only.
+// - We normalize slashes for cross-OS consistency.
 func gitDiff(config *Config, runner CommandRunner) ([]string, error) {
-	// Check if HEAD exists
+	// Fast path when HEAD exists: changes relative to last commit (staged + unstaged).
 	if _, err := runner.Run("git", "rev-parse", "--verify", "HEAD"); err == nil {
 		args := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only", "HEAD")
 		return runner.Run("git", args...)
 	}
 
-	// HEAD missing. This is quite unexpected but might happen (initial commit / orphan). Combine staged and unstaged diffs.
+	// Fallback for repos without HEAD (rare in CI but can happen).
 	var all []string
 
+	// Staged changes (index vs HEAD).
 	argsCached := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only", "--cached")
 	if out, err := runner.Run("git", argsCached...); err == nil {
 		all = append(all, out...)
 	}
 
-	// unstaged (worktree vs index)
+	// Unstaged changes (worktree vs index).
 	argsWT := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only")
 	if out, err := runner.Run("git", argsWT...); err == nil {
 		all = append(all, out...)
 	}
 
-	// dedup before returning
+	// Deduplicate and normalize before returning.
 	seen := make(map[string]struct{}, len(all))
 	out := make([]string, 0, len(all))
 	for _, f := range all {
 		f = filepath.ToSlash(strings.TrimSpace(f))
+
 		if f == "" {
 			continue
 		}
 		if _, ok := seen[f]; ok {
 			continue
 		}
+
 		seen[f] = struct{}{}
 		out = append(out, f)
 	}
@@ -152,15 +170,19 @@ func gitDiff(config *Config, runner CommandRunner) ([]string, error) {
 	return out, nil
 }
 
-// gitLsFiles runs `git ls-files --others --exclude-standard -- <patterns>` to detect untracked files.
+// gitLsFiles runs `git ls-files --others --exclude-standard -- <patterns>`
+// to get untracked files under the provided pathspecs.
 func gitLsFiles(config *Config, runner CommandRunner) ([]string, error) {
 	args := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "ls-files", "--others", "--exclude-standard")
 	return runner.Run("git", args...)
 }
 
-// buildGitStatusArgs constructs git command arguments based on naming convention and paths.
-// It builds glob patterns to match translation files for ALL provided extensions.
-// Returns: <gitCmd...> "--" <patterns...>
+// buildGitStatusArgs constructs the git command args:
+// <git subcommand...> "--" <globbed pathspecs...>
+// It builds per-path, per-extension globs and supports nested "**" for deep layouts.
+// Example (flat):   locales/*.json
+// Example (nested): locales/**/*.json
+// We rely on git's pathspec globbing (not the shell), hence the explicit "--".
 func buildGitStatusArgs(paths []string, fileExt []string, flatNaming bool, gitCmd ...string) []string {
 	patterns := make([]string, 0, len(paths)*len(fileExt))
 
@@ -170,11 +192,12 @@ func buildGitStatusArgs(paths []string, fileExt []string, flatNaming bool, gitCm
 			if ext == "" {
 				continue
 			}
+
 			if flatNaming {
-				// For flat naming, match files like "path/*.ext"
+				// Flat: match files directly under the given path.
 				patterns = append(patterns, filepath.ToSlash(filepath.Join(path, fmt.Sprintf("*.%s", ext))))
 			} else {
-				// For nested directories, match files like "path/**/*.ext"
+				// Nested: match any depth below path.
 				patterns = append(patterns, filepath.ToSlash(filepath.Join(path, "**", fmt.Sprintf("*.%s", ext))))
 			}
 		}
@@ -182,10 +205,12 @@ func buildGitStatusArgs(paths []string, fileExt []string, flatNaming bool, gitCm
 
 	args := append(gitCmd, "--")
 	args = append(args, patterns...)
+
 	return args
 }
 
-// deduplicateFiles combines and deduplicates two slices of files.
+// deduplicateFiles merges two file lists and returns a sorted, de-duplicated slice.
+// Normalizes path separators to forward slashes to avoid OS-dependent mismatches.
 func deduplicateFiles(statusFiles, untrackedFiles []string) []string {
 	fileSet := make(map[string]struct{})
 
@@ -197,18 +222,24 @@ func deduplicateFiles(statusFiles, untrackedFiles []string) []string {
 		fileSet[filepath.ToSlash(strings.TrimSpace(file))] = struct{}{}
 	}
 
-	// Collect the keys from the map to get the deduplicated list
 	allFiles := make([]string, 0, len(fileSet))
 	for file := range fileSet {
 		allFiles = append(allFiles, file)
 	}
-	slices.Sort(allFiles)
+
+	slices.Sort(allFiles) // keeps output deterministic for tests/logs
 
 	return allFiles
 }
 
-// buildExcludePatterns builds exclusion patterns based on settings.
-// Returns a slice of regular expression objects.
+// buildExcludePatterns returns a list of regexes representing files/dirs to ignore,
+// based on naming mode and base language policy.
+// Flat mode:
+//   - If AlwaysPullBase=false, exclude "<path>/<base>.<ext>" for each ext.
+//   - Always exclude subdirectories under <path> (flat layout shouldn't see nested dirs).
+//
+// Nested mode:
+//   - If AlwaysPullBase=false, exclude "<path>/<base>/**".
 func buildExcludePatterns(config *Config) ([]*regexp.Regexp, error) {
 	excludePatterns := make([]*regexp.Regexp, 0, len(config.Paths)*(1+len(config.FileExt)))
 
@@ -216,31 +247,34 @@ func buildExcludePatterns(config *Config) ([]*regexp.Regexp, error) {
 		path = filepath.ToSlash(path)
 
 		if config.FlatNaming {
-			// In flat naming we exclude baseLang file per extension if AlwaysPullBase=false
+			// Exclude base language single files per extension in flat layout.
 			if !config.AlwaysPullBase {
 				for _, ext := range config.FileExt {
 					ext = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
 					if ext == "" {
 						continue
 					}
+
 					baseLangFile := filepath.ToSlash(filepath.Join(path, fmt.Sprintf("%s.%s", config.BaseLang, ext)))
 					patternStr := fmt.Sprintf("^%s$", regexp.QuoteMeta(baseLangFile))
 					pattern, err := regexp.Compile(patternStr)
 					if err != nil {
 						return nil, fmt.Errorf("failed to compile regex '%s': %v", patternStr, err)
 					}
+
 					excludePatterns = append(excludePatterns, pattern)
 				}
 			}
-			// Exclude subdirectories entirely in flat naming
+			// In flat mode, suppress any nested directories to avoid accidental matches.
 			patternStr := fmt.Sprintf("^%s/[^/]+/.*", regexp.QuoteMeta(path))
 			pattern, err := regexp.Compile(patternStr)
 			if err != nil {
 				return nil, fmt.Errorf("failed to compile regex '%s': %v", patternStr, err)
 			}
+
 			excludePatterns = append(excludePatterns, pattern)
 		} else {
-			// In nested naming we exclude the baseLang directory if AlwaysPullBase=false
+			// Nested: exclude the entire base language subtree.
 			if !config.AlwaysPullBase {
 				baseLangDir := filepath.ToSlash(filepath.Join(path, config.BaseLang))
 				patternStr := fmt.Sprintf("^%s/.*", regexp.QuoteMeta(baseLangDir))
@@ -248,6 +282,7 @@ func buildExcludePatterns(config *Config) ([]*regexp.Regexp, error) {
 				if err != nil {
 					return nil, fmt.Errorf("failed to compile regex '%s': %v", patternStr, err)
 				}
+
 				excludePatterns = append(excludePatterns, pattern)
 			}
 		}
@@ -255,10 +290,11 @@ func buildExcludePatterns(config *Config) ([]*regexp.Regexp, error) {
 	return excludePatterns, nil
 }
 
-// filterFiles filters the list of files based on exclusion patterns.
+// filterFiles walks the given file list and drops those that match any exclusion regex.
+// Paths are normalized to forward slashes before matching.
 func filterFiles(files []string, excludePatterns []*regexp.Regexp) []string {
 	if len(excludePatterns) == 0 {
-		return files // No exclusion patterns; return all files
+		return files // nothing to exclude
 	}
 
 	var filtered []string
@@ -281,8 +317,9 @@ func filterFiles(files []string, excludePatterns []*regexp.Regexp) []string {
 	return filtered
 }
 
+// prepareConfig parses env vars, normalizes extensions, validates inputs.
+// Behavior mirrors the action inputs: FILE_EXT may be multi-line, otherwise inferred from FILE_FORMAT.
 func prepareConfig() (*Config, error) {
-	// Parse boolean environment variables
 	flatNaming, err := parsers.ParseBoolEnv("FLAT_NAMING")
 	if err != nil {
 		return nil, fmt.Errorf("invalid FLAT_NAMING value: %v", err)
@@ -293,13 +330,12 @@ func prepareConfig() (*Config, error) {
 		return nil, fmt.Errorf("invalid ALWAYS_PULL_BASE value: %v", err)
 	}
 
-	// Parse paths from TRANSLATIONS_PATH
 	paths := parsers.ParseStringArrayEnv("TRANSLATIONS_PATH")
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("no valid paths found in TRANSLATIONS_PATH")
 	}
 
-	// Parse FILE_EXT as newline-separated list; fall back to FILE_FORMAT if empty.
+	// FILE_EXT can be a YAML block (newline-separated). If empty, fall back to FILE_FORMAT.
 	fileExt := parsers.ParseStringArrayEnv("FILE_EXT")
 	if len(fileExt) == 0 {
 		if inferred := os.Getenv("FILE_FORMAT"); inferred != "" {
@@ -310,7 +346,7 @@ func prepareConfig() (*Config, error) {
 		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_FORMAT or FILE_EXT environment variables are set")
 	}
 
-	// Normalize and dedupe extensions
+	// Normalize extensions: lowercased, no leading dot, deduplicated.
 	seen := make(map[string]struct{})
 	norm := make([]string, 0, len(fileExt))
 	for _, ext := range fileExt {
@@ -321,9 +357,11 @@ func prepareConfig() (*Config, error) {
 		if _, ok := seen[e]; ok {
 			continue
 		}
+
 		seen[e] = struct{}{}
 		norm = append(norm, e)
 	}
+
 	if len(norm) == 0 {
 		return nil, fmt.Errorf("no valid file extensions after normalization")
 	}

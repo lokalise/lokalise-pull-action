@@ -18,12 +18,18 @@ func TestMain(m *testing.M) {
 	exitFunc = func(code int) {
 		panic(fmt.Sprintf("Exit called with code %d", code))
 	}
+	// silence debug logging globally for all tests
+	logDebug = func(string, ...any) {}
 
 	// Run tests
 	code := m.Run()
 
-	// Restore exitFunc after testing (optional)
+	// Restore exitFunc after testing
 	exitFunc = os.Exit
+	logDebug = func(format string, a ...any) {
+		fmt.Printf(format, a...)
+		fmt.Println()
+	}
 
 	os.Exit(code)
 }

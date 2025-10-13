@@ -11,21 +11,29 @@ import (
 	"time"
 
 	"github.com/bodrovis/lokalise-actions-common/v2/githuboutput"
-
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 )
 
-// This program commits and pushes changes to GitHub if changes were detected.
-// It constructs the commit and branch names based on environment variables
-// and handles both flat and nested translation file naming conventions.
+// This program stages translation files (with inclusion/exclusion rules),
+// creates a commit on a temp (or overridden) branch, and pushes it to origin.
+// The PR itself is handled by a separate script.
+//
+// Design goals:
+// - Work both on normal push workflows and PR workflows.
+// - Respect "flat" vs "nested" i18n layouts.
+// - Optionally exclude base language changes (to reduce noisy diffs).
+// - Be idempotent over repeated runs with the same override branch.
 
+// ErrNoChanges is returned when there is nothing staged to commit.
 var ErrNoChanges = fmt.Errorf("no changes to commit")
 
+// CommandRunner abstracts git invocations for testability.
 type CommandRunner interface {
 	Run(name string, args ...string) error
 	Capture(name string, args ...string) (string, error)
 }
 
+// DefaultCommandRunner pipes git stdout/stderr to the current process for visibility.
 type DefaultCommandRunner struct{}
 
 func (d DefaultCommandRunner) Run(name string, args ...string) error {
@@ -35,6 +43,7 @@ func (d DefaultCommandRunner) Run(name string, args ...string) error {
 	return cmd.Run()
 }
 
+// Capture returns combined stdout+stderr as a string, useful for parsing or error messages.
 func (d DefaultCommandRunner) Capture(name string, args ...string) (string, error) {
 	var out bytes.Buffer
 	cmd := exec.Command(name, args...)
@@ -44,89 +53,96 @@ func (d DefaultCommandRunner) Capture(name string, args ...string) (string, erro
 	return out.String(), err
 }
 
-// Config holds the environment variables required for the script
+// Config aggregates all inputs required to construct the commit/branch/push.
 type Config struct {
-	GitHubActor        string
-	GitHubSHA          string
-	TempBranchPrefix   string
-	FileExt            []string
-	BaseLang           string
-	FlatNaming         bool
-	AlwaysPullBase     bool
-	GitUserName        string
-	GitUserEmail       string
-	GitCommitMessage   string
-	OverrideBranchName string
-	ForcePush          bool
-	BaseRef            string
-	HeadRef            string
-	TranslationPaths   []string
+	GitHubActor        string   // used for default git user.name and noreply email
+	GitHubSHA          string   // used to shorten into branch uniqueness token
+	TempBranchPrefix   string   // prefix for generated tmp branches (e.g., "lok")
+	FileExt            []string // normalized extensions without dots (e.g., "json", "stringsdict")
+	BaseLang           string   // e.g., "en", "fr_FR"
+	FlatNaming         bool     // true: locales/en.json ; false: locales/en/app.json
+	AlwaysPullBase     bool     // if false, base language files/dir are excluded from the commit
+	GitUserName        string   // optional override for git config user.name
+	GitUserEmail       string   // optional override for git config user.email
+	GitCommitMessage   string   // commit message to use
+	OverrideBranchName string   // static branch name to reuse a single PR
+	ForcePush          bool     // whether to force-push (overwriting history)
+	BaseRef            string   // base branch name (no refs/heads/ prefix)
+	HeadRef            string   // PR head branch (when running in a PR), no refs/heads/
+	TranslationPaths   []string // one or multiple roots like ["locales"]
 }
 
 func main() {
 	branchName, err := commitAndPushChanges(DefaultCommandRunner{})
 	if err != nil {
 		if err == ErrNoChanges {
+			// Not an error for CI: just exit 0 to avoid failing the workflow.
 			fmt.Fprintln(os.Stderr, "No changes detected, exiting")
 			os.Exit(0)
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-			os.Exit(1)
 		}
+
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
 	}
 
-	// Indicate that a commit was created
-	if !githuboutput.WriteToGitHubOutput("branch_name", branchName) || !githuboutput.WriteToGitHubOutput("commit_created", "true") {
+	// Tell the composite action what's the branch and that a commit was produced.
+	if !githuboutput.WriteToGitHubOutput("branch_name", branchName) ||
+		!githuboutput.WriteToGitHubOutput("commit_created", "true") {
 		fmt.Fprintln(os.Stderr, "Failed to write to GitHub output, exiting")
 		os.Exit(1)
 	}
 }
 
-// commitAndPushChanges commits and pushes changes to GitHub
+// commitAndPushChanges wires the whole flow: config -> git user -> base ref -> branch -> add -> commit -> push.
 func commitAndPushChanges(runner CommandRunner) (string, error) {
 	config, err := envVarsToConfig()
 	if err != nil {
 		return "", err
 	}
 
+	// Ensure git user identity is set (otherwise git may refuse to commit in CI).
 	if err := setGitUser(config, runner); err != nil {
 		return "", err
 	}
 
-	// Guard from synthetic and other weird refs
+	// Guard against synthetic refs like "merge" in PR events.
 	realBase, err := resolveRealBase(runner, config)
 	if err != nil {
 		return "", err
 	}
 	fmt.Printf("Using base branch: %s\n", realBase)
 
-	// Generate a sanitized branch name
+	// Compute a safe branch name. Either static (override) or temp with prefix/ref/sha/timestamp.
 	branchName, err := generateBranchName(config)
 	if err != nil {
 		return "", err
 	}
 
-	// Checkout a new branch or switch to it if it already exists
+	// Create/switch to the working branch. We try origin/<ref> first to align with remote history.
 	if err := checkoutBranch(branchName, realBase, config.HeadRef, runner); err != nil {
 		return "", err
 	}
 
-	// Prepare and add files for commit
+	// Build pathspecs for `git add` respecting layout and base-lang policy.
 	addArgs := buildGitAddArgs(config)
 	if len(addArgs) == 0 {
 		return "", fmt.Errorf("no files to add, check your configuration")
 	}
 
-	// Run 'git add' with the constructed arguments
+	// Stage files (note: we always pass "--" to separate options from pathspecs).
 	if err := runner.Run("git", append([]string{"add", "--"}, addArgs...)...); err != nil {
 		return "", fmt.Errorf("failed to add files: %v", err)
 	}
 
-	// Commit and push changes
+	// Commit & push (force if requested).
 	return branchName, commitAndPush(branchName, runner, config)
 }
 
-// envVarsToConfig constructs a Config object from required environment variables
+// envVarsToConfig reads env vars, validates required ones, normalizes arrays and returns a Config.
+// Notes:
+// - FILE_EXT may be a multi-line YAML block; if absent, we fall back to FILE_FORMAT.
+// - We strip "refs/heads/" from BaseRef/HeadRef if present.
+// - Commit message defaults to "Translations update".
 func envVarsToConfig() (*Config, error) {
 	requiredEnvVars := []string{
 		"GITHUB_ACTOR",
@@ -145,7 +161,6 @@ func envVarsToConfig() (*Config, error) {
 	envValues := make(map[string]string)
 	envBoolValues := make(map[string]bool)
 
-	// Validate and collect required environment variables
 	for _, key := range requiredEnvVars {
 		value := os.Getenv(key)
 		if value == "" {
@@ -165,6 +180,7 @@ func envVarsToConfig() (*Config, error) {
 	baseRef := strings.TrimPrefix(strings.TrimSpace(os.Getenv("BASE_REF")), "refs/heads/")
 	headRef := strings.TrimPrefix(strings.TrimSpace(os.Getenv("HEAD_REF")), "refs/heads/")
 
+	// Extensions: normalize/dedupe lower-cased, no leading dot.
 	fileExts := parsers.ParseStringArrayEnv("FILE_EXT")
 	if len(fileExts) == 0 {
 		if inferred := os.Getenv("FILE_FORMAT"); inferred != "" {
@@ -175,9 +191,9 @@ func envVarsToConfig() (*Config, error) {
 		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_EXT or FILE_FORMAT environment variables are set")
 	}
 
-	// normalize + dedup here
 	seen := make(map[string]struct{})
 	norm := make([]string, 0, len(fileExts))
+
 	for _, ext := range fileExts {
 		e := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
 		if e == "" {
@@ -198,7 +214,6 @@ func envVarsToConfig() (*Config, error) {
 		commitMsg = "Translations update"
 	}
 
-	// Construct and return the Config object
 	return &Config{
 		GitHubActor:        envValues["GITHUB_ACTOR"],
 		GitHubSHA:          envValues["GITHUB_SHA"],
@@ -218,7 +233,8 @@ func envVarsToConfig() (*Config, error) {
 	}, nil
 }
 
-// setGitUser configures git user.name and user.email
+// setGitUser ensures git has user.name/user.email configured,
+// defaulting to the GitHub actor with a noreply email if not provided by inputs.
 func setGitUser(config *Config, runner CommandRunner) error {
 	username := config.GitUserName
 	email := config.GitUserEmail
@@ -236,11 +252,14 @@ func setGitUser(config *Config, runner CommandRunner) error {
 	if err := runner.Run("git", "config", "--global", "user.email", email); err != nil {
 		return fmt.Errorf("failed to set git user.email: %v", err)
 	}
-
 	return nil
 }
 
-// generateBranchName creates a sanitized branch name based on environment variables
+// generateBranchName returns either the override branch (sanitized) or a temp branch
+// with pattern "<prefix>_<base>_<sha6>_<unixTs>".
+// Notes:
+// - We keep "/" allowed to support hierarchical branch names (e.g., lok/feature/...).
+// - Length is capped to 255 to satisfy git ref constraints.
 func generateBranchName(config *Config) (string, error) {
 	if config.OverrideBranchName != "" {
 		return sanitizeString(config.OverrideBranchName, 255), nil
@@ -262,30 +281,33 @@ func generateBranchName(config *Config) (string, error) {
 	return sanitizeString(branchName, 255), nil
 }
 
-// checkoutBranch creates and checks out the branch, or switches to it if it already exists.
-// If branchName == headRef (PR update), base off origin/headRef.
-// Otherwise, create/reset from origin/baseRef.
+// checkoutBranch bases the working branch off either the PR head (when updating an existing PR)
+// or the base branch. We fetch the exact remote ref to work with shallow clones reliably.
 func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) error {
-	// helper to fetch a single remote branch robustly (works with shallow clones)
+	// Helper: fetch one remote branch ref without tags and prune stale ones.
 	fetch := func(ref string) {
-		// +refs/heads/<ref>:refs/remotes/origin/<ref> guarantees we fetch exactly what we need
+		// "+A:B" syntax forces update of the local remote-tracking ref.
 		_, _ = runner.Capture("git", "fetch", "--no-tags", "--prune", "origin",
 			fmt.Sprintf("+refs/heads/%[1]s:refs/remotes/origin/%[1]s", ref))
 	}
 
-	// updating existing PR head?
+	// Updating an existing PR head? Recreate branch from origin/headRef.
 	if headRef != "" && branchName == headRef {
 		fetch(headRef)
 		if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+headRef); err == nil {
 			return nil
 		}
+
+		// Fallback to local ref if remote-tracking ref is absent.
 		if err := runner.Run("git", "checkout", "-B", branchName, headRef); err == nil {
 			return nil
 		}
+
+		// Last resort: try a plain checkout (branch must already exist locally).
 		return runner.Run("git", "checkout", branchName)
 	}
 
-	// creating/resetting temp branch off base
+	// Creating/resetting a temp branch based on the base ref.
 	fetch(baseRef)
 	if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+baseRef); err == nil {
 		return nil
@@ -296,7 +318,12 @@ func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) e
 	return runner.Run("git", "checkout", branchName)
 }
 
-// buildGitAddArgs constructs the arguments for 'git add' based on the naming convention
+// buildGitAddArgs constructs git pathspecs for `git add` that:
+// - Include only translation files by extension under given roots;
+// - In flat mode, exclude the base language single file (per ext) and any subdirs;
+// - In nested mode, exclude the entire base language directory when AlwaysPullBase=false.
+//
+// We use Git's own globbing (not shell), hence explicit ":"-prefixed excludes (:!) and a final "--".
 func buildGitAddArgs(config *Config) []string {
 	translationsPaths := config.TranslationPaths
 	flatNaming := config.FlatNaming
@@ -307,28 +334,32 @@ func buildGitAddArgs(config *Config) []string {
 	var addArgs []string
 	for _, path := range translationsPaths {
 		if flatNaming {
-			// top-level only: path/*.ext (+ per-ext baseLang exclude, + exclude subdirs)
+			// Flat: only top-level files like "<path>/*.ext".
 			for _, ext := range fileExts {
 				addArgs = append(addArgs, filepath.Join(path, fmt.Sprintf("*.%s", ext)))
+				// Exclude the base language single file per ext if requested.
 				if !alwaysPullBase && baseLang != "" {
 					addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, fmt.Sprintf("%s.%s", baseLang, ext))))
 				}
+				// Ensure we do not accidentally include nested dirs in flat mode.
 				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, "**", fmt.Sprintf("*.%s", ext))))
 			}
 		} else {
-			// nested: path/**/*.ext (+ global baseLang dir exclude)
+			// Nested: include any depth below path for each extension.
 			for _, ext := range fileExts {
 				addArgs = append(addArgs, filepath.Join(path, "**", fmt.Sprintf("*.%s", ext)))
 			}
+			// Optionally exclude the entire base language subtree.
 			if !alwaysPullBase && baseLang != "" {
 				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, baseLang, "**")))
 			}
 		}
 	}
-
 	return addArgs
 }
 
+// commitAndPush commits staged changes and pushes the branch (forcing if requested).
+// Returns ErrNoChanges when nothing is staged (non-fatal for CI).
 func commitAndPush(branchName string, runner CommandRunner, config *Config) error {
 	out, err := runner.Capture("git", "diff", "--name-only", "--cached")
 	if err != nil {
@@ -345,12 +376,14 @@ func commitAndPush(branchName string, runner CommandRunner, config *Config) erro
 		}
 		return runner.Run("git", "push", "origin", branchName)
 	}
+
 	return fmt.Errorf("failed to commit changes: %v\nOutput: %s", err, output)
 }
 
-// sanitizeString removes unwanted characters from a string and truncates it to maxLength
+// sanitizeString whitelists characters acceptable for git refs and trims to maxLength.
+// Allowed: letters, digits, underscore, hyphen, slash, dot.
+// Notes: We intentionally allow "/" to keep hierarchical branch names.
 func sanitizeString(input string, maxLength int) string {
-	// Only allow letters, numbers, underscores, hyphens, forward slashes, and dots
 	allowed := func(r rune) bool {
 		return (r >= 'a' && r <= 'z') ||
 			(r >= 'A' && r <= 'Z') ||
@@ -373,15 +406,20 @@ func sanitizeString(input string, maxLength int) string {
 	return result
 }
 
+// resolveRealBase determines a usable base branch. Some CI contexts provide synthetic refs
+// like "merge" or "head". In such cases we read the remote default branch from
+// `git remote show origin` (e.g., "HEAD branch: main") and fall back to "main" as a last resort.
+//
+// Caveat: We parse human output from git, which is stable in English. If localization is enabled
+// (rare in CI), detection may fail and we’ll fall back to "main".
 func resolveRealBase(runner CommandRunner, cfg *Config) (string, error) {
 	base := cfg.BaseRef
 	if !isSyntheticRef(base) {
 		return base, nil
 	}
 
-	// fallback: detect remote default (HEAD) branch
 	out, _ := runner.Capture("git", "remote", "show", "origin")
-	// look for: "  HEAD branch: main"
+	// Example line: "  HEAD branch: main"
 	scanner := bufio.NewScanner(strings.NewReader(out))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -397,10 +435,11 @@ func resolveRealBase(runner CommandRunner, cfg *Config) (string, error) {
 		fmt.Fprintf(os.Stderr, "warning: scanning remote output failed: %v\n", err)
 	}
 
-	// last resort
+	// Last resort default.
 	return "main", nil
 }
 
+// isSyntheticRef flags CI-provided pseudo-refs we should not base from directly.
 func isSyntheticRef(ref string) bool {
 	ref = strings.TrimSpace(ref)
 	if ref == "" || ref == "merge" || ref == "head" {

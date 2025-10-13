@@ -14,20 +14,30 @@ import (
 )
 
 // exitFunc is a function variable that defaults to os.Exit.
-// This can be overridden in tests to capture exit behavior.
+// Overridable in tests to assert exit behavior without actually terminating the process.
+// Rationale: makes CLI testable without forking a process.
 var exitFunc = os.Exit
 
+// logDebug is a function variable used for debug output.
+// By default it writes to stdout, but tests can override it to suppress noise.
+var logDebug = func(format string, a ...any) {
+	fmt.Printf(format, a...)
+	fmt.Println()
+}
+
+// Defaults for retry/backoff and timeouts. These are sane, production-leaning values.
+// Note: actual HTTP/backoff implementation is delegated to lokex client.
 const (
 	defaultMaxRetries      = 3   // Default number of retries for rate-limited requests
-	defaultSleepTime       = 1   // Default initial sleep time in seconds between retries
-	maxSleepTime           = 60  // Maximum sleep time in seconds between retries
-	defaultDownloadTimeout = 600 // Maximum total time in seconds for the whole operation
-	defaultHTTPTimeout     = 120 // Timeout for the HTTP calls
-	defaultPollInitialWait = 1
-	defaultPollMaxWait     = 120
+	defaultSleepTime       = 1   // Default initial sleep time (seconds) before retrying
+	maxSleepTime           = 60  // Backoff cap (seconds). Prevents unbounded sleeps.
+	defaultDownloadTimeout = 600 // Overall operation deadline (seconds) incl. async polling
+	defaultHTTPTimeout     = 120 // Per-request HTTP timeout (seconds)
+	defaultPollInitialWait = 1   // Initial async poll delay (seconds)
+	defaultPollMaxWait     = 120 // Async polling deadline (seconds)
 )
 
-// DownloadConfig holds all the necessary configuration for downloading files
+// DownloadConfig encapsulates all runtime knobs pulled from env.
 type DownloadConfig struct {
 	ProjectID             string
 	Token                 string
@@ -46,20 +56,27 @@ type DownloadConfig struct {
 	AsyncPollMaxWait      time.Duration
 }
 
+// Downloader abstracts the concrete lokex downloader. Useful for tests.
 type Downloader interface {
+	// Download stores files into dest
 	Download(ctx context.Context, dest string, params client.DownloadParams) (string, error)
 }
 
+// AsyncDownloader is an optional extension used when AsyncMode = true.
 type AsyncDownloader interface {
 	DownloadAsync(ctx context.Context, dest string, params client.DownloadParams) (string, error)
 }
 
+// ClientFactory allows injecting a fake client in tests and keeping main() thin.
 type ClientFactory interface {
 	NewDownloader(cfg DownloadConfig) (Downloader, error)
 }
 
+// LokaliseFactory builds a real lokex client with configured backoff/timeouts.
 type LokaliseFactory struct{}
 
+// NewDownloader wires lokex client with timeouts, retries, UA and polling knobs.
+// All resilience (retry/backoff) is delegated to the lokex library.
 func (f *LokaliseFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) {
 	lokaliseClient, err := client.NewClient(
 		cfg.Token,
@@ -68,6 +85,7 @@ func (f *LokaliseFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) 
 		client.WithHTTPTimeout(cfg.HTTPTimeout),
 		client.WithBackoff(cfg.InitialSleepTime, cfg.MaxSleepTime),
 		client.WithPollWait(cfg.AsyncPollInitialWait, cfg.AsyncPollMaxWait),
+		// UA helps identify traffic on the vendor side (support/debug).
 		client.WithUserAgent("lokalise-pull-action/lokex"),
 	)
 	if err != nil {
@@ -77,41 +95,48 @@ func (f *LokaliseFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) 
 }
 
 func main() {
+	// Build config from env and fail fast on obvious misconfigurations.
 	config := prepareConfig()
 	validateDownloadConfig(config)
 
+	// Hard deadline for the whole run to avoid hanging jobs in CI.
 	ctx, cancel := context.WithTimeout(context.Background(), config.DownloadTimeout)
 	defer cancel()
 
-	err := downloadFiles(ctx, config, &LokaliseFactory{})
-	if err != nil {
+	// Perform the download using a factory (good for DI in tests).
+	if err := downloadFiles(ctx, config, &LokaliseFactory{}); err != nil {
 		returnWithError(err.Error())
 	}
 }
 
+// prepareConfig reads env, applies defaults, and normalizes whitespace.
+// Tolerate bad booleans by falling back to false instead of failing early.
 func prepareConfig() DownloadConfig {
 	skipIncludeTags, err := parsers.ParseBoolEnv("SKIP_INCLUDE_TAGS")
 	if err != nil {
 		skipIncludeTags = false
 	}
+
 	skipOriginalFilenames, err := parsers.ParseBoolEnv("SKIP_ORIGINAL_FILENAMES")
 	if err != nil {
 		skipOriginalFilenames = false
 	}
+
 	asyncMode, err := parsers.ParseBoolEnv("ASYNC_MODE")
 	if err != nil {
 		asyncMode = false
 	}
 
+	// Determine the branch/tag name used for include_tags.
+	// On push/tag events: GITHUB_REF_NAME is present.
+	// On PR events: GITHUB_HEAD_REF may be set -> use as a fallback.
 	refName := strings.TrimSpace(os.Getenv("GITHUB_REF_NAME"))
 	if refName == "" {
-		// fallback for some PR contexts
 		if v := strings.TrimSpace(os.Getenv("GITHUB_HEAD_REF")); v != "" {
 			refName = v
 		}
 	}
 
-	// Create the download configuration
 	return DownloadConfig{
 		ProjectID:             strings.TrimSpace(os.Getenv("LOKALISE_PROJECT_ID")),
 		Token:                 strings.TrimSpace(os.Getenv("LOKALISE_API_KEY")),
@@ -131,48 +156,77 @@ func prepareConfig() DownloadConfig {
 	}
 }
 
-// validateDownloadConfig ensures the configuration has all necessary fields
+// validateDownloadConfig enforces required inputs and guards common pitfalls.
+// Intentionally fails fast with actionable messages for CI logs.
 func validateDownloadConfig(config DownloadConfig) {
 	if config.ProjectID == "" {
 		returnWithError("Project ID is required and cannot be empty.")
 	}
+
 	if config.Token == "" {
 		returnWithError("API token is required and cannot be empty.")
 	}
+
 	if config.FileFormat == "" {
 		returnWithError("FILE_FORMAT environment variable is required.")
 	}
+
+	// include_tags requires a non-empty ref. Users can opt-out via SKIP_INCLUDE_TAGS=true.
 	if !config.SkipIncludeTags && config.GitHubRefName == "" {
-		returnWithError("GITHUB_REF_NAME is required when include_tags are enabled. Set SKIP_INCLUDE_TAGS=true to disable tag filtering.")
+		returnWithError(
+			"GITHUB_REF_NAME is required when include_tags are enabled. " +
+				"Set SKIP_INCLUDE_TAGS=true to disable tag filtering.",
+		)
 	}
 }
 
+// buildDownloadParams assembles the payload for the vendor API.
+// Notes:
+// - When original_filenames=true, Lokalise exports per-original path and directory_prefix is respected.
+// - include_tags narrows the export to keys tagged with the current branch/tag (git-driven workflows).
+// - AdditionalParams allows advanced overrides (must be a JSON object).
 func buildDownloadParams(config DownloadConfig) client.DownloadParams {
 	params := client.DownloadParams{
 		"format": config.FileFormat,
 	}
 
 	if !config.SkipOriginalFilenames {
+		// Preserve original bundle structure.
 		params["original_filenames"] = true
+		// "/" makes Lokalise export into repo root relative structure.
 		params["directory_prefix"] = "/"
 	}
 
 	if !config.SkipIncludeTags {
+		// Only pull keys tagged with the current ref.
 		params["include_tags"] = []string{config.GitHubRefName}
 	}
 
+	// Allow advanced overrides via JSON. Example:
+	// {"filter_langs":["en","fr"],"disable_references":true}
 	ap := strings.TrimSpace(config.AdditionalParams)
 	if ap != "" {
 		add, err := parseJSONMap(ap)
 		if err != nil {
 			returnWithError("Invalid additional_params (must be JSON object): " + err.Error())
 		}
+		// Merges without clobbering the original map reference.
+		// Caller-specified values win over our defaults if keys overlap.
 		maps.Copy(params, add)
+	}
+
+	// For CI visibility: print exactly what we’re sending to Lokalise.
+	if data, err := json.MarshalIndent(params, "", "  "); err == nil {
+		logDebug("Debug: final Lokalise download parameters:\n%s", string(data))
+	} else {
+		logDebug("Debug: failed to marshal download params: %v", err)
 	}
 
 	return params
 }
 
+// parseJSONMap parses a JSON object string into map[string]any.
+// Validation: we only accept objects; arrays/primitives are rejected by unmarshal error.
 func parseJSONMap(s string) (map[string]any, error) {
 	var m map[string]any
 	if err := json.Unmarshal([]byte(s), &m); err != nil {
@@ -181,6 +235,8 @@ func parseJSONMap(s string) (map[string]any, error) {
 	return m, nil
 }
 
+// downloadFiles orchestrates the vendor call respecting AsyncMode.
+// The actual HTTP, backoff and archive handling live inside the lokex client.
 func downloadFiles(ctx context.Context, cfg DownloadConfig, factory ClientFactory) error {
 	fmt.Println("Starting download from Lokalise")
 
@@ -198,17 +254,19 @@ func downloadFiles(ctx context.Context, cfg DownloadConfig, factory ClientFactor
 			}
 			return nil
 		}
-		// should never happen in real code but I guess you'll never know
+		// Defensive: ensures miswired factories don't silently change behavior.
 		return fmt.Errorf("async mode requested, but downloader doesn't support DownloadAsync")
 	}
 
+	// Sync path (default). Client handles retries/backoff/untar internally.
 	if _, err := dl.Download(ctx, "./", params); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
+
 	return nil
 }
 
-// returnWithError prints an error message to stderr and exits the program with a non-zero status code.
+// Kept as a function to allow test substitution via exitFunc.
 func returnWithError(message string) {
 	fmt.Fprintf(os.Stderr, "Error: %s\n", message)
 	exitFunc(1)

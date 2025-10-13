@@ -139,6 +139,7 @@ additional_params: >
 
 - `post_process_command` — A shell command that runs after pulling translation files from Lokalise but before committing them. This allows you to perform custom transformations, cleanup, replacements, or validations on the downloaded files. The command is executed in the root of your repository and has access to several environment variables (`TRANSLATIONS_PATH`, `BASE_LANG`, `FILE_FORMAT`, `FILE_EXT`, `FLAT_NAMING`, `PLATFORM`).
   + Please note that this is an **experimental feature**. You are fully responsible for the logic and behavior of any script executed through this option. These scripts run in your own repository context, under your control. If something breaks or behaves unexpectedly, we cannot guarantee support or ensure the security of the code being executed.
+  + This is executed inside a Bash shell (`shell: bash`) therefore your command must be runnable from Bash. If you need a different interpreter or shell, call it explicitly, for example `post_process_command: "zsh -c 'source ~/.zshrc && run_my_script'"`.
   + If your command requires a custom interpreter (e.g. running tools that are not available by default on GitHub-hosted runners), you are responsible for setting it up yourself before the command is executed.
 
 ```yaml

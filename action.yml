@@ -244,19 +244,20 @@ runs:
         FLAT_NAMING: "${{ inputs.flat_naming }}"
         PLATFORM: "${{ inputs.os_platform }}"
         STRICT: "${{ inputs.post_process_strict }}"
+        POST_CMD: "${{ inputs.post_process_command }}"
       shell: bash
       run: |
         echo "Running post-process command:"
-        echo "${{ inputs.post_process_command }}"
-        
+        printf '%s\n' "$POST_CMD"
+
         set +e
-        eval "${{ inputs.post_process_command }}"
+        bash -eo pipefail -lc "$POST_CMD"
         EXIT_CODE=$?
         set -e
 
         if [[ "$STRICT" == "true" && "$EXIT_CODE" -ne 0 ]]; then
           echo "Post-processing failed with exit code $EXIT_CODE and strict mode is enabled. Exiting."
-          exit $EXIT_CODE
+          exit "$EXIT_CODE"
         elif [[ "$EXIT_CODE" -ne 0 ]]; then
           echo "Post-processing failed with exit code $EXIT_CODE, but strict mode is off. Continuing..."
         else
