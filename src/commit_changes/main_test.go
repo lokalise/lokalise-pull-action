@@ -1094,7 +1094,9 @@ func TestBuildGitAddArgs(t *testing.T) {
 			norm := func(xs []string) []string {
 				out := make([]string, 0, len(xs))
 				for _, s := range xs {
-					out = append(out, filepath.ToSlash(s))
+					s = filepath.ToSlash(s)
+					s = strings.TrimPrefix(s, "./")
+					out = append(out, s)
 				}
 				sort.Strings(out)
 				return out
