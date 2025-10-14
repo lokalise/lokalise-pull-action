@@ -139,6 +139,7 @@ additional_params: >
 
 - `post_process_command` — A shell command that runs after pulling translation files from Lokalise but before committing them. This allows you to perform custom transformations, cleanup, replacements, or validations on the downloaded files. The command is executed in the root of your repository and has access to several environment variables (`TRANSLATIONS_PATH`, `BASE_LANG`, `FILE_FORMAT`, `FILE_EXT`, `FLAT_NAMING`, `PLATFORM`).
   + Please note that this is an **experimental feature**. You are fully responsible for the logic and behavior of any script executed through this option. These scripts run in your own repository context, under your control. If something breaks or behaves unexpectedly, we cannot guarantee support or ensure the security of the code being executed.
+  + This is executed inside a Bash shell (`shell: bash`) therefore your command must be runnable from Bash. If you need a different interpreter or shell, call it explicitly, for example `post_process_command: "zsh -c 'source ~/.zshrc && run_my_script'"`.
   + If your command requires a custom interpreter (e.g. running tools that are not available by default on GitHub-hosted runners), you are responsible for setting it up yourself before the command is executed.
 
 ```yaml
@@ -237,23 +238,46 @@ with open(file_path, "w", encoding="utf-8") as f:
 
 ### Outputs
 
-This action has the following outputs:
+This action exposes the following outputs:
 
-- `created_branch` — The name of the branch that was created and used for the pull request. Empty if no branch has been created (for example, if no changes have been detected).
-- `pr_created` — A boolean value specifying whether a pull request with translation updates was created. False when there are no changes or something went wrong.
-- `pr_number` —  Number of the created pull request.
-- `pr_id` — ID of the created pull request.
+- **`created_branch`** — The branch used for the PR.  
+  + On manual runs: a new temp branch is created.  
+  + On PR runs: the PR head branch is reused.  
+  + Empty if no changes were committed.
+- **`pr_exists`** — `true` if a pull request exists after the run (either created or updated). Empty/false if no PR was touched.
+- **`pr_created`** — `true` if a brand-new pull request was created by this run. Empty/false otherwise.
+- **`pr_updated`** — `true` if an existing pull request was updated by this run. Empty/false otherwise.
+- **`pr_action`** — String value: `"created"`, `"updated"`, or `"none"`. Convenience output to know what happened.
+- **`pr_number`** — Number of the pull request (created or existing). Empty if no PR exists.
+- **`pr_id`** — Node ID of the pull request (useful for GraphQL API calls).
+- **`pr_url`** — URL of the pull request. Empty if no PR exists.
 
 For example:
 
 ```yaml
-- name: Debug
+- name: Debug outputs
   run: |
-    echo "Branch created: ${{ steps.lokalise-pull.outputs.created_branch }}"
-    echo "PR created: ${{ steps.lokalise-pull.outputs.pr_created }}"
-    echo "PR id: ${{ steps.lokalise-pull.outputs.pr_id }}"
-    echo "PR number: ${{ steps.lokalise-pull.outputs.pr_number }}"
+    echo "Branch used:   ${{ steps.lokalise-pull.outputs.created_branch }}"
+    echo "PR exists:     ${{ steps.lokalise-pull.outputs.pr_exists }}"
+    echo "PR created:    ${{ steps.lokalise-pull.outputs.pr_created }}"
+    echo "PR updated:    ${{ steps.lokalise-pull.outputs.pr_updated }}"
+    echo "PR action:     ${{ steps.lokalise-pull.outputs.pr_action }}"
+    echo "PR number:     ${{ steps.lokalise-pull.outputs.pr_number }}"
+    echo "PR id:         ${{ steps.lokalise-pull.outputs.pr_id }}"
+    echo "PR url:        ${{ steps.lokalise-pull.outputs.pr_url }}"
 ```
+
+### Required permissions
+
+By default, this action requires the following permissions:
+
+```yaml
+permissions:
+  contents: write
+  pull-requests: write
+```
+
+Also, `issues: write` might be needed if you're providing the `pr_labels` parameter.
 
 ### How this action works
 

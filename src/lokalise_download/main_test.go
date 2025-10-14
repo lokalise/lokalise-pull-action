@@ -22,10 +22,159 @@ func TestMain(m *testing.M) {
 	// Run tests
 	code := m.Run()
 
-	// Restore exitFunc after testing (optional)
+	// Restore exitFunc after testing
 	exitFunc = os.Exit
 
 	os.Exit(code)
+}
+
+// ----------- prepareConfig tests ---------------
+func TestPrepareConfig_Basic(t *testing.T) {
+	t.Setenv("LOKALISE_PROJECT_ID", "proj_123")
+	t.Setenv("LOKALISE_API_KEY", "sekret")
+	t.Setenv("FILE_FORMAT", "json")
+	t.Setenv("GITHUB_REF_NAME", "release/2025-10-09")
+	t.Setenv("ADDITIONAL_PARAMS", `{"placeholder_format":"icu"}`)
+
+	t.Setenv("SKIP_INCLUDE_TAGS", "false")
+	t.Setenv("SKIP_ORIGINAL_FILENAMES", "false")
+	t.Setenv("ASYNC_MODE", "true")
+
+	t.Setenv("MAX_RETRIES", "7")
+	t.Setenv("SLEEP_TIME", "3")
+	t.Setenv("HTTP_TIMEOUT", "150")
+	t.Setenv("DOWNLOAD_TIMEOUT", "700")
+	t.Setenv("ASYNC_POLL_INITIAL_WAIT", "2")
+	t.Setenv("ASYNC_POLL_MAX_WAIT", "180")
+
+	cfg := prepareConfig()
+
+	if cfg.ProjectID != "proj_123" {
+		t.Fatalf("ProjectID mismatch: %q", cfg.ProjectID)
+	}
+	if cfg.Token != "sekret" {
+		t.Fatalf("Token mismatch: %q", cfg.Token)
+	}
+	if cfg.FileFormat != "json" {
+		t.Fatalf("FileFormat mismatch: %q", cfg.FileFormat)
+	}
+	if cfg.GitHubRefName != "release/2025-10-09" {
+		t.Fatalf("GitHubRefName mismatch: %q", cfg.GitHubRefName)
+	}
+	if cfg.AdditionalParams != `{"placeholder_format":"icu"}` {
+		t.Fatalf("AdditionalParams mismatch: %q", cfg.AdditionalParams)
+	}
+
+	if cfg.SkipIncludeTags {
+		t.Fatal("SkipIncludeTags should be false")
+	}
+	if cfg.SkipOriginalFilenames {
+		t.Fatal("SkipOriginalFilenames should be false")
+	}
+	if !cfg.AsyncMode {
+		t.Fatal("AsyncMode should be true")
+	}
+
+	if cfg.MaxRetries != 7 {
+		t.Fatalf("MaxRetries expected 7, got %d", cfg.MaxRetries)
+	}
+	if cfg.InitialSleepTime != 3*time.Second {
+		t.Fatalf("InitialSleepTime expected 3s, got %s", cfg.InitialSleepTime)
+	}
+	if cfg.HTTPTimeout != 150*time.Second {
+		t.Fatalf("HTTPTimeout expected 150s, got %s", cfg.HTTPTimeout)
+	}
+	if cfg.DownloadTimeout != 700*time.Second {
+		t.Fatalf("DownloadTimeout expected 700s, got %s", cfg.DownloadTimeout)
+	}
+	if cfg.AsyncPollInitialWait != 2*time.Second {
+		t.Fatalf("AsyncPollInitialWait expected 2s, got %s", cfg.AsyncPollInitialWait)
+	}
+	if cfg.AsyncPollMaxWait != 180*time.Second {
+		t.Fatalf("AsyncPollMaxWait expected 180s, got %s", cfg.AsyncPollMaxWait)
+	}
+}
+
+func TestPrepareConfig_TokenAndRefFallbacks(t *testing.T) {
+	t.Setenv("LOKALISE_API_KEY", "secret")
+	t.Setenv("LOKALISE_PROJECT_ID", "proj_456")
+	t.Setenv("FILE_FORMAT", "yaml")
+
+	t.Setenv("GITHUB_REF_NAME", "")
+	t.Setenv("GITHUB_HEAD_REF", "feature/sweet-stuff")
+
+	t.Setenv("SKIP_INCLUDE_TAGS", "not-a-bool")
+	t.Setenv("SKIP_ORIGINAL_FILENAMES", "lol")
+	t.Setenv("ASYNC_MODE", "nope")
+
+	cfg := prepareConfig()
+
+	if cfg.Token != "secret" {
+		t.Fatalf("Token check failed, got %q", cfg.Token)
+	}
+	if cfg.GitHubRefName != "feature/sweet-stuff" {
+		t.Fatalf("Ref fallback failed, got %q", cfg.GitHubRefName)
+	}
+	if cfg.FileFormat != "yaml" {
+		t.Fatalf("FileFormat mismatch: %q", cfg.FileFormat)
+	}
+
+	// булевые должны упасть в false
+	if cfg.SkipIncludeTags {
+		t.Fatal("SkipIncludeTags should be false on bad input")
+	}
+	if cfg.SkipOriginalFilenames {
+		t.Fatal("SkipOriginalFilenames should be false on bad input")
+	}
+	if cfg.AsyncMode {
+		t.Fatal("AsyncMode should be false on bad input")
+	}
+
+	// дефолты из констант
+	if cfg.MaxRetries != defaultMaxRetries {
+		t.Fatalf("MaxRetries default expected %d, got %d", defaultMaxRetries, cfg.MaxRetries)
+	}
+	if cfg.InitialSleepTime != time.Duration(defaultSleepTime)*time.Second {
+		t.Fatalf("InitialSleepTime default mismatch: %s", cfg.InitialSleepTime)
+	}
+	if cfg.HTTPTimeout != time.Duration(defaultHTTPTimeout)*time.Second {
+		t.Fatalf("HTTPTimeout default mismatch: %s", cfg.HTTPTimeout)
+	}
+	if cfg.DownloadTimeout != time.Duration(defaultDownloadTimeout)*time.Second {
+		t.Fatalf("DownloadTimeout default mismatch: %s", cfg.DownloadTimeout)
+	}
+	if cfg.AsyncPollInitialWait != time.Duration(defaultPollInitialWait)*time.Second {
+		t.Fatalf("AsyncPollInitialWait default mismatch: %s", cfg.AsyncPollInitialWait)
+	}
+	if cfg.AsyncPollMaxWait != time.Duration(defaultPollMaxWait)*time.Second {
+		t.Fatalf("AsyncPollMaxWait default mismatch: %s", cfg.AsyncPollMaxWait)
+	}
+}
+
+func TestPrepareConfig_WhitespaceTrim(t *testing.T) {
+	t.Setenv("LOKALISE_PROJECT_ID", "  proj_789  ")
+	t.Setenv("LOKALISE_API_KEY", "  key123  ")
+	t.Setenv("FILE_FORMAT", "   json_structured ")
+	t.Setenv("GITHUB_REF_NAME", "  refs/heads/release-1  ")
+	t.Setenv("ADDITIONAL_PARAMS", `  { "bundle_structure": "ICU" }  `)
+
+	cfg := prepareConfig()
+
+	if cfg.ProjectID != "proj_789" {
+		t.Fatalf("ProjectID not trimmed: %q", cfg.ProjectID)
+	}
+	if cfg.Token != "key123" {
+		t.Fatalf("Token not trimmed: %q", cfg.Token)
+	}
+	if cfg.FileFormat != "json_structured" {
+		t.Fatalf("FileFormat not trimmed: %q", cfg.FileFormat)
+	}
+	if cfg.GitHubRefName != "refs/heads/release-1" {
+		t.Fatalf("GitHubRefName not trimmed: %q", cfg.GitHubRefName)
+	}
+	if cfg.AdditionalParams != `{ "bundle_structure": "ICU" }` {
+		t.Fatalf("AdditionalParams not trimmed: %q", cfg.AdditionalParams)
+	}
 }
 
 // ---------- buildDownloadParams tests ----------
@@ -139,7 +288,7 @@ func TestDownloadFiles_AsyncSuccess(t *testing.T) {
 		GitHubRefName:         "v1.2.3",
 		SkipIncludeTags:       false,
 		SkipOriginalFilenames: false,
-		AsyncMode:             true, // async path
+		AsyncMode:             true,
 		MaxRetries:            7,
 		InitialSleepTime:      2 * time.Second,
 		MaxSleepTime:          time.Duration(maxSleepTime) * time.Second,
@@ -157,7 +306,6 @@ func TestDownloadFiles_AsyncSuccess(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// factory knobs
 	if ff.gotToken != "tok_abc" || ff.gotProjectID != "proj_123" {
 		t.Fatalf("factory received wrong credentials: token=%s projectID=%s", ff.gotToken, ff.gotProjectID)
 	}
@@ -174,7 +322,6 @@ func TestDownloadFiles_AsyncSuccess(t *testing.T) {
 		t.Fatalf("expected max backoff=%ds, got %v", maxSleepTime, ff.gotMaxBackoff)
 	}
 
-	// downloader inputs
 	if !fd.called {
 		t.Fatalf("expected some download method to be called")
 	}
@@ -184,10 +331,12 @@ func TestDownloadFiles_AsyncSuccess(t *testing.T) {
 	if fd.gotParams["format"] != "json" {
 		t.Fatalf("expected format=json, got %v", fd.gotParams["format"])
 	}
+
 	got, ok := fd.gotParams["include_tags"].([]string)
 	if !ok {
 		t.Fatalf("include_tags type mismatch, got %T", fd.gotParams["include_tags"])
 	}
+
 	want := []string{"v1.2.3"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected include_tags=%v, got %v", want, got)
@@ -199,7 +348,6 @@ func TestDownloadFiles_AsyncSuccess(t *testing.T) {
 		t.Fatalf("expected directory_prefix=/, got %v", fd.gotParams["directory_prefix"])
 	}
 
-	// assert the ASYNC path was used
 	if !ad.asyncCalled {
 		t.Fatalf("expected DownloadAsync to be called")
 	}
@@ -213,7 +361,7 @@ func TestDownloadFiles_SyncSuccess(t *testing.T) {
 		GitHubRefName:         "v1.2.3",
 		SkipIncludeTags:       false,
 		SkipOriginalFilenames: false,
-		AsyncMode:             false, // sync path
+		AsyncMode:             false,
 		MaxRetries:            7,
 		InitialSleepTime:      2 * time.Second,
 		MaxSleepTime:          time.Duration(maxSleepTime) * time.Second,
@@ -230,7 +378,6 @@ func TestDownloadFiles_SyncSuccess(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// factory knobs (same checks)
 	if ff.gotToken != "tok_abc" || ff.gotProjectID != "proj_123" {
 		t.Fatalf("factory received wrong credentials: token=%s projectID=%s", ff.gotToken, ff.gotProjectID)
 	}
@@ -247,7 +394,6 @@ func TestDownloadFiles_SyncSuccess(t *testing.T) {
 		t.Fatalf("expected max backoff=%ds, got %v", maxSleepTime, ff.gotMaxBackoff)
 	}
 
-	// downloader inputs
 	if !fd.called {
 		t.Fatalf("expected Download to be called")
 	}
@@ -257,10 +403,12 @@ func TestDownloadFiles_SyncSuccess(t *testing.T) {
 	if fd.gotParams["format"] != "json" {
 		t.Fatalf("expected format=json, got %v", fd.gotParams["format"])
 	}
+
 	got, ok := fd.gotParams["include_tags"].([]string)
 	if !ok {
 		t.Fatalf("include_tags type mismatch, got %T", fd.gotParams["include_tags"])
 	}
+
 	want := []string{"v1.2.3"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected include_tags=%v, got %v", want, got)
@@ -314,7 +462,6 @@ func TestDownloadFiles_DownloadError(t *testing.T) {
 // ---------- validateDownloadConfig tests ----------
 
 func TestValidateDownloadConfig_ExitsOnMissingFields(t *testing.T) {
-	// Missing ProjectID
 	requirePanicExit(t, func() {
 		validateDownloadConfig(DownloadConfig{
 			ProjectID:     "",
@@ -324,7 +471,6 @@ func TestValidateDownloadConfig_ExitsOnMissingFields(t *testing.T) {
 		})
 	})
 
-	// Missing Token
 	requirePanicExit(t, func() {
 		validateDownloadConfig(DownloadConfig{
 			ProjectID:     "p",
@@ -334,7 +480,6 @@ func TestValidateDownloadConfig_ExitsOnMissingFields(t *testing.T) {
 		})
 	})
 
-	// Missing FILE_FORMAT
 	requirePanicExit(t, func() {
 		validateDownloadConfig(DownloadConfig{
 			ProjectID:     "p",
@@ -344,7 +489,6 @@ func TestValidateDownloadConfig_ExitsOnMissingFields(t *testing.T) {
 		})
 	})
 
-	// Missing GITHUB_REF_NAME
 	requirePanicExit(t, func() {
 		validateDownloadConfig(DownloadConfig{
 			ProjectID:     "p",
@@ -360,7 +504,6 @@ func TestValidateDownloadConfig_ExitsOnMissingFields(t *testing.T) {
 func TestEnvParsingIntoConfig_Smoke(t *testing.T) {
 	t.Setenv("FILE_FORMAT", "json")
 	t.Setenv("GITHUB_REF_NAME", "release-1")
-	// JSON MUST use double quotes
 	t.Setenv("ADDITIONAL_PARAMS", `{"foo":"bar","baz_qux":false}`)
 
 	cfg := DownloadConfig{
@@ -382,12 +525,11 @@ func TestEnvParsingIntoConfig_Smoke(t *testing.T) {
 	if params["foo"] != "bar" {
 		t.Fatalf("expected foo=bar, got %v", params["foo"])
 	}
-	// you set false, so expect false
+
 	if v, ok := params["baz_qux"].(bool); !ok || v != false {
 		t.Fatalf("expected baz_qux=false, got %v (%T)", params["baz_qux"], params["baz_qux"])
 	}
 
-	// optional: sanity that include_tags got added from GitHubRefName
 	switch tags := params["include_tags"].(type) {
 	case []string:
 		if len(tags) != 1 || tags[0] != "release-1" {
@@ -418,6 +560,26 @@ func TestEnvParsingIntoConfig_BadJSON_Aborts(t *testing.T) {
 	requirePanicExit(t, func() { _ = buildDownloadParams(cfg) })
 }
 
+func TestFactory_PassesPollWaits(t *testing.T) {
+	cfg := DownloadConfig{
+		ProjectID:            "p",
+		Token:                "t",
+		FileFormat:           "json",
+		GitHubRefName:        "ref",
+		MaxRetries:           1,
+		InitialSleepTime:     500 * time.Millisecond,
+		MaxSleepTime:         5 * time.Second,
+		HTTPTimeout:          10 * time.Second,
+		AsyncPollInitialWait: 2 * time.Second,
+		AsyncPollMaxWait:     30 * time.Second,
+	}
+	ff := &fakeFactory{downloader: &fakeDownloader{}}
+
+	if err := downloadFiles(context.Background(), cfg, ff); err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+}
+
 // ---------- fakes & helpers ----------
 
 type fakeDownloader struct {
@@ -445,7 +607,7 @@ type fakeAsyncDownloader struct {
 func (f *fakeAsyncDownloader) DownloadAsync(ctx context.Context, dest string, params client.DownloadParams) (string, error) {
 	f.asyncCalled = true
 	// reuse capture from base
-	return f.fakeDownloader.Download(ctx, dest, params)
+	return f.Download(ctx, dest, params)
 }
 
 type fakeFactory struct {
@@ -493,25 +655,4 @@ func requirePanicExit(t *testing.T, fn func()) {
 		}
 	}()
 	fn()
-}
-
-func TestFactory_PassesPollWaits(t *testing.T) {
-	cfg := DownloadConfig{
-		ProjectID:            "p",
-		Token:                "t",
-		FileFormat:           "json",
-		GitHubRefName:        "ref",
-		MaxRetries:           1,
-		InitialSleepTime:     500 * time.Millisecond,
-		MaxSleepTime:         5 * time.Second,
-		HTTPTimeout:          10 * time.Second,
-		AsyncPollInitialWait: 2 * time.Second,
-		AsyncPollMaxWait:     30 * time.Second,
-	}
-	ff := &fakeFactory{downloader: &fakeDownloader{}}
-	if err := downloadFiles(context.Background(), cfg, ff); err != nil {
-		t.Fatalf("unexpected: %v", err)
-	}
-	// You don't currently expose poll waits in fakeFactory; if you care,
-	// add fields gotPollInit / gotPollMax to fakeFactory and assert them.
 }

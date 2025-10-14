@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -40,11 +39,12 @@ func TestEnvVarsToConfig(t *testing.T) {
 		{
 			name: "Valid environment variables",
 			envVars: map[string]string{
+				"BASE_REF":             "main",
+				"HEAD_REF":             "refs/heads/feature/foo",
 				"GITHUB_ACTOR":         "test_actor",
 				"GITHUB_SHA":           "123456",
-				"GITHUB_REF_NAME":      "main",
 				"TEMP_BRANCH_PREFIX":   "temp",
-				"TRANSLATIONS_PATH":    "translations/",
+				"TRANSLATIONS_PATH":    "translations",
 				"FILE_FORMAT":          "json",
 				"BASE_LANG":            "en",
 				"FLAT_NAMING":          "true",
@@ -57,7 +57,8 @@ func TestEnvVarsToConfig(t *testing.T) {
 			expectedConfig: &Config{
 				GitHubActor:        "test_actor",
 				GitHubSHA:          "123456",
-				GitHubRefName:      "main",
+				BaseRef:            "main",
+				HeadRef:            "feature/foo",
 				TempBranchPrefix:   "temp",
 				FileExt:            []string{"json"},
 				BaseLang:           "en",
@@ -67,18 +68,19 @@ func TestEnvVarsToConfig(t *testing.T) {
 				GitUserEmail:       "test@example.com",
 				OverrideBranchName: "custom_branch",
 				GitCommitMessage:   "My commit msg",
+				TranslationPaths:   []string{"translations"},
 			},
 			expectError: false,
 		},
 		{
 			name: "FILE_EXT normalization and dedupe",
 			envVars: map[string]string{
+				"BASE_REF":           "main",
 				"GITHUB_ACTOR":       "test_actor",
 				"GITHUB_SHA":         "123456",
-				"GITHUB_REF_NAME":    "main",
 				"TEMP_BRANCH_PREFIX": "temp",
-				"TRANSLATIONS_PATH":  "translations/",
-				"FILE_EXT":           "\n .JSON \n  yaml  \n .json \n", // messy input
+				"TRANSLATIONS_PATH":  "translations",
+				"FILE_EXT":           "\n .JSON \n  yaml  \n .json \n",
 				"BASE_LANG":          "en",
 				"FLAT_NAMING":        "false",
 				"ALWAYS_PULL_BASE":   "true",
@@ -86,13 +88,14 @@ func TestEnvVarsToConfig(t *testing.T) {
 			expectedConfig: &Config{
 				GitHubActor:      "test_actor",
 				GitHubSHA:        "123456",
-				GitHubRefName:    "main",
+				BaseRef:          "main",
 				TempBranchPrefix: "temp",
-				FileExt:          []string{"json", "yaml"}, // normalized, deduped, lowercased
+				FileExt:          []string{"json", "yaml"},
 				BaseLang:         "en",
 				FlatNaming:       false,
 				AlwaysPullBase:   true,
 				GitCommitMessage: "Translations update",
+				TranslationPaths: []string{"translations"},
 			},
 			expectError: false,
 		},
@@ -101,9 +104,9 @@ func TestEnvVarsToConfig(t *testing.T) {
 			envVars: map[string]string{
 				"GITHUB_ACTOR":         "test_actor",
 				"GITHUB_SHA":           "123456",
-				"GITHUB_REF_NAME":      "main",
+				"BASE_REF":             "main",
 				"TEMP_BRANCH_PREFIX":   "temp",
-				"TRANSLATIONS_PATH":    "translations/",
+				"TRANSLATIONS_PATH":    "translations",
 				"FILE_FORMAT":          "json",
 				"BASE_LANG":            "en",
 				"FLAT_NAMING":          "true",
@@ -115,7 +118,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 			expectedConfig: &Config{
 				GitHubActor:        "test_actor",
 				GitHubSHA:          "123456",
-				GitHubRefName:      "main",
+				BaseRef:            "main",
 				TempBranchPrefix:   "temp",
 				FileExt:            []string{"json"},
 				BaseLang:           "en",
@@ -125,6 +128,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				GitUserEmail:       "test@example.com",
 				OverrideBranchName: "custom_branch",
 				GitCommitMessage:   "Translations update",
+				TranslationPaths:   []string{"translations"},
 			},
 			expectError: false,
 		},
@@ -133,9 +137,9 @@ func TestEnvVarsToConfig(t *testing.T) {
 			envVars: map[string]string{
 				"GITHUB_ACTOR":       "test_actor",
 				"GITHUB_SHA":         "123456",
-				"GITHUB_REF_NAME":    "main",
+				"BASE_REF":           "main",
 				"TEMP_BRANCH_PREFIX": "temp",
-				"TRANSLATIONS_PATH":  "translations/",
+				"TRANSLATIONS_PATH":  "translations",
 				"FILE_FORMAT":        "structured_json",
 				"FILE_EXT":           "json",
 				"BASE_LANG":          "en",
@@ -145,13 +149,14 @@ func TestEnvVarsToConfig(t *testing.T) {
 			expectedConfig: &Config{
 				GitHubActor:      "test_actor",
 				GitHubSHA:        "123456",
-				GitHubRefName:    "main",
+				BaseRef:          "main",
 				TempBranchPrefix: "temp",
 				FileExt:          []string{"json"},
 				BaseLang:         "en",
 				FlatNaming:       true,
 				AlwaysPullBase:   false,
 				GitCommitMessage: "Translations update",
+				TranslationPaths: []string{"translations"},
 			},
 			expectError: false,
 		},
@@ -159,9 +164,9 @@ func TestEnvVarsToConfig(t *testing.T) {
 			name: "Missing required environment variable",
 			envVars: map[string]string{
 				"GITHUB_SHA":         "123456",
-				"GITHUB_REF_NAME":    "main",
+				"BASE_REF":           "main",
 				"TEMP_BRANCH_PREFIX": "temp",
-				"TRANSLATIONS_PATH":  "translations/",
+				"TRANSLATIONS_PATH":  "translations",
 				"FILE_FORMAT":        "json",
 				"BASE_LANG":          "en",
 				"FLAT_NAMING":        "true",
@@ -171,13 +176,28 @@ func TestEnvVarsToConfig(t *testing.T) {
 			expectedErrText: "GITHUB_ACTOR",
 		},
 		{
+			name: "Missing required extension and format info",
+			envVars: map[string]string{
+				"GITHUB_SHA":         "123456",
+				"GITHUB_ACTOR":       "test_actor",
+				"BASE_REF":           "main",
+				"TEMP_BRANCH_PREFIX": "temp",
+				"TRANSLATIONS_PATH":  "translations",
+				"BASE_LANG":          "en",
+				"FLAT_NAMING":        "true",
+				"ALWAYS_PULL_BASE":   "false",
+			},
+			expectError:     true,
+			expectedErrText: "cannot infer file extension",
+		},
+		{
 			name: "Invalid boolean environment variable",
 			envVars: map[string]string{
 				"GITHUB_ACTOR":       "test_actor",
 				"GITHUB_SHA":         "123456",
-				"GITHUB_REF_NAME":    "main",
+				"BASE_REF":           "main",
 				"TEMP_BRANCH_PREFIX": "temp",
-				"TRANSLATIONS_PATH":  "translations/",
+				"TRANSLATIONS_PATH":  "translations",
 				"FILE_FORMAT":        "json",
 				"BASE_LANG":          "en",
 				"FLAT_NAMING":        "not_a_bool",
@@ -191,9 +211,9 @@ func TestEnvVarsToConfig(t *testing.T) {
 			envVars: map[string]string{
 				"GITHUB_ACTOR":       "test_actor",
 				"GITHUB_SHA":         "123456",
-				"GITHUB_REF_NAME":    "main",
+				"BASE_REF":           "main",
 				"TEMP_BRANCH_PREFIX": "temp",
-				"TRANSLATIONS_PATH":  "translations/",
+				"TRANSLATIONS_PATH":  "translations\nlocales",
 				"FILE_EXT":           "strings\nstringsdict",
 				"BASE_LANG":          "en",
 				"FLAT_NAMING":        "false",
@@ -202,13 +222,14 @@ func TestEnvVarsToConfig(t *testing.T) {
 			expectedConfig: &Config{
 				GitHubActor:      "test_actor",
 				GitHubSHA:        "123456",
-				GitHubRefName:    "main",
+				BaseRef:          "main",
 				TempBranchPrefix: "temp",
 				FileExt:          []string{"strings", "stringsdict"},
 				BaseLang:         "en",
 				FlatNaming:       false,
 				AlwaysPullBase:   true,
 				GitCommitMessage: "Translations update",
+				TranslationPaths: []string{"translations", "locales"},
 			},
 			expectError: false,
 		},
@@ -220,7 +241,8 @@ func TestEnvVarsToConfig(t *testing.T) {
 			allEnvVars := []string{
 				"GITHUB_ACTOR",
 				"GITHUB_SHA",
-				"GITHUB_REF_NAME",
+				"BASE_REF",
+				"HEAD_REF",
 				"TEMP_BRANCH_PREFIX",
 				"TRANSLATIONS_PATH",
 				"BASE_LANG",
@@ -335,7 +357,6 @@ func TestSanitizeString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -400,36 +421,123 @@ func TestSetGitUser_WithCustomValues(t *testing.T) {
 }
 
 func TestCheckoutBranch(t *testing.T) {
-	runner := &MockCommandRunner{
-		RunFunc: func(name string, args ...string) error {
-			if name == "git" {
-				if args[0] == "fetch" && args[1] == "origin" {
-					// Allow fetch for any branch name
+	t.Run("creates from origin base", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			RunFunc: func(name string, args ...string) error {
+				if name != "git" {
+					return fmt.Errorf("unexpected binary: %s", name)
+				}
+				switch {
+				// first attempt should be: git checkout -B new_branch origin/main
+				case len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "new_branch" && args[3] == "origin/main":
+					return nil
+				default:
+					return fmt.Errorf("unexpected command: git %v", args)
+				}
+			},
+		}
+		// headRef is empty -> create from base
+		if err := checkoutBranch("new_branch", "main", "", runner); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("falls back to local base", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			RunFunc: func(name string, args ...string) error {
+				if name != "git" {
+					return fmt.Errorf("unexpected binary: %s", name)
+				}
+				switch {
+				// first attempt (remote) fails
+				case len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "branch_from_local" && args[3] == "origin/dev":
+					return fmt.Errorf("remote branch missing")
+				// second attempt should be local base: git checkout -B branch_from_local dev
+				case len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "branch_from_local" && args[3] == "dev":
+					return nil
+				default:
+					return fmt.Errorf("unexpected command: git %v", args)
+				}
+			},
+		}
+		// headRef is empty -> fallback path uses local base
+		if err := checkoutBranch("branch_from_local", "dev", "", runner); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("switches to existing branch", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			RunFunc: func(name string, args ...string) error {
+				if name != "git" {
+					return fmt.Errorf("unexpected binary: %s", name)
+				}
+				switch {
+				// fail remote create
+				case len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "existing_branch" && args[3] == "origin/main":
+					return fmt.Errorf("already exists")
+				// fail local create
+				case len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "existing_branch" && args[3] == "main":
+					return fmt.Errorf("already exists")
+				// succeed switching
+				case len(args) == 2 && args[0] == "checkout" && args[1] == "existing_branch":
+					return nil
+				default:
+					return fmt.Errorf("unexpected command: git %v", args)
+				}
+			},
+		}
+		// headRef empty -> fall back to switching to existing branch
+		if err := checkoutBranch("existing_branch", "main", "", runner); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("updates existing PR head branch (uses headRef)", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			RunFunc: func(name string, args ...string) error {
+				if name != "git" {
+					return fmt.Errorf("unexpected binary: %s", name)
+				}
+				// expect: checkout -B new_br origin/new_br
+				if len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "new_br" && args[3] == "origin/new_br" {
 					return nil
 				}
-				if args[0] == "checkout" && args[1] == "-b" {
-					if args[2] == "new_branch" {
-						return nil // Simulate branch creation
-					}
-				}
-				if args[0] == "checkout" && args[1] == "existing_branch" {
-					return nil // Simulate switching to existing branch
-				}
+				return fmt.Errorf("unexpected command: git %v", args)
+			},
+			CaptureFunc: func(name string, args ...string) (string, error) {
+				// allow fetch noise if you call it in your code before checkout
+				return "", nil
+			},
+		}
+		// headRef equals branchName -> base off origin/headRef, not baseRef
+		if err := checkoutBranch("new_br", "main", "new_br", runner); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestCheckoutBranch_FetchesCorrectRefspec(t *testing.T) {
+	fetched := ""
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			if name == "git" && args[0] == "fetch" {
+				fetched = strings.Join(args, " ")
 			}
-			return fmt.Errorf("unexpected command: %s %v", name, args)
+			return "", nil
+		},
+		RunFunc: func(name string, args ...string) error {
+			if name == "git" && len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == "new_branch" && args[3] == "origin/main" {
+				return nil
+			}
+			return fmt.Errorf("unexpected: %v", args)
 		},
 	}
-
-	// Test branch creation
-	err := checkoutBranch("new_branch", runner)
-	if err != nil {
-		t.Errorf("Unexpected error for new branch: %v", err)
+	if err := checkoutBranch("new_branch", "main", "", runner); err != nil {
+		t.Fatal(err)
 	}
-
-	// Test switching to existing branch
-	err = checkoutBranch("existing_branch", runner)
-	if err != nil {
-		t.Errorf("Unexpected error for existing branch: %v", err)
+	if !strings.Contains(fetched, "+refs/heads/main:refs/remotes/origin/main") {
+		t.Errorf("unexpected fetch refspec: %q", fetched)
 	}
 }
 
@@ -476,6 +584,209 @@ func TestCommitAndPush(t *testing.T) {
 	}
 }
 
+func TestCommitAndPush_ForcePush(t *testing.T) {
+	var capturedArgs []string
+	diffCalled := false
+	commitCalled := false
+
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			if name == "git" && len(args) >= 1 && args[0] == "diff" {
+				if len(args) >= 3 && args[1] == "--name-only" && args[2] == "--cached" {
+					diffCalled = true
+					return "locales/en.json\n", nil
+				}
+			}
+			if name == "git" && len(args) >= 1 && args[0] == "commit" {
+				commitCalled = true
+				return "Files committed", nil
+			}
+			return "", nil
+		},
+		RunFunc: func(name string, args ...string) error {
+			if name == "git" && len(args) >= 1 && args[0] == "push" {
+				capturedArgs = args
+				return nil
+			}
+			return nil
+		},
+	}
+
+	config := &Config{ForcePush: true}
+
+	err := commitAndPush("test_branch", runner, config)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	expectedArgs := []string{"push", "--force", "origin", "test_branch"}
+	if !slices.Equal(capturedArgs, expectedArgs) {
+		t.Fatalf("Expected push args %v, got %v", expectedArgs, capturedArgs)
+	}
+	if !diffCalled || !commitCalled {
+		t.Fatalf("Expected both diff --cached and commit to be called")
+	}
+}
+
+func TestCommitAndPush_Success(t *testing.T) {
+	diffCalled := false
+	commitCalled := false
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			if name == "git" && len(args) >= 1 && args[0] == "diff" {
+				if len(args) >= 3 && args[1] == "--name-only" && args[2] == "--cached" {
+					diffCalled = true
+					return "locales/en.json\n", nil
+				}
+			}
+			if name == "git" && args[0] == "commit" {
+				commitCalled = true
+				return "Files committed", nil
+			}
+			return "", nil
+		},
+		RunFunc: func(name string, args ...string) error {
+			if name == "git" && args[0] == "push" && args[1] == "origin" {
+				return nil // Simulate successful push
+			}
+			return fmt.Errorf("unexpected command: %s %v", name, args)
+		},
+	}
+
+	config := &Config{}
+
+	err := commitAndPush("test_branch", runner, config)
+	if err != nil {
+		t.Errorf("Expected no error, but got %v", err)
+	}
+	if !diffCalled || !commitCalled {
+		t.Fatalf("Expected both diff --cached and commit to be called")
+	}
+}
+
+func TestCommitAndPush_CommitError(t *testing.T) {
+	diffCalled := false
+	commitCalled := false
+
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			if name == "git" && len(args) >= 1 && args[0] == "diff" {
+				if len(args) >= 3 && args[1] == "--name-only" && args[2] == "--cached" {
+					diffCalled = true
+					return "locales/en.json\n", nil
+				}
+			}
+			if name == "git" && args[0] == "commit" {
+				commitCalled = true
+				return "", fmt.Errorf("commit failed")
+			}
+			return "", nil
+		},
+		RunFunc: func(name string, args ...string) error {
+			return nil
+		},
+	}
+
+	config := &Config{}
+
+	err := commitAndPush("test_branch", runner, config)
+	if err == nil {
+		t.Errorf("Expected error, but got nil")
+	} else if !strings.Contains(err.Error(), "failed to commit changes") {
+		t.Errorf("Expected commit error, but got %v", err)
+	}
+
+	if !diffCalled || !commitCalled {
+		t.Fatalf("Expected both diff --cached and commit to be called")
+	}
+}
+
+func TestCommitAndPush_PushError(t *testing.T) {
+	diffCalled := false
+	commitCalled := false
+
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			if name == "git" && len(args) >= 1 && args[0] == "diff" {
+				if len(args) >= 3 && args[1] == "--name-only" && args[2] == "--cached" {
+					diffCalled = true
+					return "locales/en.json\n", nil
+				}
+			}
+			if name == "git" && args[0] == "commit" {
+				commitCalled = true
+				return "Files committed", nil
+			}
+			return "", nil
+		},
+		RunFunc: func(name string, args ...string) error {
+			if name == "git" && args[0] == "push" && args[1] == "origin" {
+				return fmt.Errorf("push failed")
+			}
+			return nil
+		},
+	}
+
+	config := &Config{}
+
+	err := commitAndPush("test_branch", runner, config)
+	if err == nil {
+		t.Errorf("Expected error, but got nil")
+	} else if !strings.Contains(err.Error(), "push failed") {
+		t.Errorf("Expected push error, but got %v", err)
+	}
+
+	if !diffCalled || !commitCalled {
+		t.Fatalf("Expected both diff --cached and commit to be called")
+	}
+}
+
+func TestCommitAndPush_NoStaged_ReturnsNoChanges(t *testing.T) {
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			if name == "git" && len(args) >= 3 && args[0] == "diff" && args[1] == "--name-only" && args[2] == "--cached" {
+				return "", nil
+			}
+			t.Fatalf("Unexpected Capture call: %s %v", name, args)
+			return "", nil
+		},
+		RunFunc: func(name string, args ...string) error {
+			t.Fatalf("Run should not be called when no staged changes")
+			return nil
+		},
+	}
+
+	err := commitAndPush("branch", runner, &Config{})
+	if err != ErrNoChanges {
+		t.Fatalf("Expected ErrNoChanges, got %v", err)
+	}
+}
+
+func TestCommitAndPush_CommitFails_NoPush(t *testing.T) {
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			if name == "git" && len(args) >= 3 && args[0] == "diff" && args[1] == "--name-only" && args[2] == "--cached" {
+				return "locales/en.json\n", nil
+			}
+			if name == "git" && len(args) >= 1 && args[0] == "commit" {
+				return "hook said nope", fmt.Errorf("commit hook failed")
+			}
+			return "", nil
+		},
+		RunFunc: func(name string, args ...string) error {
+			if name == "git" && len(args) >= 1 && args[0] == "push" {
+				t.Fatalf("push must not be called when commit fails")
+			}
+			return nil
+		},
+	}
+
+	err := commitAndPush("branch", runner, &Config{GitCommitMessage: "msg"})
+	if err == nil || !strings.Contains(err.Error(), "failed to commit changes") {
+		t.Fatalf("Expected commit error, got %v", err)
+	}
+}
+
 func TestBuildGitAddArgs(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -486,12 +797,12 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Flat naming with AlwaysPullBase = true, single path",
 			config: &Config{
-				FileExt:        []string{"json"},
-				BaseLang:       "en",
-				FlatNaming:     true,
-				AlwaysPullBase: true,
+				FileExt:          []string{"json"},
+				BaseLang:         "en",
+				FlatNaming:       true,
+				AlwaysPullBase:   true,
+				TranslationPaths: []string{"path/to/translations"},
 			},
-			mockPaths: []string{filepath.Join("path", "to", "translations")},
 			expectedArgs: []string{
 				filepath.Join("path", "to", "translations", "*.json"),
 				":!" + filepath.Join("path", "to", "translations", "**", "*.json"),
@@ -500,14 +811,11 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Flat naming with AlwaysPullBase = true, multiple paths",
 			config: &Config{
-				FileExt:        []string{"json"},
-				BaseLang:       "en",
-				FlatNaming:     true,
-				AlwaysPullBase: true,
-			},
-			mockPaths: []string{
-				filepath.Join("path1"),
-				filepath.Join("path2"),
+				FileExt:          []string{"json"},
+				BaseLang:         "en",
+				FlatNaming:       true,
+				AlwaysPullBase:   true,
+				TranslationPaths: []string{"path1", "path2"},
 			},
 			expectedArgs: []string{
 				filepath.Join("path1", "*.json"),
@@ -519,14 +827,11 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Flat naming with AlwaysPullBase = false, multiple paths",
 			config: &Config{
-				FileExt:        []string{"json"},
-				BaseLang:       "en",
-				FlatNaming:     true,
-				AlwaysPullBase: false,
-			},
-			mockPaths: []string{
-				filepath.Join("path1"),
-				filepath.Join("path2"),
+				FileExt:          []string{"json"},
+				BaseLang:         "en",
+				FlatNaming:       true,
+				AlwaysPullBase:   false,
+				TranslationPaths: []string{"path1", "path2"},
 			},
 			expectedArgs: []string{
 				filepath.Join("path1", "*.json"),
@@ -540,14 +845,11 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Nested naming with AlwaysPullBase = true, multiple paths",
 			config: &Config{
-				FileExt:        []string{"json"},
-				BaseLang:       "en",
-				FlatNaming:     false,
-				AlwaysPullBase: true,
-			},
-			mockPaths: []string{
-				filepath.Join("path1"),
-				filepath.Join("path2"),
+				FileExt:          []string{"json"},
+				BaseLang:         "en",
+				FlatNaming:       false,
+				AlwaysPullBase:   true,
+				TranslationPaths: []string{"path1", "path2"},
 			},
 			expectedArgs: []string{
 				filepath.Join("path1", "**", "*.json"),
@@ -557,14 +859,11 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Nested naming with AlwaysPullBase = false, multiple paths",
 			config: &Config{
-				FileExt:        []string{"json"},
-				BaseLang:       "en",
-				FlatNaming:     false,
-				AlwaysPullBase: false,
-			},
-			mockPaths: []string{
-				filepath.Join("path1"),
-				filepath.Join("path2"),
+				FileExt:          []string{"json"},
+				BaseLang:         "en",
+				FlatNaming:       false,
+				AlwaysPullBase:   false,
+				TranslationPaths: []string{"path1", "path2"},
 			},
 			expectedArgs: []string{
 				filepath.Join("path1", "**", "*.json"),
@@ -576,23 +875,23 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Empty translations path",
 			config: &Config{
-				FileExt:        []string{"json"},
-				BaseLang:       "en",
-				FlatNaming:     true,
-				AlwaysPullBase: true,
+				FileExt:          []string{"json"},
+				BaseLang:         "en",
+				FlatNaming:       true,
+				AlwaysPullBase:   true,
+				TranslationPaths: []string{},
 			},
-			mockPaths:    []string{},
 			expectedArgs: []string{},
 		},
 		{
 			name: "Flat naming + multi-ext (iOS) + AlwaysPullBase = false, single path",
 			config: &Config{
-				FileExt:        []string{"strings", "stringsdict"},
-				BaseLang:       "en",
-				FlatNaming:     true,
-				AlwaysPullBase: false,
+				FileExt:          []string{"strings", "stringsdict"},
+				BaseLang:         "en",
+				FlatNaming:       true,
+				AlwaysPullBase:   false,
+				TranslationPaths: []string{"ios/Localizations"},
 			},
-			mockPaths: []string{filepath.Join("ios", "Localizations")},
 			expectedArgs: []string{
 				// strings
 				filepath.Join("ios", "Localizations", "*.strings"),
@@ -607,14 +906,11 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Nested naming + multi-ext (iOS) + AlwaysPullBase = true, multiple paths",
 			config: &Config{
-				FileExt:        []string{"strings", "stringsdict"},
-				BaseLang:       "en",
-				FlatNaming:     false,
-				AlwaysPullBase: true,
-			},
-			mockPaths: []string{
-				filepath.Join("ios", "ModuleA"),
-				filepath.Join("ios", "ModuleB"),
+				FileExt:          []string{"strings", "stringsdict"},
+				BaseLang:         "en",
+				FlatNaming:       false,
+				AlwaysPullBase:   true,
+				TranslationPaths: []string{"ios/ModuleA", "ios/ModuleB"},
 			},
 			expectedArgs: []string{
 				// ModuleA both exts
@@ -628,13 +924,11 @@ func TestBuildGitAddArgs(t *testing.T) {
 		{
 			name: "Nested naming + multi-ext (iOS) + AlwaysPullBase = false (exclude base dir once per path)",
 			config: &Config{
-				FileExt:        []string{"strings", "stringsdict"},
-				BaseLang:       "en",
-				FlatNaming:     false,
-				AlwaysPullBase: false,
-			},
-			mockPaths: []string{
-				filepath.Join("ios", "App"),
+				FileExt:          []string{"strings", "stringsdict"},
+				BaseLang:         "en",
+				FlatNaming:       false,
+				AlwaysPullBase:   false,
+				TranslationPaths: []string{"ios/App"},
 			},
 			expectedArgs: []string{
 				filepath.Join("ios", "App", "**", "*.strings"),
@@ -645,19 +939,7 @@ func TestBuildGitAddArgs(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			// Set TRANSLATIONS_PATH environment variable
-			// Join the mock paths with newline since ParseStringArrayEnv splits by newlines
-			envValue := strings.Join(tt.mockPaths, "\n")
-			if envValue != "" {
-				os.Setenv("TRANSLATIONS_PATH", envValue)
-				defer os.Unsetenv("TRANSLATIONS_PATH")
-			} else {
-				// Ensure env var is unset if empty
-				os.Unsetenv("TRANSLATIONS_PATH")
-			}
-
 			got := buildGitAddArgs(tt.config)
 
 			if !equalSlices(got, tt.expectedArgs) {
@@ -678,7 +960,7 @@ func TestGenerateBranchName(t *testing.T) {
 			name: "Valid inputs",
 			config: &Config{
 				GitHubSHA:        "1234567890abcdef",
-				GitHubRefName:    "feature_branch",
+				BaseRef:          "feature_branch",
 				TempBranchPrefix: "temp",
 			},
 			expectedError: false,
@@ -688,7 +970,7 @@ func TestGenerateBranchName(t *testing.T) {
 			name: "Valid inputs with branch override",
 			config: &Config{
 				GitHubSHA:          "1234567890abcdef",
-				GitHubRefName:      "feature_branch",
+				BaseRef:            "feature_branch",
 				TempBranchPrefix:   "temp",
 				OverrideBranchName: "custom_branch",
 			},
@@ -699,26 +981,26 @@ func TestGenerateBranchName(t *testing.T) {
 			name: "GITHUB_SHA too short",
 			config: &Config{
 				GitHubSHA:        "123",
-				GitHubRefName:    "main",
+				BaseRef:          "main",
 				TempBranchPrefix: "temp",
 			},
 			expectedError: true,
 		},
 		{
-			name: "GITHUB_REF_NAME with invalid characters",
+			name: "BASE_REF with invalid characters",
 			config: &Config{
 				GitHubSHA:        "abcdef123456",
-				GitHubRefName:    "feature/branch!@#",
+				BaseRef:          "feature/branch!@#",
 				TempBranchPrefix: "temp",
 			},
 			expectedError: false,
 			expectedStart: "temp_feature/branch_abcdef_",
 		},
 		{
-			name: "GITHUB_REF_NAME exceeding 50 characters",
+			name: "BASE_REF exceeding 50 characters",
 			config: &Config{
 				GitHubSHA:        "abcdef123456",
-				GitHubRefName:    strings.Repeat("a", 60),
+				BaseRef:          strings.Repeat("a", 60),
 				TempBranchPrefix: "temp",
 			},
 			expectedError: false,
@@ -727,8 +1009,6 @@ func TestGenerateBranchName(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt // Capture variable
-
 		t.Run(tt.name, func(t *testing.T) {
 			branchName, err := generateBranchName(tt.config)
 			if tt.expectedError {
@@ -748,110 +1028,93 @@ func TestGenerateBranchName(t *testing.T) {
 	}
 }
 
-func TestCommitAndPush_ForcePush(t *testing.T) {
-	var capturedArgs []string
+func TestResolveRealBase_UsesProvidedBase(t *testing.T) {
+	runner := &MockCommandRunner{} // no calls expected
+	cfg := &Config{BaseRef: "feature/xyz"}
 
-	runner := &MockCommandRunner{
-		CaptureFunc: func(name string, args ...string) (string, error) {
-			if name == "git" && args[0] == "commit" {
-				return "Files committed", nil
-			}
-			return "", nil
-		},
-		RunFunc: func(name string, args ...string) error {
-			if name == "git" && args[0] == "push" {
-				capturedArgs = args
-				return nil
-			}
-			return nil
-		},
-	}
-
-	config := &Config{
-		ForcePush: true,
-	}
-
-	err := commitAndPush("test_branch", runner, config)
+	got, err := resolveRealBase(runner, cfg)
 	if err != nil {
-		t.Errorf("Expected no error, got %v", err)
+		t.Fatalf("unexpected err: %v", err)
 	}
-
-	expectedArgs := []string{"push", "--force", "origin", "test_branch"}
-	if !slices.Equal(capturedArgs, expectedArgs) {
-		t.Errorf("Expected push args %v, got %v", expectedArgs, capturedArgs)
+	if got != "feature/xyz" {
+		t.Fatalf("want feature/xyz, got %s", got)
 	}
 }
 
-func TestCommitAndPush_Success(t *testing.T) {
+func TestResolveRealBase_FallbackToRemoteHEAD(t *testing.T) {
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
-			if name == "git" && args[0] == "commit" {
-				return "Files committed", nil
+			if name == "git" && len(args) >= 2 && args[0] == "remote" && args[1] == "show" {
+				// minimal realistic snippet
+				return `
+* remote origin
+  Fetch URL: git@github.com:org/repo.git
+  HEAD branch: develop
+  Remote branches:
+    develop tracked
+    main    tracked
+`, nil
 			}
-			return "", nil
-		},
-		RunFunc: func(name string, args ...string) error {
-			if name == "git" && args[0] == "push" && args[1] == "origin" {
-				return nil // Simulate successful push
-			}
-			return fmt.Errorf("unexpected command: %s %v", name, args)
+			return "", fmt.Errorf("unexpected capture: %s %v", name, args)
 		},
 	}
+	cfg := &Config{BaseRef: "123/merge"} // synthetic
 
-	config := &Config{}
-
-	err := commitAndPush("test_branch", runner, config)
+	got, err := resolveRealBase(runner, cfg)
 	if err != nil {
-		t.Errorf("Expected no error, but got %v", err)
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != "develop" {
+		t.Fatalf("want develop, got %s", got)
 	}
 }
 
-func TestCommitAndPush_CommitError(t *testing.T) {
+func TestResolveRealBase_FallbackToMainWhenUnknown(t *testing.T) {
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
-			if name == "git" && args[0] == "commit" {
-				return "", fmt.Errorf("commit failed")
-			}
-			return "", nil
-		},
-		RunFunc: func(name string, args ...string) error {
-			return nil
+			// simulate git output that doesn't include "HEAD branch:"
+			return "some weird output", nil
 		},
 	}
+	cfg := &Config{BaseRef: ""} // empty → synthetic
 
-	config := &Config{}
-
-	err := commitAndPush("test_branch", runner, config)
-	if err == nil {
-		t.Errorf("Expected error, but got nil")
-	} else if !strings.Contains(err.Error(), "failed to commit changes") {
-		t.Errorf("Expected commit error, but got %v", err)
+	got, err := resolveRealBase(runner, cfg)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != "main" {
+		t.Fatalf("want main, got %s", got)
 	}
 }
 
-func TestCommitAndPush_PushError(t *testing.T) {
-	runner := &MockCommandRunner{
-		CaptureFunc: func(name string, args ...string) (string, error) {
-			if name == "git" && args[0] == "commit" {
-				return "Files committed", nil
-			}
-			return "", nil
-		},
-		RunFunc: func(name string, args ...string) error {
-			if name == "git" && args[0] == "push" && args[1] == "origin" {
-				return fmt.Errorf("push failed")
-			}
-			return nil
-		},
+func TestIsSyntheticRef(t *testing.T) {
+	t.Parallel() // this test can run alongside other tests
+
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"", true},
+		{"merge", true},
+		{"head", true},
+		{"123/merge", true},
+		{"123/head", true},
+		{"refs/pull/45/merge", true},
+		{"refs/pull/45/head", true},
+		{"pull/99/merge", true},
+		{"feature/foo", false},
+		{"main", false},
 	}
 
-	config := &Config{}
+	for _, c := range cases {
+		t.Run(fmt.Sprintf("in=%q", c.in), func(t *testing.T) {
+			t.Parallel()
 
-	err := commitAndPush("test_branch", runner, config)
-	if err == nil {
-		t.Errorf("Expected error, but got nil")
-	} else if !strings.Contains(err.Error(), "push failed") {
-		t.Errorf("Expected push error, but got %v", err)
+			got := isSyntheticRef(c.in)
+			if got != c.want {
+				t.Errorf("isSyntheticRef(%q) = %v; want %v", c.in, got, c.want)
+			}
+		})
 	}
 }
 
