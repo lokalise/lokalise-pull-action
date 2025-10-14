@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -184,28 +185,39 @@ func gitLsFiles(config *Config, runner CommandRunner) ([]string, error) {
 // Example (nested): locales/**/*.json
 // We rely on git's pathspec globbing (not the shell), hence the explicit "--".
 func buildGitStatusArgs(paths []string, fileExt []string, flatNaming bool, gitCmd ...string) []string {
-	patterns := make([]string, 0, len(paths)*len(fileExt))
+	patSet := make(map[string]struct{})
 
 	for _, path := range paths {
+		if path = strings.TrimSpace(path); path == "" {
+			continue
+		}
 		for _, ext := range fileExt {
 			ext = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
 			if ext == "" {
 				continue
 			}
-
+			var pat string
 			if flatNaming {
-				// Flat: match files directly under the given path.
-				patterns = append(patterns, filepath.ToSlash(filepath.Join(path, fmt.Sprintf("*.%s", ext))))
+				pat = filepath.Join(path, fmt.Sprintf("*.%s", ext))
 			} else {
-				// Nested: match any depth below path.
-				patterns = append(patterns, filepath.ToSlash(filepath.Join(path, "**", fmt.Sprintf("*.%s", ext))))
+				pat = filepath.Join(path, "**", fmt.Sprintf("*.%s", ext))
 			}
+			p := filepath.ToSlash(pat)
+
+			p = strings.TrimPrefix(p, "./")
+			patSet[p] = struct{}{}
 		}
 	}
 
+	patterns := make([]string, 0, len(patSet))
+	for p := range patSet {
+		patterns = append(patterns, p)
+	}
+
+	slices.Sort(patterns)
+
 	args := append(gitCmd, "--")
 	args = append(args, patterns...)
-
 	return args
 }
 
@@ -299,18 +311,20 @@ func filterFiles(files []string, excludePatterns []*regexp.Regexp) []string {
 
 	var filtered []string
 	for _, file := range files {
-		file = filepath.ToSlash(file)
+		norm := filepath.ToSlash(file)
+		norm = strings.TrimPrefix(norm, "./")
+
 		exclude := false
 
 		for _, pattern := range excludePatterns {
-			if pattern.MatchString(file) {
+			if pattern.MatchString(norm) {
 				exclude = true
 				break
 			}
 		}
 
 		if !exclude {
-			filtered = append(filtered, file)
+			filtered = append(filtered, norm)
 		}
 	}
 
@@ -330,9 +344,18 @@ func prepareConfig() (*Config, error) {
 		return nil, fmt.Errorf("invalid ALWAYS_PULL_BASE value: %v", err)
 	}
 
-	paths := parsers.ParseStringArrayEnv("TRANSLATIONS_PATH")
-	if len(paths) == 0 {
+	rawPaths := parsers.ParseStringArrayEnv("TRANSLATIONS_PATH")
+	if len(rawPaths) == 0 {
 		return nil, fmt.Errorf("no valid paths found in TRANSLATIONS_PATH")
+	}
+
+	paths := make([]string, 0, len(rawPaths))
+	for _, p := range rawPaths {
+		pp, err := ensureRepoRelative(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid TRANSLATIONS_PATH %q: %v", p, err)
+		}
+		paths = append(paths, pp)
 	}
 
 	// FILE_EXT can be a YAML block (newline-separated). If empty, fall back to FILE_FORMAT.
@@ -378,4 +401,38 @@ func prepareConfig() (*Config, error) {
 		BaseLang:       baseLang,
 		Paths:          paths,
 	}, nil
+}
+
+// helper: repo-relative paths only (как в прошлом скрипте)
+//
+// Allowed examples:
+//
+//	"." , "path", "./path", "dir/subdir"
+//
+// Disallowed:
+//
+//	absolute ("/x", "C:\\x", "C:/x"),
+//	parent escape ("..", "../x", "a/../../b"),
+//	empty/whitespace.
+func ensureRepoRelative(p string) (string, error) {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return "", errors.New("empty path")
+	}
+
+	clean := filepath.Clean(p)
+	if filepath.IsAbs(clean) {
+		return "", fmt.Errorf("path must be relative to repo: %q", p)
+	}
+
+	s := filepath.ToSlash(clean)
+	if strings.HasPrefix(s, "/") {
+		return "", fmt.Errorf("path must be relative to repo: %q", p)
+	}
+
+	if s == ".." || strings.HasPrefix(s, "../") {
+		return "", fmt.Errorf("path escapes repo root: %q", p)
+	}
+
+	return clean, nil
 }

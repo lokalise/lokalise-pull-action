@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -230,6 +231,94 @@ func TestEnvVarsToConfig(t *testing.T) {
 				AlwaysPullBase:   true,
 				GitCommitMessage: "Translations update",
 				TranslationPaths: []string{"translations", "locales"},
+			},
+			expectError: false,
+		},
+		{
+			name: "Multiple TRANSLATIONS_PATH cleaned and normalized",
+			envVars: map[string]string{
+				"GITHUB_ACTOR":       "test_actor",
+				"GITHUB_SHA":         "123456",
+				"BASE_REF":           "main",
+				"TEMP_BRANCH_PREFIX": "temp",
+				"TRANSLATIONS_PATH":  ".\n./loc\nloc/../loc",
+				"FILE_EXT":           "json",
+				"BASE_LANG":          "en",
+				"FLAT_NAMING":        "true",
+				"ALWAYS_PULL_BASE":   "false",
+			},
+			expectedConfig: &Config{
+				GitHubActor:      "test_actor",
+				GitHubSHA:        "123456",
+				BaseRef:          "main",
+				TempBranchPrefix: "temp",
+				FileExt:          []string{"json"},
+				BaseLang:         "en",
+				FlatNaming:       true,
+				AlwaysPullBase:   false,
+				GitCommitMessage: "Translations update",
+				TranslationPaths: []string{".", "loc", "loc"},
+			},
+			expectError: false,
+		},
+		{
+			name: "Reject absolute TRANSLATIONS_PATH",
+			envVars: map[string]string{
+				"GITHUB_ACTOR":       "test_actor",
+				"GITHUB_SHA":         "123456",
+				"BASE_REF":           "main",
+				"TEMP_BRANCH_PREFIX": "temp",
+				"TRANSLATIONS_PATH":  "/etc/locales",
+				"FILE_EXT":           "json",
+				"BASE_LANG":          "en",
+				"FLAT_NAMING":        "true",
+				"ALWAYS_PULL_BASE":   "false",
+			},
+			expectError:     true,
+			expectedErrText: "invalid TRANSLATIONS_PATH",
+		},
+		{
+			name: "Reject parent-escape TRANSLATIONS_PATH",
+			envVars: map[string]string{
+				"GITHUB_ACTOR":       "test_actor",
+				"GITHUB_SHA":         "123456",
+				"BASE_REF":           "main",
+				"TEMP_BRANCH_PREFIX": "temp",
+				"TRANSLATIONS_PATH":  "../locales",
+				"FILE_EXT":           "json",
+				"BASE_LANG":          "en",
+				"FLAT_NAMING":        "true",
+				"ALWAYS_PULL_BASE":   "false",
+			},
+			expectError:     true,
+			expectedErrText: "invalid TRANSLATIONS_PATH",
+		},
+		{
+			name: "FORCE_PUSH true is parsed",
+			envVars: map[string]string{
+				"GITHUB_ACTOR":       "test_actor",
+				"GITHUB_SHA":         "123456",
+				"BASE_REF":           "main",
+				"TEMP_BRANCH_PREFIX": "temp",
+				"TRANSLATIONS_PATH":  "translations",
+				"FILE_EXT":           "json",
+				"BASE_LANG":          "en",
+				"FLAT_NAMING":        "false",
+				"ALWAYS_PULL_BASE":   "true",
+				"FORCE_PUSH":         "true",
+			},
+			expectedConfig: &Config{
+				GitHubActor:      "test_actor",
+				GitHubSHA:        "123456",
+				BaseRef:          "main",
+				TempBranchPrefix: "temp",
+				FileExt:          []string{"json"},
+				BaseLang:         "en",
+				FlatNaming:       false,
+				AlwaysPullBase:   true,
+				GitCommitMessage: "Translations update",
+				ForcePush:        true,
+				TranslationPaths: []string{"translations"},
 			},
 			expectError: false,
 		},
@@ -936,14 +1025,86 @@ func TestBuildGitAddArgs(t *testing.T) {
 				":!" + filepath.Join("ios", "App", "en", "**"),
 			},
 		},
+		{
+			name: "Nested + dot root: no ./ prefix and base excluded once",
+			config: &Config{
+				FileExt:          []string{"json"},
+				BaseLang:         "en",
+				FlatNaming:       false,
+				AlwaysPullBase:   false,
+				TranslationPaths: []string{"."},
+			},
+			expectedArgs: []string{
+				"**/*.json",
+				":!en/**",
+			},
+		},
+		{
+			name: "Dedup paths & exts; trim ./ and backslashes",
+			config: &Config{
+				FileExt:          []string{".JSON", " json "}, // -> json
+				BaseLang:         "en",
+				FlatNaming:       true,
+				AlwaysPullBase:   true,
+				TranslationPaths: []string{`.\loc`, "./loc", "loc"}, // dup + mixed
+			},
+			expectedArgs: []string{
+				filepath.Join("loc", "*.json"),
+				":!" + filepath.Join("loc", "**", "*.json"),
+			},
+		},
+		{
+			name: "Flat naming with Windows-like path normalizes to slashes",
+			config: &Config{
+				FileExt:          []string{"yaml"},
+				BaseLang:         "en",
+				FlatNaming:       true,
+				AlwaysPullBase:   true,
+				TranslationPaths: []string{`path\to\tr`},
+			},
+			expectedArgs: []string{
+				filepath.Join("path", "to", "tr", "*.yaml"),
+				":!" + filepath.Join("path", "to", "tr", "**", "*.yaml"),
+			},
+		},
+		{
+			name: "Flat + multi-ext; AlwaysPullBase=false excludes per ext",
+			config: &Config{
+				FileExt:          []string{"json", "yaml"},
+				BaseLang:         "base",
+				FlatNaming:       true,
+				AlwaysPullBase:   false,
+				TranslationPaths: []string{"locales"},
+			},
+			expectedArgs: []string{
+				filepath.Join("locales", "*.json"),
+				":!" + filepath.Join("locales", "base.json"),
+				":!" + filepath.Join("locales", "**", "*.json"),
+				filepath.Join("locales", "*.yaml"),
+				":!" + filepath.Join("locales", "base.yaml"),
+				":!" + filepath.Join("locales", "**", "*.yaml"),
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := buildGitAddArgs(tt.config)
 
-			if !equalSlices(got, tt.expectedArgs) {
-				t.Errorf("buildGitAddArgs() = %v, want %v", got, tt.expectedArgs)
+			norm := func(xs []string) []string {
+				out := make([]string, 0, len(xs))
+				for _, s := range xs {
+					out = append(out, filepath.ToSlash(s))
+				}
+				sort.Strings(out)
+				return out
+			}
+
+			gotN := norm(got)
+			wantN := norm(tt.expectedArgs)
+
+			if !reflect.DeepEqual(gotN, wantN) {
+				t.Errorf("buildGitAddArgs() = %v, want %v", gotN, wantN)
 			}
 		})
 	}
@@ -1121,23 +1282,4 @@ func TestIsSyntheticRef(t *testing.T) {
 // containsSubstring checks if a string contains a substring
 func containsSubstring(s, substr string) bool {
 	return strings.Contains(s, substr)
-}
-
-func equalSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	// Sort both slices to normalize their order
-	sortedA := slices.Clone(a) // Create a copy to avoid modifying the original slices
-	sortedB := slices.Clone(b)
-	slices.Sort(sortedA)
-	slices.Sort(sortedB)
-
-	for i := range sortedA {
-		if sortedA[i] != sortedB[i] {
-			return false
-		}
-	}
-	return true
 }

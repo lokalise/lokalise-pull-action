@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -214,6 +216,16 @@ func envVarsToConfig() (*Config, error) {
 		commitMsg = "Translations update"
 	}
 
+	rawPaths := parsers.ParseStringArrayEnv("TRANSLATIONS_PATH")
+	cleaned := make([]string, 0, len(rawPaths))
+	for _, p := range rawPaths {
+		cp, err := ensureRepoRelative(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid TRANSLATIONS_PATH %q: %v", p, err)
+		}
+		cleaned = append(cleaned, cp)
+	}
+
 	return &Config{
 		GitHubActor:        envValues["GITHUB_ACTOR"],
 		GitHubSHA:          envValues["GITHUB_SHA"],
@@ -229,7 +241,7 @@ func envVarsToConfig() (*Config, error) {
 		ForcePush:          envBoolValues["FORCE_PUSH"],
 		BaseRef:            baseRef,
 		HeadRef:            headRef,
-		TranslationPaths:   parsers.ParseStringArrayEnv("TRANSLATIONS_PATH"),
+		TranslationPaths:   cleaned,
 	}, nil
 }
 
@@ -325,37 +337,65 @@ func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) e
 //
 // We use Git's own globbing (not shell), hence explicit ":"-prefixed excludes (:!) and a final "--".
 func buildGitAddArgs(config *Config) []string {
-	translationsPaths := config.TranslationPaths
-	flatNaming := config.FlatNaming
-	alwaysPullBase := config.AlwaysPullBase
-	baseLang := config.BaseLang
-	fileExts := config.FileExt
+	paths := config.TranslationPaths
+	flat := config.FlatNaming
+	pullBase := config.AlwaysPullBase
+	base := config.BaseLang
+	exts := config.FileExt
 
-	var addArgs []string
-	for _, path := range translationsPaths {
-		if flatNaming {
-			// Flat: only top-level files like "<path>/*.ext".
-			for _, ext := range fileExts {
-				addArgs = append(addArgs, filepath.Join(path, fmt.Sprintf("*.%s", ext)))
-				// Exclude the base language single file per ext if requested.
-				if !alwaysPullBase && baseLang != "" {
-					addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, fmt.Sprintf("%s.%s", baseLang, ext))))
+	norm := func(s string) string {
+		s = filepath.ToSlash(s)
+		return strings.TrimPrefix(s, "./")
+	}
+	seen := make(map[string]struct{})
+	add := func(p string) {
+		p = norm(p)
+		if p == "" {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+	}
+
+	for _, root := range paths {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		for _, ext := range exts {
+			ext = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
+			if ext == "" {
+				continue
+			}
+			if flat {
+				// include top-level files
+				add(filepath.Join(root, fmt.Sprintf("*.%s", ext)))
+				// exclude base file
+				if !pullBase && base != "" {
+					add(fmt.Sprintf(":!%s", filepath.Join(root, fmt.Sprintf("%s.%s", base, ext))))
 				}
-				// Ensure we do not accidentally include nested dirs in flat mode.
-				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, "**", fmt.Sprintf("*.%s", ext))))
-			}
-		} else {
-			// Nested: include any depth below path for each extension.
-			for _, ext := range fileExts {
-				addArgs = append(addArgs, filepath.Join(path, "**", fmt.Sprintf("*.%s", ext)))
-			}
-			// Optionally exclude the entire base language subtree.
-			if !alwaysPullBase && baseLang != "" {
-				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, baseLang, "**")))
+				// exclude any nested dirs (flat layout)
+				add(fmt.Sprintf(":!%s", filepath.Join(root, "**", fmt.Sprintf("*.%s", ext))))
+			} else {
+				// include nested any depth
+				add(filepath.Join(root, "**", fmt.Sprintf("*.%s", ext)))
 			}
 		}
+		if !flat && !pullBase && base != "" {
+			add(fmt.Sprintf(":!%s", filepath.Join(root, base, "**")))
+		}
 	}
-	return addArgs
+
+	out := make([]string, 0, len(seen))
+	for p := range seen {
+		out = append(out, p)
+	}
+
+	slices.Sort(out)
+
+	return out
 }
 
 // commitAndPush commits staged changes and pushes the branch (forcing if requested).
@@ -452,4 +492,30 @@ func isSyntheticRef(ref string) bool {
 		return true
 	}
 	return false
+}
+
+// repo-relative path validator
+// Allowed: ".", "path", "./path", "dir/subdir"
+// Disallowed: absolute ("/x", "C:\\x", "C:/x"), parent escape ("..", "../x", "a/../../b"), empty.
+func ensureRepoRelative(p string) (string, error) {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return "", errors.New("empty path")
+	}
+
+	clean := filepath.Clean(p)
+	if filepath.IsAbs(clean) {
+		return "", fmt.Errorf("path must be relative to repo: %q", p)
+	}
+
+	s := filepath.ToSlash(clean)
+	if strings.HasPrefix(s, "/") {
+		return "", fmt.Errorf("path must be relative to repo: %q", p)
+	}
+
+	if s == ".." || strings.HasPrefix(s, "../") {
+		return "", fmt.Errorf("path escapes repo root: %q", p)
+	}
+
+	return clean, nil
 }

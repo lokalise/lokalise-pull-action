@@ -34,6 +34,19 @@ func cmdKey(gitCmd []string, patterns []string) string {
 }
 
 func TestPrepareConfig(t *testing.T) {
+	normalizeCfg := func(c *Config) *Config {
+		if c == nil {
+			return nil
+		}
+		cp := *c
+		normPaths := make([]string, len(c.Paths))
+		for i, p := range c.Paths {
+			normPaths[i] = filepath.ToSlash(p)
+		}
+		cp.Paths = normPaths
+		return &cp
+	}
+
 	tests := []struct {
 		name           string
 		envVars        map[string]string
@@ -96,7 +109,7 @@ func TestPrepareConfig(t *testing.T) {
 			name: "FILE_EXT normalization (leading dot, spaces, casing) and dedupe",
 			envVars: map[string]string{
 				"TRANSLATIONS_PATH": "path/to/translations",
-				"FILE_EXT":          ".JSON\n json \nJsOn", // should normalize to just "json"
+				"FILE_EXT":          ".JSON\n json \nJsOn",
 				"BASE_LANG":         "en",
 				"FLAT_NAMING":       "true",
 				"ALWAYS_PULL_BASE":  "false",
@@ -134,28 +147,76 @@ func TestPrepareConfig(t *testing.T) {
 			name: "No valid extensions after normalization",
 			envVars: map[string]string{
 				"TRANSLATIONS_PATH": "path/to/translations",
-				"FILE_EXT":          " \n . \n\t", // all collapse to empty after trim/strip dot
+				"FILE_EXT":          " \n . \n\t",
 				"BASE_LANG":         "en",
 				"FLAT_NAMING":       "true",
 				"ALWAYS_PULL_BASE":  "false",
 			},
 			expectedError: "no valid file extensions after normalization",
 		},
+		{
+			name: "Multiple TRANSLATIONS_PATH are cleaned and kept relative",
+			envVars: map[string]string{
+				"TRANSLATIONS_PATH": ".\n./locales\nlocales/../locales",
+				"FILE_EXT":          "json",
+				"BASE_LANG":         "en",
+				"FLAT_NAMING":       "true",
+				"ALWAYS_PULL_BASE":  "false",
+			},
+			expectedConfig: &Config{
+				FileExt:        []string{"json"},
+				FlatNaming:     true,
+				AlwaysPullBase: false,
+				BaseLang:       "en",
+				Paths:          []string{".", "locales", "locales"},
+			},
+		},
+		{
+			name: "Reject absolute TRANSLATIONS_PATH",
+			envVars: map[string]string{
+				"TRANSLATIONS_PATH": "/etc/locales",
+				"FILE_EXT":          "json",
+				"BASE_LANG":         "en",
+				"FLAT_NAMING":       "true",
+				"ALWAYS_PULL_BASE":  "false",
+			},
+			expectedError: "invalid TRANSLATIONS_PATH",
+		},
+		{
+			name: "Reject parent-escape TRANSLATIONS_PATH",
+			envVars: map[string]string{
+				"TRANSLATIONS_PATH": "../locales",
+				"FILE_EXT":          "json",
+				"BASE_LANG":         "en",
+				"FLAT_NAMING":       "true",
+				"ALWAYS_PULL_BASE":  "false",
+			},
+			expectedError: "invalid TRANSLATIONS_PATH",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// set envs
 			for k, v := range tt.envVars {
 				if err := os.Setenv(k, v); err != nil {
 					t.Fatalf("failed to set env: %v", err)
 				}
 			}
+			// ensure required booleans have defaults if test omitted them
+			if _, ok := tt.envVars["FLAT_NAMING"]; !ok {
+				_ = os.Setenv("FLAT_NAMING", "true")
+			}
+			if _, ok := tt.envVars["ALWAYS_PULL_BASE"]; !ok {
+				_ = os.Setenv("ALWAYS_PULL_BASE", "false")
+			}
+
 			defer func() {
 				for k := range tt.envVars {
-					if err := os.Unsetenv(k); err != nil {
-						t.Fatalf("failed to set env: %v", err)
-					}
+					_ = os.Unsetenv(k)
 				}
+				_ = os.Unsetenv("FLAT_NAMING")
+				_ = os.Unsetenv("ALWAYS_PULL_BASE")
 			}()
 
 			cfg, err := prepareConfig()
@@ -171,8 +232,11 @@ func TestPrepareConfig(t *testing.T) {
 				t.Fatalf("Unexpected error: %v", err)
 			}
 
-			if !reflect.DeepEqual(cfg, tt.expectedConfig) {
-				t.Errorf("Expected config %+v, got %+v", tt.expectedConfig, cfg)
+			got := normalizeCfg(cfg)
+			want := normalizeCfg(tt.expectedConfig)
+
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("Expected config %+v, got %+v", want, got)
 			}
 		})
 	}
@@ -224,7 +288,7 @@ func TestBuildGitStatusArgs(t *testing.T) {
 		{
 			name:       "Nested naming (multi-ext iOS bundle, mixed case + spaces + leading dot)",
 			paths:      []string{"ios/App"},
-			fileExt:    []string{".STRINGS", " stringsdict "}, // should normalize to strings / stringsdict
+			fileExt:    []string{".STRINGS", " stringsdict "},
 			flatNaming: false,
 			expected: []string{
 				"diff", "--name-only", "HEAD", "--",
@@ -238,6 +302,58 @@ func TestBuildGitStatusArgs(t *testing.T) {
 			fileExt:    []string{},
 			flatNaming: true,
 			expected:   []string{"diff", "--name-only", "HEAD", "--"},
+		},
+		{
+			name:       "Dedup paths/exts and trim ./ prefix",
+			paths:      []string{"./locales", "locales"},
+			fileExt:    []string{"JSON", ".json", " yaml "},
+			flatNaming: true,
+			expected: []string{
+				"diff", "--name-only", "HEAD", "--",
+				filepath.ToSlash(filepath.Join("locales", "*.json")),
+				filepath.ToSlash(filepath.Join("locales", "*.yaml")),
+			},
+		},
+		{
+			name:       "Nested naming with dot root produces **/*.ext (no ./ prefix)",
+			paths:      []string{"."},
+			fileExt:    []string{"json"},
+			flatNaming: false,
+			expected: []string{
+				"diff", "--name-only", "HEAD", "--",
+				"**/*.json",
+			},
+		},
+		{
+			name:       "Deterministic order with multiple paths and extensions",
+			paths:      []string{"b", "a"},
+			fileExt:    []string{"yaml", "json"},
+			flatNaming: true,
+			expected: []string{
+				"diff", "--name-only", "HEAD", "--",
+				filepath.ToSlash(filepath.Join("a", "*.json")),
+				filepath.ToSlash(filepath.Join("a", "*.yaml")),
+				filepath.ToSlash(filepath.Join("b", "*.json")),
+				filepath.ToSlash(filepath.Join("b", "*.yaml")),
+			},
+		},
+		{
+			name:       "Ignores empty/whitespace extensions",
+			paths:      []string{"path1"},
+			fileExt:    []string{" ", "\t", "."},
+			flatNaming: true,
+			expected:   []string{"diff", "--name-only", "HEAD", "--"},
+		},
+		{
+			name:       "Nested naming with mixed separators in input paths",
+			paths:      []string{`ios\LocA`},
+			fileExt:    []string{"strings", "stringsdict"},
+			flatNaming: false,
+			expected: []string{
+				"diff", "--name-only", "HEAD", "--",
+				filepath.ToSlash(filepath.Join("ios/LocA", "**", "*.strings")),
+				filepath.ToSlash(filepath.Join("ios/LocA", "**", "*.stringsdict")),
+			},
 		},
 	}
 
@@ -353,6 +469,52 @@ func TestFilterFiles(t *testing.T) {
 				regexp.MustCompile(`^kill\.json$`),
 			},
 			expected: []string{"1.json", "2.json", "keep/3.json"},
+		},
+		{
+			name:  "Backslash paths are normalized before matching",
+			files: []string{`loc\en.json`, `loc\fr.json`},
+			excludePatterns: []*regexp.Regexp{
+				regexp.MustCompile(`^loc/en\.json$`),
+			},
+			expected: []string{`loc/fr.json`},
+		},
+		{
+			name:  "Leading ./ is normalized before matching",
+			files: []string{"./loc/en.json", "loc/fr.json"},
+			excludePatterns: []*regexp.Regexp{
+				regexp.MustCompile(`^loc/.*`),
+			},
+			expected: []string{}, // both excluded after normalization
+		},
+		{
+			name:  "Regex metacharacters in filenames",
+			files: []string{"loc/de+at.json", "loc/de.json"},
+			excludePatterns: []*regexp.Regexp{
+				regexp.MustCompile(`^loc/de\+at\.json$`), // escape '+' so it matches literally
+			},
+			expected: []string{"loc/de.json"},
+		},
+		{
+			name:            "Empty excludePatterns slice behaves like nil (no exclusions)",
+			files:           []string{"a.json", "b.json"},
+			excludePatterns: []*regexp.Regexp{}, // explicit empty slice
+			expected:        []string{"a.json", "b.json"},
+		},
+		{
+			name:  "Duplicates are preserved for non-excluded files",
+			files: []string{"a.json", "a.json", "b.json"},
+			excludePatterns: []*regexp.Regexp{
+				regexp.MustCompile(`^b\.json$`),
+			},
+			expected: []string{"a.json", "a.json"},
+		},
+		{
+			name:  "Mixed slashes with directory-only exclude",
+			files: []string{`base\one.json`, `base/two.json`, `other/three.json`},
+			excludePatterns: []*regexp.Regexp{
+				regexp.MustCompile(`^base/.*`),
+			},
+			expected: []string{"other/three.json"},
 		},
 	}
 
@@ -727,7 +889,6 @@ func TestBuildExcludePatterns(t *testing.T) {
 				AlwaysPullBase: false,
 				BaseLang:       "en",
 			},
-			// exclude base dir (not per-ext)
 			expectedPatterns: []string{
 				"^ios/App/en/.*",
 			},
@@ -742,10 +903,83 @@ func TestBuildExcludePatterns(t *testing.T) {
 				AlwaysPullBase: false,
 				BaseLang:       "en",
 			},
-			// one exclude per path
 			expectedPatterns: []string{
 				"^module/A/loc/en/.*",
 				"^module/B/loc/en/.*",
+			},
+			expectError: false,
+		},
+		{
+			name: "Flat naming, AlwaysPullBase = false, EMPTY FileExt → only subdir exclude",
+			config: &Config{
+				Paths:          []string{"flat"},
+				FileExt:        []string{},
+				FlatNaming:     true,
+				AlwaysPullBase: false,
+				BaseLang:       "en",
+			},
+			expectedPatterns: []string{
+				"^flat/[^/]+/.*",
+			},
+			expectError: false,
+		},
+		{
+			name: "Flat naming, paths with regex metachars are safely escaped",
+			config: &Config{
+				Paths:          []string{`module[1]+/loc.v2`},
+				FileExt:        []string{"json"},
+				FlatNaming:     true,
+				AlwaysPullBase: false,
+				BaseLang:       "en",
+			},
+			expectedPatterns: []string{
+				`^module\[1\]\+/loc\.v2/en\.json$`,
+				`^module\[1\]\+/loc\.v2/[^/]+/.*`,
+			},
+			expectError: false,
+		},
+		{
+			name: "Flat naming, multiple paths & multi-ext — per-ext file excludes per path + subdir excludes",
+			config: &Config{
+				Paths:          []string{"pkg/a", "pkg/b"},
+				FileExt:        []string{"json", "yaml"},
+				FlatNaming:     true,
+				AlwaysPullBase: false,
+				BaseLang:       "en",
+			},
+			expectedPatterns: []string{
+				`^pkg/a/en\.json$`,
+				`^pkg/a/en\.yaml$`,
+				`^pkg/a/[^/]+/.*`,
+				`^pkg/b/en\.json$`,
+				`^pkg/b/en\.yaml$`,
+				`^pkg/b/[^/]+/.*`,
+			},
+			expectError: false,
+		},
+		{
+			name: "Nested naming, AlwaysPullBase = true → no excludes at all",
+			config: &Config{
+				Paths:          []string{"nested/loc"},
+				FileExt:        []string{"json"},
+				FlatNaming:     false,
+				AlwaysPullBase: true,
+				BaseLang:       "en",
+			},
+			expectedPatterns: []string{},
+			expectError:      false,
+		},
+		{
+			name: "Nested naming with Windows-like path gets normalized",
+			config: &Config{
+				Paths:          []string{`ios\Loc`},
+				FileExt:        []string{"strings"},
+				FlatNaming:     false,
+				AlwaysPullBase: false,
+				BaseLang:       "en-US",
+			},
+			expectedPatterns: []string{
+				`^ios/Loc/en-US/.*`,
 			},
 			expectError: false,
 		},
