@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -329,25 +328,9 @@ func prepareConfig() (*Config, error) {
 		return nil, fmt.Errorf("invalid ALWAYS_PULL_BASE value: %v", err)
 	}
 
-	rawPaths := parsers.ParseStringArrayEnv("TRANSLATIONS_PATH")
-	if len(rawPaths) == 0 {
-		return nil, fmt.Errorf("no valid paths found in TRANSLATIONS_PATH")
-	}
-	// validate + normalize repo-relative paths
-	pathSet := make(map[string]struct{}, len(rawPaths))
-	paths := make([]string, 0, len(rawPaths))
-	for _, p := range rawPaths {
-		clean, err := ensureRepoRelative(p)
-		if err != nil {
-			return nil, fmt.Errorf("invalid path %q in TRANSLATIONS_PATH: %w", p, err)
-		}
-		// normalize separators to forward slash for git pathspec
-		norm := filepath.ToSlash(clean)
-		if _, dup := pathSet[norm]; dup {
-			continue
-		}
-		pathSet[norm] = struct{}{}
-		paths = append(paths, norm)
+	paths, err := parsers.ParseRepoRelativePathsEnv("TRANSLATIONS_PATH")
+	if err != nil {
+		return nil, err
 	}
 
 	fileExt := parsers.ParseStringArrayEnv("FILE_EXT")
@@ -393,35 +376,4 @@ func prepareConfig() (*Config, error) {
 		BaseLang:       baseLang,
 		Paths:          paths,
 	}, nil
-}
-
-// ensureRepoRelative validates that the path stays inside repo root and is relative.
-// It rejects: absolute paths (including Windows drives and UNC), attempts to escape (".."),
-// empty/whitespace, and normalizes cleaned relative path for further use.
-func ensureRepoRelative(p string) (string, error) {
-	p = strings.TrimSpace(p)
-	if p == "" {
-		return "", errors.New("empty path")
-	}
-
-	clean := filepath.Clean(p)
-
-	// Reject absolute (covers *nix, Windows drive letters and UNC)
-	if filepath.IsAbs(clean) {
-		return "", fmt.Errorf("path must be relative to repo: %q", p)
-	}
-	// Quick guard for UNC-like strings that filepath.IsAbs может не распознать в редких кейсах
-	s := filepath.ToSlash(clean)
-	if strings.HasPrefix(s, "/") || strings.HasPrefix(s, "//") {
-		return "", fmt.Errorf("path must be relative to repo: %q", p)
-	}
-	// Block going above repo
-	if s == ".." || strings.HasPrefix(s, "../") {
-		return "", fmt.Errorf("path escapes repo root: %q", p)
-	}
-	// Block Windows drive letters that slipped as relative (e.g. "C:foo")
-	if matched, _ := regexp.MatchString(`^[A-Za-z]:`, s); matched {
-		return "", fmt.Errorf("path must be relative (got drive-prefixed): %q", p)
-	}
-	return clean, nil
 }

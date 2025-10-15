@@ -116,7 +116,7 @@ func TestPrepareConfig(t *testing.T) {
 				"FLAT_NAMING":      "true",
 				"ALWAYS_PULL_BASE": "false",
 			},
-			expectedError: "no valid paths found in TRANSLATIONS_PATH",
+			expectedError: "variable TRANSLATIONS_PATH is required",
 		},
 		{
 			name: "Invalid FLAT_NAMING",

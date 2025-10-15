@@ -217,23 +217,9 @@ func envVarsToConfig() (*Config, error) {
 	}
 
 	// validate TranslationPaths: repo-relative + ToSlash + dedupe
-	rawPaths := parsers.ParseStringArrayEnv("TRANSLATIONS_PATH")
-	if len(rawPaths) == 0 {
-		return nil, fmt.Errorf("environment variable TRANSLATIONS_PATH is required")
-	}
-	pathSet := make(map[string]struct{}, len(rawPaths))
-	paths := make([]string, 0, len(rawPaths))
-	for _, p := range rawPaths {
-		clean, err := ensureRepoRelative(p)
-		if err != nil {
-			return nil, fmt.Errorf("invalid path %q in TRANSLATIONS_PATH: %w", p, err)
-		}
-		norm := filepath.ToSlash(clean)
-		if _, dup := pathSet[norm]; dup {
-			continue
-		}
-		pathSet[norm] = struct{}{}
-		paths = append(paths, norm)
+	paths, err := parsers.ParseRepoRelativePathsEnv("TRANSLATIONS_PATH")
+	if err != nil {
+		return nil, err
 	}
 
 	return &Config{
@@ -469,41 +455,6 @@ func isSyntheticRef(ref string) bool {
 		return true
 	}
 	return false
-}
-
-// ensureRepoRelative validates that the path stays inside repo root and is relative.
-// Rejects: absolute (incl. Windows drives/UNC), parent escape (".."), empty.
-func ensureRepoRelative(p string) (string, error) {
-	p = strings.TrimSpace(p)
-	if p == "" {
-		return "", fmt.Errorf("empty path")
-	}
-	clean := filepath.Clean(p)
-
-	// Absolute (POSIX, Windows drive, UNC via IsAbs for most cases)
-	if filepath.IsAbs(clean) {
-		return "", fmt.Errorf("path must be relative to repo: %q", p)
-	}
-
-	// Normalize to forward slashes for checks
-	s := filepath.ToSlash(clean)
-
-	// Guard odd UNC-like or leading slash leftovers
-	if strings.HasPrefix(s, "/") || strings.HasPrefix(s, "//") {
-		return "", fmt.Errorf("path must be relative to repo: %q", p)
-	}
-
-	// Escape above repo
-	if s == ".." || strings.HasPrefix(s, "../") {
-		return "", fmt.Errorf("path escapes repo root: %q", p)
-	}
-
-	// Drive-like "C:foo" (relative-with-drive) — тоже нафиг
-	if len(s) >= 2 && s[1] == ':' && ((s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= 'a' && s[0] <= 'z')) {
-		return "", fmt.Errorf("path must be relative (drive-prefixed): %q", p)
-	}
-
-	return clean, nil
 }
 
 func joinSlash(elem ...string) string {
