@@ -49,6 +49,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				"BASE_LANG":            "en",
 				"FLAT_NAMING":          "true",
 				"ALWAYS_PULL_BASE":     "false",
+				"FORCE_PUSH":           "false",
 				"GIT_USER_NAME":        "my_user",
 				"GIT_USER_EMAIL":       "test@example.com",
 				"OVERRIDE_BRANCH_NAME": "custom_branch",
@@ -69,6 +70,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				OverrideBranchName: "custom_branch",
 				GitCommitMessage:   "My commit msg",
 				TranslationPaths:   []string{"translations"},
+				ForcePush:          false,
 			},
 			expectError: false,
 		},
@@ -84,6 +86,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				"BASE_LANG":          "en",
 				"FLAT_NAMING":        "false",
 				"ALWAYS_PULL_BASE":   "true",
+				"FORCE_PUSH":         "false",
 			},
 			expectedConfig: &Config{
 				GitHubActor:      "test_actor",
@@ -96,6 +99,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				AlwaysPullBase:   true,
 				GitCommitMessage: "Translations update",
 				TranslationPaths: []string{"translations"},
+				ForcePush:        false,
 			},
 			expectError: false,
 		},
@@ -111,6 +115,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				"BASE_LANG":            "en",
 				"FLAT_NAMING":          "true",
 				"ALWAYS_PULL_BASE":     "false",
+				"FORCE_PUSH":           "false",
 				"GIT_USER_NAME":        "my_user",
 				"GIT_USER_EMAIL":       "test@example.com",
 				"OVERRIDE_BRANCH_NAME": "custom_branch",
@@ -129,6 +134,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				OverrideBranchName: "custom_branch",
 				GitCommitMessage:   "Translations update",
 				TranslationPaths:   []string{"translations"},
+				ForcePush:          false,
 			},
 			expectError: false,
 		},
@@ -145,6 +151,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				"BASE_LANG":          "en",
 				"FLAT_NAMING":        "true",
 				"ALWAYS_PULL_BASE":   "false",
+				"FORCE_PUSH":         "false",
 			},
 			expectedConfig: &Config{
 				GitHubActor:      "test_actor",
@@ -157,6 +164,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				AlwaysPullBase:   false,
 				GitCommitMessage: "Translations update",
 				TranslationPaths: []string{"translations"},
+				ForcePush:        false,
 			},
 			expectError: false,
 		},
@@ -186,6 +194,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				"BASE_LANG":          "en",
 				"FLAT_NAMING":        "true",
 				"ALWAYS_PULL_BASE":   "false",
+				"FORCE_PUSH":         "false",
 			},
 			expectError:     true,
 			expectedErrText: "cannot infer file extension",
@@ -202,6 +211,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				"BASE_LANG":          "en",
 				"FLAT_NAMING":        "not_a_bool",
 				"ALWAYS_PULL_BASE":   "true",
+				"FORCE_PUSH":         "false",
 			},
 			expectError:     true,
 			expectedErrText: "FLAT_NAMING",
@@ -218,6 +228,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				"BASE_LANG":          "en",
 				"FLAT_NAMING":        "false",
 				"ALWAYS_PULL_BASE":   "true",
+				"FORCE_PUSH":         "false",
 			},
 			expectedConfig: &Config{
 				GitHubActor:      "test_actor",
@@ -230,6 +241,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				AlwaysPullBase:   true,
 				GitCommitMessage: "Translations update",
 				TranslationPaths: []string{"translations", "locales"},
+				ForcePush:        false,
 			},
 			expectError: false,
 		},
@@ -257,37 +269,34 @@ func TestEnvVarsToConfig(t *testing.T) {
 				"FILE_EXT",
 			}
 			for _, k := range allEnvVars {
-				t.Setenv(k, "") // treat as missing
+				t.Setenv(k, "")
 			}
 
-			// now set only what this test needs
 			for key, value := range tt.envVars {
 				t.Setenv(key, value)
 			}
 
-			// Execute
 			config, err := envVarsToConfig()
 
 			if tt.expectError {
 				if err == nil {
-					t.Errorf("Expected error but got nil")
-				} else if !containsSubstring(err.Error(), tt.expectedErrText) {
-					t.Errorf("Expected error containing '%s', but got '%v'", tt.expectedErrText, err)
+					t.Fatalf("Expected error but got nil")
+				}
+				if tt.expectedErrText != "" && !containsSubstring(err.Error(), tt.expectedErrText) {
+					t.Fatalf("Expected error containing '%s', but got '%v'", tt.expectedErrText, err)
 				}
 				return
 			}
 
 			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
-				return
+				t.Fatalf("Unexpected error: %v", err)
 			}
 
 			if config == nil {
-				t.Errorf("Expected config but got nil")
-				return
+				t.Fatalf("Expected config but got nil")
 			}
 			if !reflect.DeepEqual(config, tt.expectedConfig) {
-				t.Errorf("Expected config %+v but got %+v", *tt.expectedConfig, *config)
+				t.Fatalf("Expected config %+v but got %+v", *tt.expectedConfig, *config)
 			}
 		})
 	}
@@ -788,10 +797,11 @@ func TestCommitAndPush_CommitFails_NoPush(t *testing.T) {
 }
 
 func TestBuildGitAddArgs(t *testing.T) {
+	J := func(parts ...string) string { return filepath.ToSlash(filepath.Join(parts...)) }
+
 	tests := []struct {
 		name         string
 		config       *Config
-		mockPaths    []string
 		expectedArgs []string
 	}{
 		{
@@ -804,8 +814,8 @@ func TestBuildGitAddArgs(t *testing.T) {
 				TranslationPaths: []string{"path/to/translations"},
 			},
 			expectedArgs: []string{
-				filepath.Join("path", "to", "translations", "*.json"),
-				":!" + filepath.Join("path", "to", "translations", "**", "*.json"),
+				J("path", "to", "translations", "*.json"),
+				":!" + J("path", "to", "translations", "**", "*.json"),
 			},
 		},
 		{
@@ -818,10 +828,10 @@ func TestBuildGitAddArgs(t *testing.T) {
 				TranslationPaths: []string{"path1", "path2"},
 			},
 			expectedArgs: []string{
-				filepath.Join("path1", "*.json"),
-				":!" + filepath.Join("path1", "**", "*.json"),
-				filepath.Join("path2", "*.json"),
-				":!" + filepath.Join("path2", "**", "*.json"),
+				J("path1", "*.json"),
+				":!" + J("path1", "**", "*.json"),
+				J("path2", "*.json"),
+				":!" + J("path2", "**", "*.json"),
 			},
 		},
 		{
@@ -834,12 +844,12 @@ func TestBuildGitAddArgs(t *testing.T) {
 				TranslationPaths: []string{"path1", "path2"},
 			},
 			expectedArgs: []string{
-				filepath.Join("path1", "*.json"),
-				":!" + filepath.Join("path1", "en.json"),
-				":!" + filepath.Join("path1", "**", "*.json"),
-				filepath.Join("path2", "*.json"),
-				":!" + filepath.Join("path2", "en.json"),
-				":!" + filepath.Join("path2", "**", "*.json"),
+				J("path1", "*.json"),
+				":!" + J("path1", "en.json"),
+				":!" + J("path1", "**", "*.json"),
+				J("path2", "*.json"),
+				":!" + J("path2", "en.json"),
+				":!" + J("path2", "**", "*.json"),
 			},
 		},
 		{
@@ -852,8 +862,8 @@ func TestBuildGitAddArgs(t *testing.T) {
 				TranslationPaths: []string{"path1", "path2"},
 			},
 			expectedArgs: []string{
-				filepath.Join("path1", "**", "*.json"),
-				filepath.Join("path2", "**", "*.json"),
+				J("path1", "**", "*.json"),
+				J("path2", "**", "*.json"),
 			},
 		},
 		{
@@ -866,10 +876,10 @@ func TestBuildGitAddArgs(t *testing.T) {
 				TranslationPaths: []string{"path1", "path2"},
 			},
 			expectedArgs: []string{
-				filepath.Join("path1", "**", "*.json"),
-				":!" + filepath.Join("path1", "en", "**"),
-				filepath.Join("path2", "**", "*.json"),
-				":!" + filepath.Join("path2", "en", "**"),
+				J("path1", "**", "*.json"),
+				":!" + J("path1", "en", "**"),
+				J("path2", "**", "*.json"),
+				":!" + J("path2", "en", "**"),
 			},
 		},
 		{
@@ -894,13 +904,13 @@ func TestBuildGitAddArgs(t *testing.T) {
 			},
 			expectedArgs: []string{
 				// strings
-				filepath.Join("ios", "Localizations", "*.strings"),
-				":!" + filepath.Join("ios", "Localizations", "en.strings"),
-				":!" + filepath.Join("ios", "Localizations", "**", "*.strings"),
+				J("ios", "Localizations", "*.strings"),
+				":!" + J("ios", "Localizations", "en.strings"),
+				":!" + J("ios", "Localizations", "**", "*.strings"),
 				// stringsdict
-				filepath.Join("ios", "Localizations", "*.stringsdict"),
-				":!" + filepath.Join("ios", "Localizations", "en.stringsdict"),
-				":!" + filepath.Join("ios", "Localizations", "**", "*.stringsdict"),
+				J("ios", "Localizations", "*.stringsdict"),
+				":!" + J("ios", "Localizations", "en.stringsdict"),
+				":!" + J("ios", "Localizations", "**", "*.stringsdict"),
 			},
 		},
 		{
@@ -914,11 +924,11 @@ func TestBuildGitAddArgs(t *testing.T) {
 			},
 			expectedArgs: []string{
 				// ModuleA both exts
-				filepath.Join("ios", "ModuleA", "**", "*.strings"),
-				filepath.Join("ios", "ModuleA", "**", "*.stringsdict"),
+				J("ios", "ModuleA", "**", "*.strings"),
+				J("ios", "ModuleA", "**", "*.stringsdict"),
 				// ModuleB both exts
-				filepath.Join("ios", "ModuleB", "**", "*.strings"),
-				filepath.Join("ios", "ModuleB", "**", "*.stringsdict"),
+				J("ios", "ModuleB", "**", "*.strings"),
+				J("ios", "ModuleB", "**", "*.stringsdict"),
 			},
 		},
 		{
@@ -931,19 +941,33 @@ func TestBuildGitAddArgs(t *testing.T) {
 				TranslationPaths: []string{"ios/App"},
 			},
 			expectedArgs: []string{
-				filepath.Join("ios", "App", "**", "*.strings"),
-				filepath.Join("ios", "App", "**", "*.stringsdict"),
-				":!" + filepath.Join("ios", "App", "en", "**"),
+				J("ios", "App", "**", "*.strings"),
+				J("ios", "App", "**", "*.stringsdict"),
+				":!" + J("ios", "App", "en", "**"),
+			},
+		},
+		{
+			name: "Flat naming + AlwaysPullBase = false, but BaseLang empty -> no base excludes",
+			config: &Config{
+				FileExt:          []string{"json"},
+				BaseLang:         "",
+				FlatNaming:       true,
+				AlwaysPullBase:   false,
+				TranslationPaths: []string{"p"},
+			},
+			expectedArgs: []string{
+				J("p", "*.json"),
+				":!" + J("p", "**", "*.json"),
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := buildGitAddArgs(tt.config)
-
 			if !equalSlices(got, tt.expectedArgs) {
-				t.Errorf("buildGitAddArgs() = %v, want %v", got, tt.expectedArgs)
+				t.Fatalf("buildGitAddArgs() = %v, want %v", got, tt.expectedArgs)
 			}
 		})
 	}
