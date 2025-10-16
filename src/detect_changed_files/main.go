@@ -192,20 +192,23 @@ func buildGitStatusArgs(paths []string, fileExt []string, flatNaming bool, gitCm
 			if ext == "" {
 				continue
 			}
-
 			if flatNaming {
-				// Flat: match files directly under the given path.
 				patterns = append(patterns, filepath.ToSlash(filepath.Join(path, fmt.Sprintf("*.%s", ext))))
 			} else {
-				// Nested: match any depth below path.
 				patterns = append(patterns, filepath.ToSlash(filepath.Join(path, "**", fmt.Sprintf("*.%s", ext))))
 			}
 		}
 	}
 
-	args := append(gitCmd, "--")
-	args = append(args, patterns...)
+	if len(patterns) == 0 {
+		// bail early; avoid running git across repo root
+		return append([]string{"-c", "core.quotepath=false"}, gitCmd...)
+	}
 
+	// git -c core.quotepath=false <subcmd...> -- <patterns...>
+	args := append([]string{"-c", "core.quotepath=false"}, gitCmd...)
+	args = append(args, "--")
+	args = append(args, patterns...)
 	return args
 }
 
@@ -330,12 +333,11 @@ func prepareConfig() (*Config, error) {
 		return nil, fmt.Errorf("invalid ALWAYS_PULL_BASE value: %v", err)
 	}
 
-	paths := parsers.ParseStringArrayEnv("TRANSLATIONS_PATH")
-	if len(paths) == 0 {
-		return nil, fmt.Errorf("no valid paths found in TRANSLATIONS_PATH")
+	paths, err := parsers.ParseRepoRelativePathsEnv("TRANSLATIONS_PATH")
+	if err != nil {
+		return nil, err
 	}
 
-	// FILE_EXT can be a YAML block (newline-separated). If empty, fall back to FILE_FORMAT.
 	fileExt := parsers.ParseStringArrayEnv("FILE_EXT")
 	if len(fileExt) == 0 {
 		if inferred := os.Getenv("FILE_FORMAT"); inferred != "" {
@@ -346,7 +348,6 @@ func prepareConfig() (*Config, error) {
 		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_FORMAT or FILE_EXT environment variables are set")
 	}
 
-	// Normalize extensions: lowercased, no leading dot, deduplicated.
 	seen := make(map[string]struct{})
 	norm := make([]string, 0, len(fileExt))
 	for _, ext := range fileExt {
@@ -354,22 +355,24 @@ func prepareConfig() (*Config, error) {
 		if e == "" {
 			continue
 		}
+		if strings.ContainsAny(e, `/\`) {
+			return nil, fmt.Errorf("invalid file extension %q", ext)
+		}
 		if _, ok := seen[e]; ok {
 			continue
 		}
-
 		seen[e] = struct{}{}
 		norm = append(norm, e)
 	}
-
 	if len(norm) == 0 {
 		return nil, fmt.Errorf("no valid file extensions after normalization")
 	}
 
-	baseLang := os.Getenv("BASE_LANG")
+	baseLang := strings.TrimSpace(os.Getenv("BASE_LANG"))
 	if baseLang == "" {
 		return nil, fmt.Errorf("BASE_LANG environment variable is required")
 	}
+	// keep baseLang as-is; we use it as path segment/file stem later
 
 	return &Config{
 		FileExt:        norm,

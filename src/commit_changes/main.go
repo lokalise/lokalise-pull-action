@@ -193,11 +193,13 @@ func envVarsToConfig() (*Config, error) {
 
 	seen := make(map[string]struct{})
 	norm := make([]string, 0, len(fileExts))
-
 	for _, ext := range fileExts {
 		e := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
 		if e == "" {
 			continue
+		}
+		if strings.ContainsAny(e, `/\`) {
+			return nil, fmt.Errorf("invalid file extension %q", ext)
 		}
 		if _, ok := seen[e]; ok {
 			continue
@@ -212,6 +214,12 @@ func envVarsToConfig() (*Config, error) {
 	commitMsg := os.Getenv("GIT_COMMIT_MESSAGE")
 	if commitMsg == "" {
 		commitMsg = "Translations update"
+	}
+
+	// validate TranslationPaths: repo-relative + ToSlash + dedupe
+	paths, err := parsers.ParseRepoRelativePathsEnv("TRANSLATIONS_PATH")
+	if err != nil {
+		return nil, err
 	}
 
 	return &Config{
@@ -229,7 +237,7 @@ func envVarsToConfig() (*Config, error) {
 		ForcePush:          envBoolValues["FORCE_PUSH"],
 		BaseRef:            baseRef,
 		HeadRef:            headRef,
-		TranslationPaths:   parsers.ParseStringArrayEnv("TRANSLATIONS_PATH"),
+		TranslationPaths:   paths,
 	}, nil
 }
 
@@ -325,37 +333,32 @@ func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) e
 //
 // We use Git's own globbing (not shell), hence explicit ":"-prefixed excludes (:!) and a final "--".
 func buildGitAddArgs(config *Config) []string {
-	translationsPaths := config.TranslationPaths
-	flatNaming := config.FlatNaming
-	alwaysPullBase := config.AlwaysPullBase
-	baseLang := config.BaseLang
-	fileExts := config.FileExt
+	paths := config.TranslationPaths
+	flat := config.FlatNaming
+	always := config.AlwaysPullBase
+	base := config.BaseLang
+	exts := config.FileExt
 
-	var addArgs []string
-	for _, path := range translationsPaths {
-		if flatNaming {
-			// Flat: only top-level files like "<path>/*.ext".
-			for _, ext := range fileExts {
-				addArgs = append(addArgs, filepath.Join(path, fmt.Sprintf("*.%s", ext)))
-				// Exclude the base language single file per ext if requested.
-				if !alwaysPullBase && baseLang != "" {
-					addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, fmt.Sprintf("%s.%s", baseLang, ext))))
+	var args []string
+	for _, p := range paths {
+		if flat {
+			for _, ext := range exts {
+				args = append(args, joinSlash(p, fmt.Sprintf("*.%s", ext)))
+				if !always && base != "" {
+					args = append(args, ":!"+joinSlash(p, fmt.Sprintf("%s.%s", base, ext)))
 				}
-				// Ensure we do not accidentally include nested dirs in flat mode.
-				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, "**", fmt.Sprintf("*.%s", ext))))
+				args = append(args, ":!"+joinSlash(p, "**", fmt.Sprintf("*.%s", ext)))
 			}
 		} else {
-			// Nested: include any depth below path for each extension.
-			for _, ext := range fileExts {
-				addArgs = append(addArgs, filepath.Join(path, "**", fmt.Sprintf("*.%s", ext)))
+			for _, ext := range exts {
+				args = append(args, joinSlash(p, "**", fmt.Sprintf("*.%s", ext)))
 			}
-			// Optionally exclude the entire base language subtree.
-			if !alwaysPullBase && baseLang != "" {
-				addArgs = append(addArgs, fmt.Sprintf(":!%s", filepath.Join(path, baseLang, "**")))
+			if !always && base != "" {
+				args = append(args, ":!"+joinSlash(p, base, "**"))
 			}
 		}
 	}
-	return addArgs
+	return args
 }
 
 // commitAndPush commits staged changes and pushes the branch (forcing if requested).
@@ -406,37 +409,110 @@ func sanitizeString(input string, maxLength int) string {
 	return result
 }
 
-// resolveRealBase determines a usable base branch. Some CI contexts provide synthetic refs
-// like "merge" or "head". In such cases we read the remote default branch from
-// `git remote show origin` (e.g., "HEAD branch: main") and fall back to "main" as a last resort.
+// resolveRealBase determines a usable base branch.
+// If cfg.BaseRef is empty/synthetic, we ask the remote what HEAD points to,
+// using a locale-agnostic, network-first approach.
 //
-// Caveat: We parse human output from git, which is stable in English. If localization is enabled
-// (rare in CI), detection may fail and we’ll fall back to "main".
+// Order:
+//  1. git ls-remote --symref origin HEAD  -> "ref: refs/heads/<branch> HEAD"
+//  2. git symbolic-ref --short refs/remotes/origin/HEAD -> "origin/<branch>"
+//  3. git remote show origin  -> parse "HEAD branch: <branch>" (best-effort)
+//  4. fallback "main"
 func resolveRealBase(runner CommandRunner, cfg *Config) (string, error) {
-	base := cfg.BaseRef
+	base := strings.TrimSpace(cfg.BaseRef)
 	if !isSyntheticRef(base) {
 		return base, nil
 	}
 
-	out, _ := runner.Capture("git", "remote", "show", "origin")
-	// Example line: "  HEAD branch: main"
-	scanner := bufio.NewScanner(strings.NewReader(out))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if def, ok := strings.CutPrefix(line, "HEAD branch: "); ok {
-			def = strings.TrimSpace(def)
-			if def != "" {
-				fmt.Printf("BASE_REF synthetic/empty, using remote HEAD: %s\n", def)
-				return def, nil
+	// 1) Ask the remote directly (locale-proof, no local refs needed).
+	if br, ok := getDefaultBranchFromLsRemote(runner); ok {
+		fmt.Printf("BASE_REF synthetic/empty, using remote HEAD via ls-remote: %s\n", br)
+		return br, nil
+	}
+
+	// 2) Use local symbolic ref if present (works after a fetch).
+	if br, ok := getDefaultBranchFromSymbolicRef(runner); ok {
+		fmt.Printf("BASE_REF synthetic/empty, using origin/HEAD via symbolic-ref: %s\n", br)
+		return br, nil
+	}
+
+	// 3) Best-effort legacy parse (English-only output).
+	if br, ok := getDefaultBranchFromRemoteShow(runner); ok {
+		fmt.Printf("BASE_REF synthetic/empty, using remote show origin: %s\n", br)
+		return br, nil
+	}
+
+	// 4) Last resort.
+	return "main", nil
+}
+
+func getDefaultBranchFromLsRemote(runner CommandRunner) (string, bool) {
+	out, err := runner.Capture("git", "ls-remote", "--symref", "origin", "HEAD")
+	if err != nil || strings.TrimSpace(out) == "" {
+		return "", false
+	}
+	const (
+		linePrefix = "ref: "
+		lineSuffix = "\tHEAD"
+		refPrefix  = "refs/heads/"
+	)
+
+	sc := bufio.NewScanner(strings.NewReader(out))
+	for sc.Scan() {
+		line := sc.Text()
+		// tolerate CRLF
+		line = strings.TrimSuffix(line, "\r")
+
+		if !strings.HasPrefix(line, linePrefix) || !strings.HasSuffix(line, lineSuffix) {
+			continue
+		}
+
+		// strip "ref: " and trailing "\tHEAD"
+		if rest, ok := strings.CutPrefix(line, linePrefix); ok {
+			ref := strings.TrimSuffix(rest, lineSuffix)
+			ref = strings.TrimSpace(ref) // just in case
+
+			// expect "refs/heads/<branch>"
+			if br, ok := strings.CutPrefix(ref, refPrefix); ok && br != "" {
+				return br, true
 			}
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: scanning remote output failed: %v\n", err)
-	}
+	// ignore scanner error: even if long line truncates, our target line is tiny
+	return "", false
+}
 
-	// Last resort default.
-	return "main", nil
+func getDefaultBranchFromSymbolicRef(runner CommandRunner) (string, bool) {
+	out, err := runner.Capture("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return "", false
+	}
+	line := strings.TrimSpace(out) // e.g. "origin/main"
+	if line == "" {
+		return "", false
+	}
+	if i := strings.Index(line, "/"); i >= 0 && i+1 < len(line) {
+		return line[i+1:], true
+	}
+	return line, true
+}
+
+func getDefaultBranchFromRemoteShow(runner CommandRunner) (string, bool) {
+	out, err := runner.Capture("git", "remote", "show", "origin")
+	if err != nil || strings.TrimSpace(out) == "" {
+		return "", false
+	}
+	sc := bufio.NewScanner(strings.NewReader(out))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if def, ok := strings.CutPrefix(line, "HEAD branch: "); ok {
+			def = strings.TrimSpace(def)
+			if def != "" {
+				return def, true
+			}
+		}
+	}
+	return "", false
 }
 
 // isSyntheticRef flags CI-provided pseudo-refs we should not base from directly.
@@ -452,4 +528,8 @@ func isSyntheticRef(ref string) bool {
 		return true
 	}
 	return false
+}
+
+func joinSlash(elem ...string) string {
+	return filepath.ToSlash(filepath.Join(elem...))
 }
