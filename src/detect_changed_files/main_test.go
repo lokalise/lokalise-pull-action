@@ -292,13 +292,13 @@ func TestBuildGitStatusArgs(t *testing.T) {
 			}),
 		},
 		{
-			name:       "Empty extensions yields only git args and --",
+			name:       "Empty extensions yields only git args",
 			paths:      []string{"path1"},
 			fileExt:    []string{},
 			flatNaming: true,
 			expected: []string{
 				"-c", "core.quotepath=false",
-				"diff", "--name-only", "HEAD", "--",
+				"diff", "--name-only", "HEAD",
 			},
 		},
 	}

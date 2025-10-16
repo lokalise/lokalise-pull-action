@@ -200,6 +200,11 @@ func buildGitStatusArgs(paths []string, fileExt []string, flatNaming bool, gitCm
 		}
 	}
 
+	if len(patterns) == 0 {
+		// bail early; avoid running git across repo root
+		return append([]string{"-c", "core.quotepath=false"}, gitCmd...)
+	}
+
 	// git -c core.quotepath=false <subcmd...> -- <patterns...>
 	args := append([]string{"-c", "core.quotepath=false"}, gitCmd...)
 	args = append(args, "--")

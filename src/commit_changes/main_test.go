@@ -1065,20 +1065,18 @@ func TestResolveRealBase_UsesProvidedBase(t *testing.T) {
 	}
 }
 
-func TestResolveRealBase_FallbackToRemoteHEAD(t *testing.T) {
+func TestResolveRealBase_LsRemoteWins(t *testing.T) {
+	// ls-remote --symref provides the default branch → should be used first
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
-			if name == "git" && len(args) >= 2 && args[0] == "remote" && args[1] == "show" {
-				// minimal realistic snippet
-				return `
-* remote origin
-  Fetch URL: git@github.com:org/repo.git
-  HEAD branch: develop
-  Remote branches:
-    develop tracked
-    main    tracked
-`, nil
+			if name != "git" {
+				return "", fmt.Errorf("unexpected bin: %s", name)
 			}
+			if len(args) >= 3 && args[0] == "ls-remote" && args[1] == "--symref" && args[2] == "origin" {
+				// Note the CRLF and tabs; real git may spit CRLF on Windows.
+				return "ref: refs/heads/develop\tHEAD\r\n0123456789abcdef\tHEAD\r\n", nil
+			}
+			// should not be called, but keep harmless
 			return "", fmt.Errorf("unexpected capture: %s %v", name, args)
 		},
 	}
@@ -1093,11 +1091,76 @@ func TestResolveRealBase_FallbackToRemoteHEAD(t *testing.T) {
 	}
 }
 
-func TestResolveRealBase_FallbackToMainWhenUnknown(t *testing.T) {
+func TestResolveRealBase_SymbolicRefFallback(t *testing.T) {
+	// ls-remote fails → symbolic-ref gives "origin/main"
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
-			// simulate git output that doesn't include "HEAD branch:"
-			return "some weird output", nil
+			if name != "git" {
+				return "", fmt.Errorf("unexpected bin: %s", name)
+			}
+			if len(args) >= 3 && args[0] == "ls-remote" && args[1] == "--symref" && args[2] == "origin" {
+				return "", fmt.Errorf("boom") // simulate network issue or no symref
+			}
+			if len(args) >= 4 && args[0] == "symbolic-ref" && args[1] == "--quiet" &&
+				args[2] == "--short" && args[3] == "refs/remotes/origin/HEAD" {
+				return "origin/main\n", nil
+			}
+			return "", fmt.Errorf("unexpected capture: %s %v", name, args)
+		},
+	}
+	cfg := &Config{BaseRef: ""}
+
+	got, err := resolveRealBase(runner, cfg)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != "main" {
+		t.Fatalf("want main, got %s", got)
+	}
+}
+
+func TestResolveRealBase_RemoteShowAsLastNetworkFallback(t *testing.T) {
+	// ls-remote fails, symbolic-ref fails, remote show origin returns HEAD branch
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			if name != "git" {
+				return "", fmt.Errorf("unexpected bin: %s", name)
+			}
+			if len(args) >= 3 && args[0] == "ls-remote" && args[1] == "--symref" && args[2] == "origin" {
+				return "", fmt.Errorf("no symref here")
+			}
+			if len(args) >= 4 && args[0] == "symbolic-ref" && args[1] == "--quiet" &&
+				args[2] == "--short" && args[3] == "refs/remotes/origin/HEAD" {
+				return "", fmt.Errorf("no local origin/HEAD")
+			}
+			if len(args) >= 2 && args[0] == "remote" && args[1] == "show" {
+				return `
+* remote origin
+  Fetch URL: git@github.com:org/repo.git
+  HEAD branch: release
+  Remote branches:
+    develop tracked
+    release tracked
+`, nil
+			}
+			return "", fmt.Errorf("unexpected capture: %s %v", name, args)
+		},
+	}
+	cfg := &Config{BaseRef: "456/merge"}
+
+	got, err := resolveRealBase(runner, cfg)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if got != "release" {
+		t.Fatalf("want release, got %s", got)
+	}
+}
+
+func TestResolveRealBase_FallbackToMainWhenEverythingFails(t *testing.T) {
+	runner := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			return "", fmt.Errorf("nope")
 		},
 	}
 	cfg := &Config{BaseRef: ""} // empty → synthetic
@@ -1108,6 +1171,20 @@ func TestResolveRealBase_FallbackToMainWhenUnknown(t *testing.T) {
 	}
 	if got != "main" {
 		t.Fatalf("want main, got %s", got)
+	}
+}
+
+func TestGetDefaultBranchFromLsRemote_CRLF_AndCutPrefix(t *testing.T) {
+	// direct unit test for the helper: ensure CRLF and CutPrefix flow works
+	out := "ref: refs/heads/qa\tHEAD\r\n123456\tHEAD\r\n"
+	r := &MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			return out, nil
+		},
+	}
+	br, ok := getDefaultBranchFromLsRemote(r)
+	if !ok || br != "qa" {
+		t.Fatalf("want qa/true, got %q/%v", br, ok)
 	}
 }
 
