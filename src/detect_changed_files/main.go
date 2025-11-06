@@ -132,6 +132,10 @@ func gitDiff(config *Config, runner CommandRunner) ([]string, error) {
 	// Fast path when HEAD exists: changes relative to last commit (staged + unstaged).
 	if _, err := runner.Run("git", "rev-parse", "--verify", "HEAD"); err == nil {
 		args := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only", "HEAD")
+		if !hasPathspec(args) {
+			// bail early: ничего не матчится, не трогаем корень репо
+			return nil, nil
+		}
 		return runner.Run("git", args...)
 	}
 
@@ -140,14 +144,18 @@ func gitDiff(config *Config, runner CommandRunner) ([]string, error) {
 
 	// Staged changes (index vs HEAD).
 	argsCached := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only", "--cached")
-	if out, err := runner.Run("git", argsCached...); err == nil {
-		all = append(all, out...)
+	if hasPathspec(argsCached) {
+		if out, err := runner.Run("git", argsCached...); err == nil {
+			all = append(all, out...)
+		}
 	}
 
 	// Unstaged changes (worktree vs index).
 	argsWT := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only")
-	if out, err := runner.Run("git", argsWT...); err == nil {
-		all = append(all, out...)
+	if hasPathspec(argsWT) {
+		if out, err := runner.Run("git", argsWT...); err == nil {
+			all = append(all, out...)
+		}
 	}
 
 	// Deduplicate and normalize before returning.
@@ -155,14 +163,12 @@ func gitDiff(config *Config, runner CommandRunner) ([]string, error) {
 	out := make([]string, 0, len(all))
 	for _, f := range all {
 		f = filepath.ToSlash(strings.TrimSpace(f))
-
 		if f == "" {
 			continue
 		}
 		if _, ok := seen[f]; ok {
 			continue
 		}
-
 		seen[f] = struct{}{}
 		out = append(out, f)
 	}
@@ -174,6 +180,10 @@ func gitDiff(config *Config, runner CommandRunner) ([]string, error) {
 // to get untracked files under the provided pathspecs.
 func gitLsFiles(config *Config, runner CommandRunner) ([]string, error) {
 	args := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "ls-files", "--others", "--exclude-standard")
+	if !hasPathspec(args) {
+		// bail early: нет паттернов — возвращаем пусто
+		return nil, nil
+	}
 	return runner.Run("git", args...)
 }
 
@@ -381,4 +391,9 @@ func prepareConfig() (*Config, error) {
 		BaseLang:       baseLang,
 		Paths:          paths,
 	}, nil
+}
+
+// hasPathspec reports whether args contain "--" (i.e., at least один паттерн).
+func hasPathspec(args []string) bool {
+	return slices.Contains(args, "--")
 }
