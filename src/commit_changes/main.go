@@ -292,6 +292,21 @@ func generateBranchName(config *Config) (string, error) {
 // checkoutBranch bases the working branch off either the PR head (when updating an existing PR)
 // or the base branch. We fetch the exact remote ref to work with shallow clones reliably.
 func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) error {
+	before, _ := runner.Capture("git", "stash", "list")
+
+	_ = runner.Run("git", "add", "-A")
+	_ = runner.Run("git", "stash", "push", "-u", "--quiet", "-m", "lokalise-temp-stash")
+
+	after, _ := runner.Capture("git", "stash", "list")
+	created := strings.Count(after, "lokalise-temp-stash") > strings.Count(before, "lokalise-temp-stash")
+
+	defer func() {
+		if created {
+			_ = runner.Run("git", "stash", "apply", "--quiet", "stash^{/lokalise-temp-stash}")
+			_ = runner.Run("git", "stash", "drop", "--quiet", "stash^{/lokalise-temp-stash}")
+		}
+	}()
+
 	// Helper: fetch one remote branch ref without tags and prune stale ones.
 	fetch := func(ref string) {
 		// "+A:B" syntax forces update of the local remote-tracking ref.
