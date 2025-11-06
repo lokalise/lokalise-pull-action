@@ -299,10 +299,18 @@ func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) e
 			fmt.Sprintf("+refs/heads/%[1]s:refs/remotes/origin/%[1]s", ref))
 	}
 
+	// In rare cases (when using overrides) this branch name might already exist, so let's try to base on that
+	fetch(branchName)
+	if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+branchName); err == nil {
+		_ = runner.Run("git", "branch", "--set-upstream-to=origin/"+branchName, branchName)
+		return nil
+	}
+
 	// Updating an existing PR head? Recreate branch from origin/headRef.
 	if headRef != "" && branchName == headRef {
 		fetch(headRef)
 		if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+headRef); err == nil {
+			_ = runner.Run("git", "branch", "--set-upstream-to=origin/"+headRef, branchName)
 			return nil
 		}
 
@@ -318,6 +326,7 @@ func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) e
 	// Creating/resetting a temp branch based on the base ref.
 	fetch(baseRef)
 	if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+baseRef); err == nil {
+		_ = runner.Run("git", "branch", "--unset-upstream")
 		return nil
 	}
 	if err := runner.Run("git", "checkout", "-B", branchName, baseRef); err == nil {

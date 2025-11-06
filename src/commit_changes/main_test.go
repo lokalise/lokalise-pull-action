@@ -550,6 +550,133 @@ func TestCheckoutBranch_FetchesCorrectRefspec(t *testing.T) {
 	}
 }
 
+func TestCheckoutBranch_OverrideBranchExistsOnRemote(t *testing.T) {
+	const branch = "lokalise-sync"
+	const base = "main"
+
+	runner := MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			if name != "git" {
+				return "", fmt.Errorf("unexpected binary: %s", name)
+			}
+			// fetch lokalise-sync
+			if len(args) == 6 &&
+				args[0] == "fetch" && args[1] == "--no-tags" && args[2] == "--prune" &&
+				args[3] == "origin" &&
+				strings.HasPrefix(args[4], "+refs/heads/"+branch) &&
+				strings.HasSuffix(args[4], ":refs/remotes/origin/"+branch) {
+				return "", nil
+			}
+			return "", fmt.Errorf("unexpected capture: git %v", args)
+		},
+		RunFunc: func(name string, args ...string) error {
+			if name != "git" {
+				return fmt.Errorf("unexpected binary: %s", name)
+			}
+
+			switch {
+			// checkout -B lokalise-sync origin/lokalise-sync
+			case len(args) == 4 &&
+				args[0] == "checkout" && args[1] == "-B" &&
+				args[2] == branch && args[3] == "origin/"+branch:
+				return nil
+
+			// branch --set-upstream-to=origin/lokalise-sync lokalise-sync
+			case len(args) == 4 &&
+				args[0] == "branch" &&
+				args[1] == "--set-upstream-to=origin/"+branch &&
+				args[2] == branch:
+				return nil
+			}
+
+			return fmt.Errorf("unexpected run: git %v", args)
+		},
+	}
+
+	if err := checkoutBranch(branch, base, "", runner); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCheckoutBranch_OverrideMissing_FallbackToOriginBase_UnsetUpstream(t *testing.T) {
+	const branch = "lokalise-sync"
+	const base = "main"
+
+	failedFirstRemoteCheckout := false
+
+	runner := MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			switch {
+			// fetch override
+			case len(args) == 6 && strings.Contains(args[4], branch):
+				return "", nil
+			// fetch base
+			case len(args) == 6 && strings.Contains(args[4], base):
+				return "", nil
+			}
+			return "", fmt.Errorf("unexpected capture: git %v", args)
+		},
+		RunFunc: func(name string, args ...string) error {
+			switch {
+			// checkout -B lokalise-sync origin/lokalise-sync (fail, no remote override)
+			case len(args) == 4 && args[0] == "checkout" && args[2] == branch && args[3] == "origin/"+branch && !failedFirstRemoteCheckout:
+				failedFirstRemoteCheckout = true
+				return fmt.Errorf("missing remote branch")
+
+			// checkout -B lokalise-sync origin/main (success)
+			case len(args) == 4 && args[0] == "checkout" && args[2] == branch && args[3] == "origin/"+base:
+				return nil
+
+			// branch --unset-upstream
+			case len(args) == 2 && args[0] == "branch" && args[1] == "--unset-upstream":
+				return nil
+			}
+			return fmt.Errorf("unexpected run: git %v", args)
+		},
+	}
+
+	if err := checkoutBranch(branch, base, "", runner); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCheckoutBranch_HeadRefMatches_UsesRemoteHeadAndSetsUpstream(t *testing.T) {
+	const branch = "feature/x"
+	const base = "main"
+	const head = "feature/x"
+
+	firstOverrideAttempt := false
+
+	runner := MockCommandRunner{
+		CaptureFunc: func(name string, args ...string) (string, error) {
+			// fetch override or fetch head
+			return "", nil
+		},
+		RunFunc: func(name string, args ...string) error {
+			switch {
+			// first try checkout from origin/branch, fail
+			case len(args) == 4 && args[0] == "checkout" && args[2] == branch && args[3] == "origin/"+branch && !firstOverrideAttempt:
+				firstOverrideAttempt = true
+				return fmt.Errorf("missing origin override")
+
+			// second attempt: checkout from origin/headRef (success)
+			case len(args) == 4 && args[0] == "checkout" && args[2] == branch && args[3] == "origin/"+head:
+				return nil
+
+			// set upstream
+			case len(args) == 4 && args[0] == "branch" && args[1] == "--set-upstream-to=origin/"+head && args[2] == branch:
+				return nil
+			}
+
+			return fmt.Errorf("unexpected run: git %v", args)
+		},
+	}
+
+	if err := checkoutBranch(branch, base, head, runner); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestCommitAndPush(t *testing.T) {
 	expectedMessage := "my test commit message"
 
