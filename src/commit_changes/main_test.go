@@ -559,7 +559,17 @@ func TestCheckoutBranch_OverrideBranchExistsOnRemote(t *testing.T) {
 			if name != "git" {
 				return "", fmt.Errorf("unexpected binary: %s", name)
 			}
-			// fetch lokalise-sync
+
+			// 1) hasRemote(...) -> ls-remote --exit-code --heads origin <branch>
+			if len(args) == 5 &&
+				args[0] == "ls-remote" &&
+				args[1] == "--exit-code" &&
+				args[2] == "--heads" &&
+				args[3] == "origin" &&
+				args[4] == branch {
+				return "deadbeef\trefs/heads/" + branch + "\n", nil
+			}
+
 			if len(args) == 6 &&
 				args[0] == "fetch" && args[1] == "--no-tags" && args[2] == "--prune" &&
 				args[3] == "origin" &&
@@ -567,6 +577,7 @@ func TestCheckoutBranch_OverrideBranchExistsOnRemote(t *testing.T) {
 				strings.HasSuffix(args[4], ":refs/remotes/origin/"+branch) {
 				return "", nil
 			}
+
 			return "", fmt.Errorf("unexpected capture: git %v", args)
 		},
 		RunFunc: func(name string, args ...string) error {

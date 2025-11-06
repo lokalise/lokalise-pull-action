@@ -300,10 +300,12 @@ func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) e
 	}
 
 	// In rare cases (when using overrides) this branch name might already exist, so let's try to base on that
-	fetch(branchName)
-	if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+branchName); err == nil {
-		_ = runner.Run("git", "branch", "--set-upstream-to=origin/"+branchName, branchName)
-		return nil
+	if hasRemote(runner, branchName) {
+		fetch(branchName)
+		if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+branchName); err == nil {
+			_ = runner.Run("git", "branch", "--set-upstream-to=origin/"+branchName, branchName)
+			return nil
+		}
 	}
 
 	// Updating an existing PR head? Recreate branch from origin/headRef.
@@ -541,4 +543,9 @@ func isSyntheticRef(ref string) bool {
 
 func joinSlash(elem ...string) string {
 	return filepath.ToSlash(filepath.Join(elem...))
+}
+
+func hasRemote(runner CommandRunner, ref string) bool {
+	_, err := runner.Capture("git", "ls-remote", "--exit-code", "--heads", "origin", ref)
+	return err == nil
 }
