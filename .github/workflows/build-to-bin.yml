@@ -206,7 +206,7 @@ jobs:
           ls -lah bin || true
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.0.0
         with:
           cosign-release: 'v3.0.2'
 
@@ -284,7 +284,7 @@ jobs:
           git push || true
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.0.0
         with:
           cosign-release: 'v3.0.2'
 
