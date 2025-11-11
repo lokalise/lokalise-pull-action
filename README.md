@@ -32,7 +32,7 @@ jobs:
           fetch-depth: 0
 
       - name: Pull from Lokalise
-        uses: lokalise/lokalise-pull-action@v4.2.0
+        uses: lokalise/lokalise-pull-action@v4.3.0
         with:
           api_token: ${{ secrets.LOKALISE_API_TOKEN }}
           project_id: LOKALISE_PROJECT_ID
@@ -312,7 +312,7 @@ By default, the following headers and parameters are set when downloading files 
 You'll find checksums for the compiled binaries in the `bin/` directory. The checksums are also signed and attested. To verify, install Cosign, clone the repo, and run the following commands in the project root:
 
 ```
-cosign verify-blob-attestation --bundle bin/checksums.txt.attestation --certificate-identity "https://github.com/lokalise/lokalise-pull-action/.github/workflows/build-to-bin.yml@refs/tags/[INSERT_VERSION]" --certificate-oidc-issuer "https://token.actions.githubusercontent.com" --type custom bin/checksums.txt
+cosign verify-blob-attestation --bundle bin/checksums.txt.attestation --certificate-identity "https://github.com/lokalise/lokalise-pull-action/.github/workflows/build-to-bin.yml@refs/heads/main" --certificate-oidc-issuer "https://token.actions.githubusercontent.com" --type custom bin/checksums.txt
 
 cosign verify-blob --bundle bin/checksums.txt.sigstore --certificate-identity-regexp "^https://github.com/lokalise/lokalise-pull-action/\.github/workflows/build-to-bin\.yml@.*$" --certificate-oidc-issuer "https://token.actions.githubusercontent.com" bin/checksums.txt
 ```
