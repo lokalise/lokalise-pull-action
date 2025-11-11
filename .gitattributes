@@ -1,0 +1,14 @@
+bin/* binary
+bin/checksums.txt -text
+bin/*.sigstore -text
+
+*.go text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+
+*.yml text eol=lf
+*.yaml text eol=lf
+
+*.md text eol=lf
+*.txt text eol=lf
+.gitignore text eol=lf

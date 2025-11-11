@@ -307,6 +307,16 @@ By default, the following headers and parameters are set when downloading files 
 - `directory_prefix` — Set to `/`.
 - `include_tags` — Set to the branch name that triggered the workflow.
 
+## Checksums and attestation
+
+You'll find checksums for the compiled binaries in the `bin/` directory. The checksums are also signed and attested. To verify, install Cosign, clone the repo, and run the following commands in the project root:
+
+```
+cosign verify-blob-attestation --bundle bin/checksums.txt.attestation --certificate-identity "https://github.com/lokalise/lokalise-pull-action/.github/workflows/build-to-bin.yml@refs/tags/[INSERT_VERSION]" --certificate-oidc-issuer "https://token.actions.githubusercontent.com" --type custom bin/checksums.txt
+
+cosign verify-blob --bundle bin/checksums.txt.sigstore --certificate-identity-regexp "^https://github.com/lokalise/lokalise-pull-action/\.github/workflows/build-to-bin\.yml@.*$" --certificate-oidc-issuer "https://token.actions.githubusercontent.com" bin/checksums.txt
+```
+
 ## Special notes and known issues
 
 * If you are using Gettext (PO files) and the action opens pull requests when no translations have been changed and the only difference is the "revision date", [refer to the following comment for clarifications](https://github.com/lokalise/lokalise-pull-action/issues/9#issuecomment-2578225342)
