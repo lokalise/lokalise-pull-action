@@ -32,7 +32,7 @@ jobs:
           fetch-depth: 0
 
       - name: Pull from Lokalise
-        uses: lokalise/lokalise-pull-action@v4.3.0
+        uses: lokalise/lokalise-pull-action@v4.4.0
         with:
           api_token: ${{ secrets.LOKALISE_API_TOKEN }}
           project_id: LOKALISE_PROJECT_ID
@@ -204,6 +204,7 @@ with open(file_path, "w", encoding="utf-8") as f:
 - `override_branch_name` — Static branch name instead of an auto-generated one. Helps update the same PR across runs (e.g., always `lokalise-sync`). If the branch exists, it’s updated rather than recreated.
 - `force_push` — Force push to the remote branch. Use with caution, as it overwrites history. Defaults to `false`.
 - `temp_branch_prefix` — Prefix for temporary branch names (e.g., `lok` — branch starts with `lok`). Defaults to `lok`.
+- `override_base_branch` — Override base branch to use for the Lokalise PR (by default, the action always uses the triggering branch as a base). Make sure you understand what you're doing before adjusting this param; typically, it's needed only for complex/non-standard workflows like [explained in this issue](https://github.com/lokalise/lokalise-pull-action/issues/33#issuecomment-3533135731).
 
 ### Pull request details
 
