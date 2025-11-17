@@ -129,6 +129,10 @@ inputs:
     description: 'Optional static branch name to use instead of auto-generating one. Useful when you want to reuse the same PR.'
     required: false
     default: ''
+  override_base_branch:
+    description: 'Override base branch to use for the Lokalise PR (defaults to triggering branch)'
+    required: false
+    default: ''
   force_push:
     description: 'Force push changes to the remote branch (overwrites history). Use with caution. Defaults to false.'
     required: false
@@ -268,7 +272,7 @@ runs:
       id: create-commit
       if: steps.pull-files.outputs.has_changes == 'true'
       env:
-        BASE_REF: "${{ github.event.pull_request.base.ref || github.ref_name }}"
+        BASE_REF: "${{ inputs.override_base_branch || github.event.pull_request.base.ref || github.ref_name }}"
         HEAD_REF: "${{ github.event.pull_request.head.ref || '' }}"
         FILE_FORMAT: "${{ inputs.file_format }}"
         FILE_EXT: "${{ inputs.file_ext }}"
@@ -308,7 +312,7 @@ runs:
       if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'
       env:
         BRANCH_NAME: "${{ steps.create-commit.outputs.branch_name }}"
-        BASE_REF: "${{ github.event.pull_request.base.ref || github.ref_name }}"
+        BASE_REF: "${{ inputs.override_base_branch || github.event.pull_request.base.ref || github.ref_name }}"
         PR_LABELS: "${{ inputs.pr_labels }}"
         PR_TITLE: "${{ inputs.pr_title }}"
         PR_BODY: "${{ inputs.pr_body }}"
