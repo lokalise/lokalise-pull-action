@@ -4,12 +4,12 @@
 
 GitHub action to download translation files from [Lokalise TMS](https://lokalise.com/) to your GitHub repository in the form of a pull request.
 
+*To find documentation for the **stable version 3**, [browse the v3 tag](https://github.com/lokalise/lokalise-pull-action/tree/v3).*
+
 * Step-by-step tutorial covering the usage of this action is available on [Lokalise Developer Hub](https://developers.lokalise.com/docs/github-actions)
 * If you're looking for an in-depth tutorial, [check out our blog post](https://lokalise.com/blog/github-actions-for-lokalise-translation/)
 
-To upload translation files from GitHub to Lokalise, use the [lokalise-push-action](https://github.com/lokalise/lokalise-push-action).
-
-*To find documentation for the **stable version 3**, [browse the v3 tag](https://github.com/lokalise/lokalise-pull-action/tree/v3).*
+> To upload translation files from GitHub to Lokalise, use the [lokalise-push-action](https://github.com/lokalise/lokalise-push-action).
 
 ## Usage
 
@@ -97,10 +97,12 @@ You'll need to provide some parameters for the action. These can be set as envir
 ### Mandatory parameters
 
 - `api_token` — Lokalise API token with read/write permissions.
+  + Keep in mind that the API tokens are created on a per-user basis. If this contributor does not have proper access rights within a project (*Download files* permission), the downloads will fail.
 - `project_id` — Your Lokalise project ID.
-- `translations_path` — One or more paths to your translation files. Do not provide the actual filenames here. For example, if your translations are stored in the `locales` folder at the project root, use `locales`. Defaults to `locales`.
-- `file_format` — Defines the format of your translation files, such as `json` for JSON files. Defaults to `json`. This format determines how translation files are processed and also influences the file extension used when searching for them. However, some specific formats, such as `json_structured`, may still be downloaded with a generic `.json` extension. If you're using such a format, make sure to set the `file_ext` parameter explicitly to match the correct extension for your files.
-- `base_lang` — Your project base language, such as `en` for English. Defaults to `en`.
+- `translations_path` (*default: `locales`*) — One or more paths to your translation files. Do not provide the actual filenames here. For example, if your translations are stored in the `locales` folder at the project root, use `locales`.
+- `file_format` (*default: `json`*) — Defines the format of your translation files, such as `json` for JSON files. This format determines how translation files are processed and also influences the file extension used when searching for them.
+  + Some specific formats, such as `json_structured`, may still be downloaded with a generic `.json` extension. If you're using such a format, make sure to set the `file_ext` parameter explicitly to match the correct extension for your files.
+- `base_lang` (*default: `en`*) — Your project base language, such as `en` for English.
 - `file_ext` (*not strictly mandatory but recommended*) — One or more custom file extensions to use when searching for translation files (without leading dot, e.g. `json` or `yml`). By default, the extension is inferred from the `file_format` value. However, for certain formats (e.g. `json_structured`) or mixed bundles (e.g. iOS, which uses both `.strings` and `.stringsdict`), the downloaded files may still have a generic extension or require multiple extensions. In such cases, this parameter allows specifying the correct extension(s) manually to ensure proper file matching.
 
 ```yaml
@@ -115,11 +117,11 @@ file_ext: |
 
 ### Download options
 
-- `async_mode` — Download translations in asynchronous mode. Not recommended for small projects but required for larger ones (>= 10 000 key-language pairs). Defaults to `false`.
-- `flat_naming` — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`. Defaults to `false`.
-- `skip_include_tags` — Skip setting the `"include_tags"` param during download. This will download all translation keys for the specified format, regardless of tags.
-- `skip_original_filenames` — Skips setting the `"original_filenames": true` and `"directory_prefix": "/"` params during download. You can disable original filenames by setting `"original_filenames": false` explicitly via `additional_params`.
-- `additional_params` — Extra parameters to pass when sending [File download API request](https://developers.lokalise.com/reference/download-files). Must be valid JSON. For example, you can use `"indentation": "2sp"` to manage indentation. Defaults to an empty string. Multiple params can be specified:
+- `async_mode` (*default: `false`*) — Download translations in asynchronous mode. Not recommended for small projects but *required* for larger ones (>= 10 000 key-language pairs; sync downloads for such projects will fail).
+- `flat_naming` (*default: `false`*) — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`.
+- `skip_include_tags` (*default: `false`*) — Skip setting the `"include_tags"` param during download. This will download all translation keys for the specified format, regardless of tags.
+- `skip_original_filenames` (*default: `false`*) — Skip setting the `"original_filenames": true` and `"directory_prefix": "/"` params during download. You can disable original filenames by setting `"original_filenames": false` explicitly via `additional_params`.
+- `additional_params` (*default: empty*) — Extra parameters to pass when sending [File download API request](https://developers.lokalise.com/reference/download-files). Must be valid JSON. For example, you can use `"indentation": "2sp"` to manage indentation. Multiple params can be specified:
 
 ```yaml
 additional_params: >
@@ -178,55 +180,59 @@ with open(file_path, "w", encoding="utf-8") as f:
     json.dump(replace_values(data), f, ensure_ascii=False, indent=2)
 ```
 
-- `post_process_strict` — Whether to fail the workflow if the `post_process_command` fails (non-zero exit code). If set to `true`, the workflow will exit immediately on failure. Defaults to `false`.
+- `post_process_strict` (*default: `false`*) — Whether to fail the workflow if the `post_process_command` fails (non-zero exit code). If set to `true`, the workflow will exit immediately on failure.
 
 ### Update behavior
 
-- `always_pull_base` — By default, changes in the base language translation files (defined by the `base_lang` option) are ignored when checking for updates. Set this option to `true` to include changes in the base language translations in the pull request. Defaults to `false`.
+- `always_pull_base` (*default: `false`*) — By default, changes in the base language translation files (defined by the `base_lang` option) are ignored when checking for updates. Set this option to `true` to include changes in the base language translations in the pull request.
 
 ### Retry and timeout
 
-- `max_retries` — Maximum number of retries on rate limit (HTTP 429) and other retryable errors. Defaults to `3`.
-- `sleep_on_retry` — Number of seconds to sleep before retrying on retryable errors (exponential backoff applies). Defaults to `1`.
-- `http_timeout` — Timeout in seconds for every HTTP operation (requesting bundle, downloading archive, etc.). Defaults to `120`.
-- `async_poll_initial_wait` — Number of seconds to wait before polling the async download process for the first time. Has no effect if the `async_mode` is disabled. Defaults to `1`.
-- `async_poll_max_wait` — Timeout for polling the async download process. Has no effect if the `async_mode` is disabled. Defaults to `120`.
-- `download_timeout` — Timeout in seconds for the whole download and unzip operation. Defaults to `600`.
+- `max_retries` (*default: `3`*) — Maximum number of retries on rate limit (HTTP 429) and other retryable errors.
+- `sleep_on_retry` (*default: `1`*) — Number of seconds to sleep before retrying on retryable errors (exponential backoff applies).
+- `http_timeout` (*default: `120`*) — Timeout in seconds for every HTTP operation (requesting bundle, downloading archive, etc.).
+- `async_poll_initial_wait` (*default: `1`*) — Number of seconds to wait before polling the async download process for the first time. Has no effect if the `async_mode` is disabled.
+- `async_poll_max_wait` (*default: `120`*) — Timeout for polling the async download process. Has no effect if the `async_mode` is disabled.
+- `download_timeout` (*default: `600`*) — Timeout in seconds for the whole download and unzip operation.
 
 ### Git identity
 
-- `git_user_name` — Optional Git username for commits. Defaults to the GitHub actor of the workflow run. Handy for using a specific identity (e.g., "Localization Bot").
-- `git_user_email` — Optional Git email for commits. Defaults to a noreply address based on the username (e.g., `username@users.noreply.github.com`). Useful for cleaner commit metadata or bot identities.
+- `git_user_name` (*default: [`GITHUB_ACTOR`](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts) of the workflow run*) — Optional Git username for commits. Handy for using a specific identity (e.g., "Localization Bot").
+- `git_user_email` (*default: noreply address based on the username (e.g., `username@users.noreply.github.com`)*) — Optional Git email for commits. Useful for cleaner commit metadata or bot identities.
 
 ### Commit and branch control
 
-- `git_commit_message` — Custom commit message. Defaults to "Translations update".
-- `override_branch_name` — Static branch name instead of an auto-generated one. Helps update the same PR across runs (e.g., always `lokalise-sync`). If the branch exists, it’s updated rather than recreated.
-- `force_push` — Force push to the remote branch. Use with caution, as it overwrites history. Defaults to `false`.
-- `temp_branch_prefix` — Prefix for temporary branch names (e.g., `lok` — branch starts with `lok`). Defaults to `lok`.
-- `override_base_branch` — Override base branch to use for the Lokalise PR (by default, the action always uses the triggering branch as a base). Make sure you understand what you're doing before adjusting this param; typically, it's needed only for complex/non-standard workflows like [explained in this issue](https://github.com/lokalise/lokalise-pull-action/issues/33#issuecomment-3533135731).
+- `git_commit_message` (*default: `"Translations update"`*) — Custom commit message.
+- `override_branch_name` (*default: empty string*) — Static branch name for PR creation instead of an auto-generated one. Helps update the same PR across runs (e.g., always `lokalise-sync`). If the branch exists, it’s updated rather than recreated.
+- `force_push` (*default: `false`*) — Force push to the remote branch. Use with caution, as it overwrites history.
+- `temp_branch_prefix` (*default: `"lok"`*) — Prefix for temporary branch names (e.g., `sample` — branch name starts with `sample`).
+- `override_base_branch` (*default: empty string*) — Override base branch to use for the Lokalise PR (by default, the action always uses the triggering branch as a base). Make sure you understand what you're doing before adjusting this param; typically, it's needed only for complex/non-standard workflows like [the one covered in this issue](https://github.com/lokalise/lokalise-pull-action/issues/33#issuecomment-3533135731).
 
 ### Pull request details
 
-- `pr_title` — Title for the PR. Defaults to "Translations update".
-- `pr_body` — Body text for the PR. Defaults to "This pull request updates translations from Lokalise".
-- `pr_labels` — Comma-separated labels to apply to the PR.
-- `pr_draft` — Create the PR as a draft (`true`/`false`). Defaults to `false`.
-- `pr_assignees` — Comma-separated GitHub usernames to assign to the PR. Defaults to none.
+- `pr_title` (*default: `"Translations update"`*) — Title for the PR.
+- `pr_body` (*default: `"This pull request updates translations from Lokalise"`*) — Body text for the PR.
+- `pr_labels` (*default: empty string*) — Comma-separated labels to apply to the PR.
+- `pr_draft` (*default: `false`*) — Create the PR as a draft (`true`/`false`). Defaults to `false`.
+- `pr_assignees` (*default: empty string*) — Comma-separated GitHub usernames to assign to the PR.
 
 ### Review requests
 
-- `pr_reviewers` — Comma-separated GitHub usernames to request as reviewers. Only individual users can be specified.
-- `pr_teams_reviewers` — Comma-separated team slugs (e.g., `backend`, `qa`) from the same org as the repo.  
+- `pr_reviewers` (*default: empty string*) — Comma-separated GitHub usernames to request as reviewers. Only individual users can be specified.
+- `pr_teams_reviewers` (*default: empty string*) — Comma-separated team slugs (e.g., `backend`, `qa`) from the same org as the repo.  
   + Requires a token with `repo` and `read:org` scopes if the default `GITHUB_TOKEN` is restricted.
 
 ### Authentication
 
-- `custom_github_token` — Optional token for creating/updating pull requests. Defaults to `GITHUB_TOKEN`. Use when elevated permissions are needed (assigning reviewers, interacting with protected branches, cross-repo changes). Keep secret.
+- `custom_github_token` (*default: `GITHUB_TOKEN`*) — Optional token for creating/updating pull requests. Use when elevated permissions are needed (assigning reviewers, interacting with protected branches, cross-repo changes). Keep secret.
 
 ### Platform support
 
-- `os_platform` — Target platform for the precompiled binaries used by this action (`linux_amd64`, `linux_arm64`, `mac_amd64`, `mac_arm64`). These binaries handle tasks like downloading and processing translations. Typically, you don't need to change this, as the default (`linux_amd64`) works for most environments. Override if running on a macOS runner or a different architecture.
+- `os_platform` (*default: `"linux_amd64"`*) — Target platform for the precompiled binaries used by this action. These binaries handle tasks like downloading and processing translations. Typically, you don't need to change this, as the default works for common environments. Override if running on a macOS runner or a different architecture. Supported values:
+  + `linux_amd64`
+  + `linux_arm64`
+  + `mac_amd64`
+  + `mac_arm64`
 
 ### Configuring GitHub permissions
 
@@ -286,10 +292,11 @@ When triggered, this action follows these steps:
 
 1. **Download translation files**:
    - Retrieves translation files for all languages from the specified Lokalise project.
+   - By default, translations for the base language are ignored.
    - The downloaded keys are filtered by the tag corresponding to the triggering branch. For example, if the branch is named `lokalise-hub`, only keys tagged with `lokalise-hub` in Lokalise will be included in the download bundle.
 
 2. **Detect changes**:
-   - Compares the downloaded translation files against the repository’s existing files to detect any updates or modifications.
+   - Compares the downloaded translation files against the repository’s existing files to detect any updates or modifications. By default, the triggering branch is used as a base.
 
 3. **Create a pull request**:
    - If changes are detected, the action creates a pull request from a temporary branch to the triggering branch.
@@ -310,7 +317,7 @@ By default, the following headers and parameters are set when downloading files 
 
 ## Checksums and attestation
 
-You'll find checksums for the compiled binaries in the `bin/` directory. The checksums are also signed and attested. To verify, install Cosign, clone the repo, and run the following commands in the project root:
+You'll find checksums for the compiled binaries in the `bin/` directory. The checksums are also signed and attested. To verify, install [Cosign](https://github.com/sigstore/cosign), clone the repo, and run the following commands in the project root:
 
 ```
 cosign verify-blob-attestation --bundle bin/checksums.txt.attestation --certificate-identity "https://github.com/lokalise/lokalise-pull-action/.github/workflows/build-to-bin.yml@refs/heads/main" --certificate-oidc-issuer "https://token.actions.githubusercontent.com" --type custom bin/checksums.txt
