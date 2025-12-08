@@ -65,6 +65,7 @@ type Config struct {
 	GitUserName        string   // optional override for git config user.name
 	GitUserEmail       string   // optional override for git config user.email
 	GitCommitMessage   string   // commit message to use
+	GitSignCommits     bool     // add -S for git commit
 	OverrideBranchName string   // static branch name to reuse a single PR
 	ForcePush          bool     // whether to force-push (overwriting history)
 	BaseRef            string   // base branch name (no refs/heads/ prefix)
@@ -222,6 +223,11 @@ func envVarsToConfig() (*Config, error) {
 		return nil, err
 	}
 
+	signCommits, err := parsers.ParseBoolEnv("GIT_SIGN_COMMITS")
+	if err != nil {
+		signCommits = false
+	}
+
 	return &Config{
 		GitHubActor:        envValues["GITHUB_ACTOR"],
 		GitHubSHA:          envValues["GITHUB_SHA"],
@@ -233,6 +239,7 @@ func envVarsToConfig() (*Config, error) {
 		GitUserName:        os.Getenv("GIT_USER_NAME"),
 		GitUserEmail:       os.Getenv("GIT_USER_EMAIL"),
 		GitCommitMessage:   commitMsg,
+		GitSignCommits:     signCommits,
 		OverrideBranchName: os.Getenv("OVERRIDE_BRANCH_NAME"),
 		ForcePush:          envBoolValues["FORCE_PUSH"],
 		BaseRef:            baseRef,
@@ -383,7 +390,13 @@ func commitAndPush(branchName string, runner CommandRunner, config *Config) erro
 		return ErrNoChanges
 	}
 
-	output, err := runner.Capture("git", "commit", "-m", config.GitCommitMessage)
+	commitArgs := []string{"commit"}
+	if config.GitSignCommits {
+		commitArgs = append(commitArgs, "-S")
+	}
+	commitArgs = append(commitArgs, "-m", config.GitCommitMessage)
+
+	output, err := runner.Capture("git", commitArgs...)
 	if err == nil {
 		if config.ForcePush {
 			return runner.Run("git", "push", "--force", "origin", branchName)

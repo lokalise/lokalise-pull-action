@@ -121,6 +121,10 @@ inputs:
     description: 'Git commit message used. If not provided, defaults to "Translations update".'
     required: false
     default: 'Translations update'
+  git_sign_commits:
+    description: 'Use `git commit -S` (requires signing to be configured in the workflow)'
+    required: false
+    default: 'false'
   custom_github_token:
     description: 'Optional GitHub token to use for API operations instead of the default GITHUB_TOKEN. Useful for custom permissions or elevated scopes.'
     required: false
@@ -285,6 +289,7 @@ runs:
         GIT_USER_NAME: "${{ inputs.git_user_name }}"
         GIT_USER_EMAIL: "${{ inputs.git_user_email }}"
         GIT_COMMIT_MESSAGE: "${{ inputs.git_commit_message }}"
+        GIT_SIGN_COMMITS: "${{ inputs.git_sign_commits }}"
         OVERRIDE_BRANCH_NAME: "${{ github.event.pull_request.head.ref || inputs.override_branch_name }}"
         FORCE_PUSH: "${{ inputs.force_push }}"
       shell: bash
