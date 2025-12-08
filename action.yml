@@ -381,4 +381,5 @@ runs:
           fi
         else
           echo "Commit created but no PR exists (unexpected)."
+          exit 1
         fi
