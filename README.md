@@ -27,12 +27,12 @@ jobs:
 
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Pull from Lokalise
-        uses: lokalise/lokalise-pull-action@v4.4.0
+        uses: lokalise/lokalise-pull-action@v4.5.0
         with:
           api_token: ${{ secrets.LOKALISE_API_TOKEN }}
           project_id: LOKALISE_PROJECT_ID
@@ -207,6 +207,7 @@ with open(file_path, "w", encoding="utf-8") as f:
 - `force_push` (*default: `false`*) — Force push to the remote branch. Use with caution, as it overwrites history.
 - `temp_branch_prefix` (*default: `"lok"`*) — Prefix for temporary branch names (e.g., `sample` — branch name starts with `sample`).
 - `override_base_branch` (*default: empty string*) — Override base branch to use for the Lokalise PR (by default, the action always uses the triggering branch as a base). Make sure you understand what you're doing before adjusting this param; typically, it's needed only for complex/non-standard workflows like [the one covered in this issue](https://github.com/lokalise/lokalise-pull-action/issues/33#issuecomment-3533135731).
+- `git_sign_commits` (*default: `false`*) — Use `git commit -S` when performing commit which effectively enables signing. Please note that you must configure signing (for example, GPG) manually in your workflow **before** calling the pull action. [This comment](https://github.com/lokalise/lokalise-pull-action/issues/39#issuecomment-3626512044) explains how to easily get started with GPG signing.
 
 ### Pull request details
 
