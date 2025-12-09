@@ -97,7 +97,7 @@ You'll need to provide some parameters for the action. These can be set as envir
 
 ### Mandatory parameters
 
-- `api_token` — Lokalise API token with read/write permissions.
+- `api_token` — Lokalise API token with read permissions.
   + Keep in mind that the API tokens are created on a per-user basis. If this contributor does not have proper access rights within a project (*Download files* permission), the downloads will fail.
 - `project_id` — Your Lokalise project ID.
 - `translations_path` (*default: `locales`*) — One or more paths to your translation files. Do not provide the actual filenames here. For example, if your translations are stored in the `locales` folder at the project root, use `locales`.
