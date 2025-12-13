@@ -101,8 +101,8 @@ You'll need to provide some parameters for the action. These can be set as envir
   + Keep in mind that the API tokens are created on a per-user basis. If this contributor does not have proper access rights within a project (*Download files* permission), the downloads will fail.
 - `project_id` — Your Lokalise project ID.
 - `translations_path` (default: `locales`) — one or more *base paths* where translation files are located. This is a common (root) directory for your translations, not a path to a specific file, so do not include filenames or locale placeholders (`%LANG_ISO%`) in this value. The action scans everything inside these directories and compares downloaded translations against existing files. Inside this path, translations can be stored:
-  + Directly as files (for example, `locales/en.json`)
-  + In nested folders (for example, `locales/en/common.json`, `locales/fr/app.json`). In this case make sure the filenames assigned to your keys on Lokalise contain the `%LANG_ISO%` placeholder, for example: `locales/%LANG_ISO%/common.json`.
+  + Directly as files (for example, `locales/en.json`). In this case make sure to enable `flat_naming`.
+  + In nested folders and sub-folders (for example, `locales/en/common.json`, `locales/fr/app.json`). In this case make sure the filenames assigned to your keys on Lokalise contain the `%LANG_ISO%` placeholder, for example: `locales/%LANG_ISO%/common.json`.
 - `file_format` (*default: `json`*) — Defines the format of your translation files, such as `json` for JSON files. This format determines how translation files are processed and also influences the file extension used when searching for them.
   + Some specific formats, such as `json_structured`, may still be downloaded with a generic `.json` extension. If you're using such a format, make sure to set the `file_ext` parameter explicitly to match the correct extension for your files.
 - `base_lang` (*default: `en`*) — Your project base language, such as `en` for English.
