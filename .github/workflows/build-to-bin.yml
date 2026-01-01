@@ -271,7 +271,7 @@ jobs:
           ls -lah bin || (echo "bin not found!" && exit 1)
 
       - name: Install syft
-        uses: anchore/sbom-action/download-syft@v0.20.10
+        uses: anchore/sbom-action/download-syft@v0.21.0
 
       - name: Generate SBOM (SPDX JSON)
         run: |
