@@ -111,7 +111,7 @@ jobs:
           cat "${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}.sha256"
 
       - name: Upload artifact (final binaries)
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}
           path: |
