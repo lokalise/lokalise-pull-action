@@ -13,12 +13,14 @@ import (
 //     stay human-readable and match external API expectations.
 //   - json.Encoder.Encode appends a trailing newline; that's fine for HTTP bodies.
 //   - On encode errors (e.g., unsupported values), returns a wrapped error.
-func EncodeJSONBody(body any) (*bytes.Buffer, error) {
+func EncodeJSONBody(body any) (*bytes.Reader, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(body); err != nil {
 		return nil, fmt.Errorf("encode body: %w", err)
 	}
-	return &buf, nil
+
+	// bytes.Reader умеет Seek, и он читает из слайса без доп. копии
+	return bytes.NewReader(buf.Bytes()), nil
 }

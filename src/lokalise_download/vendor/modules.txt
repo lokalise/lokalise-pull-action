@@ -1,7 +1,7 @@
 # github.com/bodrovis/lokalise-actions-common/v2 v2.4.1
 ## explicit; go 1.25
 github.com/bodrovis/lokalise-actions-common/v2/parsers
-# github.com/bodrovis/lokex v1.0.2
+# github.com/bodrovis/lokex v1.1.0
 ## explicit; go 1.25
 github.com/bodrovis/lokex/client
 github.com/bodrovis/lokex/internal/apierr

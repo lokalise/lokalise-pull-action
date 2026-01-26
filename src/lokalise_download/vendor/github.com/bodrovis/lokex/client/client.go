@@ -1,6 +1,6 @@
 // Package client provides a wrapper around the Lokalise API that the
 // upload/download packages depend on. It handles base URL normalization,
-// authentication, JSON encoding/decoding, retry with exponential backoff,
+// authentication, retry with exponential backoff,
 // and simple polling of asynchronous processes.
 package client
 
@@ -24,7 +24,7 @@ const (
 	defaultBaseURL = "https://api.lokalise.com/api2/"
 
 	// defaultUserAgent is sent on every request unless overridden via WithUserAgent.
-	defaultUserAgent = "lokex/1.0.2"
+	defaultUserAgent = "lokex/1.1.0"
 
 	// defaultErrCap caps how many bytes we slurp from a non-2xx response when
 	// constructing an apierr.APIError.
@@ -90,6 +90,12 @@ func (pr *processResponse) ToQueuedProcess() QueuedProcess {
 // Option customizes a Client during construction.
 // Errors returned by an Option abort NewClient.
 type Option func(*Client) error
+
+type retryBodyFactory interface {
+	// NewBody must return a fresh body for each attempt.
+	// Caller (doWithRetry) will Close() it.
+	NewBody() (io.ReadCloser, error)
+}
 
 // WithBaseURL sets a custom API base URL.
 // The value must be an absolute URL; a trailing slash is enforced.
@@ -242,11 +248,12 @@ func NewClient(token, projectID string, opts ...Option) (*Client, error) {
 
 // PollProcesses polls one or more process IDs until they reach a terminal
 // status or the overall poll budget (PollMaxWait) is exhausted.
-// It returns a result for each input ID, preserving input order.
-// Terminal statuses considered: "finished" and "failed".
+// It returns a result for each non-empty input ID, preserving the caller’s order.
+// Terminal statuses: "finished" and "failed".
 //
-// Errors from individual GET requests are ignored and retried on the next loop.
-// Context cancellation (ctx.Done) aborts the whole poll with ctx.Err().
+// Each polling round fetches statuses with bounded concurrency.
+// Errors from individual GET requests are ignored for that round and retried on
+// subsequent rounds. Context cancellation aborts the whole poll.
 func (c *Client) PollProcesses(ctx context.Context, processIDs []string) ([]QueuedProcess, error) {
 	start := time.Now()
 
@@ -254,6 +261,7 @@ func (c *Client) PollProcesses(ctx context.Context, processIDs []string) ([]Queu
 	if wait <= 0 {
 		wait = defaultPollInitialWait
 	}
+
 	maxWait := c.PollMaxWait
 	if maxWait <= 0 {
 		maxWait = defaultPollMaxWait
@@ -261,6 +269,8 @@ func (c *Client) PollProcesses(ctx context.Context, processIDs []string) ([]Queu
 	if maxWait < wait {
 		maxWait = wait
 	}
+
+	deadline := start.Add(maxWait)
 
 	processMap := make(map[string]QueuedProcess, len(processIDs))
 	pending := make(map[string]struct{}, len(processIDs))
@@ -285,70 +295,127 @@ func (c *Client) PollProcesses(ctx context.Context, processIDs []string) ([]Queu
 		return results, nil
 	}
 
+	// Concurrency cap (tune as you like)
+	const maxConcurrent = 8
+	sem := make(chan struct{}, maxConcurrent)
+
+	type pollResult struct {
+		id   string
+		proc QueuedProcess
+		err  error
+	}
+
+	// Reusable timer (avoid time.After allocations)
+	timer := time.NewTimer(time.Hour)
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	defer timer.Stop()
+
 	for len(pending) > 0 {
-		// respect overall max wait
-		if time.Since(start) >= maxWait {
+		// Respect overall poll budget
+		if time.Now().After(deadline) {
 			break
 		}
 
+		// Snapshot pending IDs for this round (so we can safely delete from pending later)
+		ids := make([]string, 0, len(pending))
 		for id := range pending {
+			ids = append(ids, id)
+		}
+
+		resCh := make(chan pollResult, len(ids))
+
+		// Launch requests with bounded concurrency
+		for _, id := range ids {
+			select {
+			case sem <- struct{}{}:
+				// ok
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+
+			go func(id string) {
+				defer func() { <-sem }()
+
+				path := c.projectPath(fmt.Sprintf("processes/%s", id))
+				var resp processResponse
+				err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, nil)
+				if err != nil {
+					resCh <- pollResult{id: id, err: err}
+					return
+				}
+				resCh <- pollResult{id: id, proc: resp.ToQueuedProcess()}
+			}(id)
+		}
+
+		// Collect results (single goroutine mutates maps → no locks)
+		for i := 0; i < len(ids); i++ {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			default:
-			}
-
-			path := c.projectPath(fmt.Sprintf("processes/%s", id))
-			var resp processResponse
-
-			if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, nil); err != nil {
-				// skip this id for now; try again next loop
-				continue
-			}
-
-			proc := resp.ToQueuedProcess()
-			processMap[id] = proc
-
-			if proc.Status == "finished" || proc.Status == "failed" {
-				delete(pending, id)
+			case r := <-resCh:
+				if r.err != nil {
+					// ignore request-level errors; keep it pending for the next round
+					continue
+				}
+				processMap[r.id] = r.proc
+				if r.proc.Status == "finished" || r.proc.Status == "failed" {
+					delete(pending, r.id)
+				}
 			}
 		}
+		close(resCh)
 
 		if len(pending) == 0 {
 			break
 		}
 
-		// compute a safe sleep that never goes negative/zero and never exceeds remaining budget
-		remaining := maxWait - time.Since(start)
+		// Sleep with growing interval, clipped to remaining budget
+		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			break
 		}
+
 		sleep := wait
 		if sleep > remaining {
 			sleep = remaining
 		}
 		if sleep <= 0 {
-			sleep = 10 * time.Millisecond // tiny floor to avoid spin
+			sleep = 10 * time.Millisecond
 		}
 
+		// Reset timer safely
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(sleep)
+
 		select {
-		case <-time.After(sleep):
-			// grow next wait, clipped by what remains
-			remaining = maxWait - time.Since(start)
-			next := wait * 2
-			if next > remaining {
-				next = remaining
-			}
-			if next <= 0 {
-				next = 10 * time.Millisecond
-			}
-			wait = next
+		case <-timer.C:
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+
+		// Grow wait for next round (exponential), still bounded
+		remaining = time.Until(deadline)
+		next := wait * 2
+		if next > remaining {
+			next = remaining
+		}
+		if next <= 0 {
+			next = 10 * time.Millisecond
+		}
+		wait = next
 	}
 
-	// preserve input order in results
+	// Preserve input order in results
 	results := make([]QueuedProcess, 0, len(processIDs))
 	for _, id := range processIDs {
 		if p, ok := processMap[id]; ok {
@@ -358,10 +425,40 @@ func (c *Client) PollProcesses(ctx context.Context, processIDs []string) ([]Queu
 	return results, nil
 }
 
-// doWithRetry executes one HTTP operation with buffered body and retries
-// according to the client's backoff policy. v is decoded into on success.
-// method/path should be relative (e.g., "projects/<id>/...").
+// doWithRetry executes one HTTP operation and retries according to the client's
+// backoff policy. If the body is seekable or provides a retryBodyFactory it is
+// reused across attempts; otherwise it is buffered into memory once.
 func (c *Client) doWithRetry(ctx context.Context, method, path string, body io.Reader, v any) error {
+	headers := make(http.Header)
+	if body != nil {
+		headers.Set("Content-Type", "application/json")
+	}
+
+	if f, ok := body.(retryBodyFactory); ok {
+		return c.withExpBackoff(ctx, "request", func(_ int) error {
+			rc, err := f.NewBody()
+			if err != nil {
+				return fmt.Errorf("create request body: %w", err)
+			}
+			defer func() {
+				if cerr := rc.Close(); err == nil && cerr != nil {
+					err = cerr
+				}
+			}()
+
+			return c.doRequest(ctx, method, path, rc, v, headers)
+		}, nil)
+	}
+
+	if rs, ok := body.(io.ReadSeeker); ok {
+		return c.withExpBackoff(ctx, "request", func(_ int) error {
+			if _, err := rs.Seek(0, io.SeekStart); err != nil {
+				return fmt.Errorf("rewind body: %w", err)
+			}
+			return c.doRequest(ctx, method, path, rs, v, headers)
+		}, nil)
+	}
+
 	var payload []byte
 	if body != nil {
 		b, err := io.ReadAll(body)
@@ -371,29 +468,18 @@ func (c *Client) doWithRetry(ctx context.Context, method, path string, body io.R
 		payload = b
 	}
 
-	err := c.withExpBackoff(ctx, "request", func(_ int) error {
+	return c.withExpBackoff(ctx, "request", func(_ int) error {
 		var rdr io.Reader
-		headers := make(http.Header)
-
 		if payload != nil {
 			rdr = bytes.NewReader(payload)
-			headers.Set("Content-Type", "application/json")
 		}
-
-		if err := c.doRequest(ctx, method, path, rdr, v, headers); err != nil {
-			return err
-		}
-		return nil
+		return c.doRequest(ctx, method, path, rdr, v, headers)
 	}, nil)
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 // doRequest performs a single HTTP request (no retries).
 // Body is sent as-is; if it's a bytes.Reader/strings.Reader/bytes.Buffer, we
-// set Content-Length for nicer traces and potential connection reuse.
+// set Content-Length for nicer traces and fewer chunked uploads.
 // If v is nil, the body is drained and discarded; otherwise it is decoded as JSON.
 func (c *Client) doRequest(ctx context.Context, method, path string, body io.Reader, v any, headers http.Header) error {
 	fullURL, err := url.JoinPath(c.BaseURL, path)
@@ -422,8 +508,8 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 	req.Header.Set("User-Agent", c.UserAgent)
 	req.Header.Set("Accept", "application/json")
 	for k, vv := range headers {
-		for _, v := range vv {
-			req.Header.Add(k, v)
+		if len(vv) > 0 {
+			req.Header.Set(k, vv[len(vv)-1])
 		}
 	}
 
@@ -435,8 +521,14 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		slurp, _ := io.ReadAll(io.LimitReader(resp.Body, defaultErrCap))
+		_, _ = io.Copy(io.Discard, resp.Body)
+
 		ae := apierr.Parse(slurp, resp.StatusCode)
+
+		resp.Body = io.NopCloser(bytes.NewReader(slurp))
+		resp.ContentLength = int64(len(slurp))
 		ae.Resp = resp
+
 		return ae
 	}
 
@@ -467,9 +559,9 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body io.Rea
 }
 
 // withExpBackoff runs op with retries using exponential backoff + jitter.
-// Semantics: MaxRetries is the number of *retries* after the initial attempt,
-// so total attempts = MaxRetries + 1. A nil isRetryable defaults to apierr.IsRetryable.
-// If ctx is canceled, the function returns ctx.Err().
+// MaxRetries is the number of *retries* after the initial attempt (total attempts = MaxRetries+1).
+// If isRetryable is nil, apierr.IsRetryable is used.
+// If ctx is canceled or its deadline is exceeded, ctx.Err() is returned (wrapped with label when provided).
 func (c *Client) withExpBackoff(
 	ctx context.Context,
 	label string,
@@ -480,38 +572,57 @@ func (c *Client) withExpBackoff(
 		isRetryable = apierr.IsRetryable
 	}
 
-	var lastErr error
-
 	// Floors to avoid tight spins when caller sets zeros.
-	initial := c.InitialBackoff
-	if initial <= 0 {
-		initial = 50 * time.Millisecond
+	backoff := c.InitialBackoff
+	if backoff <= 0 {
+		backoff = 50 * time.Millisecond
 	}
 	max := c.MaxBackoff
 	if max <= 0 {
 		max = 2 * time.Second
 	}
-	backoff := initial
+
+	// Reuse a single timer to avoid allocations on each retry.
+	timer := time.NewTimer(time.Hour)
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	defer timer.Stop()
 
 	for attempt := 0; ; attempt++ {
+		// Bail fast if caller already canceled / deadline exceeded.
+		if err := ctx.Err(); err != nil {
+			if label != "" {
+				return fmt.Errorf("%s: context: %w", label, err)
+			}
+			return err
+		}
+
 		// attempt is 0-based; pass it through as-is to op.
 		if err := op(attempt); err == nil {
 			return nil
 		} else {
-			lastErr = err
-		}
-
-		// If it's not retryable or we've exhausted retries, bail.
-		// attempt counts completed attempts; allow up to MaxRetries retries.
-		if !isRetryable(lastErr) || attempt >= c.MaxRetries {
-			if label != "" {
-				// attempt+1 = human-readable total attempts performed
-				return fmt.Errorf("%s (attempt %d): %w", label, attempt+1, lastErr)
+			// If ctx got canceled during the attempt, surface that cleanly.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				if label != "" {
+					return fmt.Errorf("%s: context: %w", label, ctxErr)
+				}
+				return ctxErr
 			}
-			return lastErr
+
+			// Not retryable or retries exhausted.
+			if !isRetryable(err) || attempt >= c.MaxRetries {
+				if label != "" {
+					return fmt.Errorf("%s (attempt %d): %w", label, attempt+1, err)
+				}
+				return err
+			}
 		}
 
-		// jittered sleep capped at max; ensure positive delay
+		// Jittered sleep capped at max; ensure positive delay.
 		delay := apierr.JitteredBackoff(backoff)
 		if delay <= 0 {
 			delay = time.Millisecond
@@ -520,27 +631,26 @@ func (c *Client) withExpBackoff(
 			delay = max
 		}
 
-		timer := time.NewTimer(delay)
+		// Reset timer safely.
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(delay)
+
 		select {
 		case <-timer.C:
 			// proceed to next retry
 		case <-ctx.Done():
-			// drain timer if needed
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
 			if label != "" {
 				return fmt.Errorf("%s: context: %w", label, ctx.Err())
 			}
 			return ctx.Err()
 		}
-		// Best-effort stop; safe even if already fired.
-		timer.Stop()
 
-		// exponential growth capped at max
+		// Exponential growth capped at max.
 		backoff *= 2
 		if backoff > max {
 			backoff = max

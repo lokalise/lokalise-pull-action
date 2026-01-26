@@ -194,7 +194,6 @@ func (d *Downloader) DownloadAndUnzip(ctx context.Context, bundleURL, destDir st
 		if err := d.downloadOnce(ctx, bundleURL, tmpPath, ua); err != nil {
 			return err
 		}
-		// validate it's a real zip; if not, return ErrUnexpectedEOF to trigger retry
 		return zipx.Validate(tmpPath)
 	}, nil); err != nil {
 		return err
@@ -208,8 +207,12 @@ func (d *Downloader) DownloadAndUnzip(ctx context.Context, bundleURL, destDir st
 
 // downloadOnce performs a single GET of the bundle and writes it to destPath.
 // It sets Accept headers appropriate for zips and optionally propagates a
-// User-Agent. It verifies Content-Length when available to detect truncation.
+// User-Agent. It checks Content-Length (when present) to detect truncation.
 func (d *Downloader) downloadOnce(ctx context.Context, url, destPath, ua string) error {
+	if d == nil || d.client == nil || d.client.HTTPClient == nil {
+		return fmt.Errorf("download: nil http client")
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
@@ -217,25 +220,24 @@ func (d *Downloader) downloadOnce(ctx context.Context, url, destPath, ua string)
 	if ua != "" {
 		req.Header.Set("User-Agent", ua)
 	}
-	// avoid transparent compression; we want raw bytes on disk
+	// Avoid transparent compression; we want raw zip bytes on disk.
 	req.Header.Set("Accept-Encoding", "identity")
 	req.Header.Set("Accept", "application/zip, application/octet-stream, */*")
 
-	hc := d.client.HTTPClient
-	resp, err := hc.Do(req)
+	resp, err := d.client.HTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("http get: %w", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		slurp, _ := io.ReadAll(io.LimitReader(resp.Body, defaultErrCap))
+		_, _ = io.Copy(io.Discard, resp.Body)
+
 		return &apierr.APIError{
 			Status:  resp.StatusCode,
-			Message: strings.TrimSpace(string(slurp)),
 			Code:    resp.StatusCode,
+			Message: strings.TrimSpace(string(slurp)),
 		}
 	}
 
@@ -243,9 +245,8 @@ func (d *Downloader) downloadOnce(ctx context.Context, url, destPath, ua string)
 	if err != nil {
 		return fmt.Errorf("create temp zip: %w", err)
 	}
-	defer func() {
-		_ = f.Close()
-	}()
+	// Close to ensure data is flushed to the OS; Sync() is unnecessary for temp files.
+	defer func() { _ = f.Close() }()
 
 	var want int64 = -1
 	if cl := resp.Header.Get("Content-Length"); cl != "" {
@@ -258,13 +259,16 @@ func (d *Downloader) downloadOnce(ctx context.Context, url, destPath, ua string)
 	if err != nil {
 		return fmt.Errorf("write zip: %w", err)
 	}
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("flush zip: %w", err)
-	}
 
-	// trigger retry if server cut us short
+	// trigger retry if server cut us short (only reliable when Content-Length is set)
 	if want >= 0 && n != want {
 		return fmt.Errorf("incomplete download: got %d of %d: %w", n, want, io.ErrUnexpectedEOF)
 	}
+
+	// Best-effort close now so errors surface early (optional)
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close zip: %w", err)
+	}
+
 	return nil
 }
