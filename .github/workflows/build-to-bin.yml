@@ -111,7 +111,7 @@ jobs:
           cat "${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}.sha256"
 
       - name: Upload artifact (final binaries)
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}
           path: |
@@ -129,7 +129,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           path: _dist
           merge-multiple: true
@@ -271,7 +271,7 @@ jobs:
           ls -lah bin || (echo "bin not found!" && exit 1)
 
       - name: Install syft
-        uses: anchore/sbom-action/download-syft@v0.20.10
+        uses: anchore/sbom-action/download-syft@v0.21.0
 
       - name: Generate SBOM (SPDX JSON)
         run: |
