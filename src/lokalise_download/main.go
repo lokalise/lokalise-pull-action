@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
-	"github.com/bodrovis/lokex/client"
+	"github.com/bodrovis/lokex/v2/client"
 )
 
 // exitFunc is a function variable that defaults to os.Exit.

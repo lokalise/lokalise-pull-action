@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bodrovis/lokex/client"
+	"github.com/bodrovis/lokex/v2/client"
 )
 
 func TestMain(m *testing.M) {

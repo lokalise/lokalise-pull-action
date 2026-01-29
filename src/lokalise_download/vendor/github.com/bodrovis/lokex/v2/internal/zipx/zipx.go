@@ -235,17 +235,22 @@ func Unzip(srcZip, destDir string, p Policy) (err error) {
 			perm = 0o644
 		}
 
-		tmp := targetAbs + ".partial"
-		// Create tmp file exclusively to avoid races/truncation
-		out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY|os.O_EXCL, perm)
+		// Create a unique temp file next to the final destination.
+		// This avoids ".partial" leftovers breaking future runs.
+		tmpf, err := os.CreateTemp(filepath.Dir(targetAbs), filepath.Base(targetAbs)+".partial-*")
 		if err != nil {
 			_ = rc.Close()
 			return err
 		}
+		tmp := tmpf.Name()
 
-		n, werr := copyCapped(out, rc, p.MaxFileBytes)
+		// Best-effort set permissions on the temp file (some OSes may ignore until rename).
+		_ = tmpf.Chmod(perm)
+
+		n, werr := copyCapped(tmpf, rc, p.MaxFileBytes)
+
 		// close writers/readers with proper precedence
-		if cerr := out.Close(); werr == nil && cerr != nil {
+		if cerr := tmpf.Close(); werr == nil && cerr != nil {
 			werr = cerr
 		}
 		if cerr := rc.Close(); werr == nil && cerr != nil {
@@ -263,7 +268,8 @@ func Unzip(srcZip, destDir string, p Policy) (err error) {
 			return fmt.Errorf("zip too large uncompressed (actual): %d > %d", totalWritten, p.MaxTotalBytes)
 		}
 
-		// Atomically move into place
+		// On Windows, rename over existing file may fail. Remove first.
+		_ = os.Remove(targetAbs)
 		if err := os.Rename(tmp, targetAbs); err != nil {
 			_ = os.Remove(tmp)
 			return err

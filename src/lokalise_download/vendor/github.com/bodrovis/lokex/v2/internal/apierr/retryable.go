@@ -8,8 +8,14 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"sync"
 	"syscall"
 	"time"
+)
+
+var (
+	jitterRandMu sync.Mutex
+	jitterRand   = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
 // IsRetryable returns true only for transient failures.
@@ -65,11 +71,19 @@ func IsRetryable(err error) bool {
 }
 
 // JitteredBackoff returns a randomized delay in [0.5*base, 1.5*base).
-// If base <= 0, defaults to 300ms.
+// If base <= 0, it falls back to 300ms.
+//
+// Note: we intentionally use a package-local PRNG guarded by a mutex.
+// A *rand.Rand created via rand.New(...) is NOT goroutine-safe, so without
+// the lock we'd get races when multiple retries happen concurrently.
 func JitteredBackoff(base time.Duration) time.Duration {
 	if base <= 0 {
 		base = 300 * time.Millisecond
 	}
-	delta := time.Duration(rand.Int63n(int64(base))) // [0, base)
+
+	jitterRandMu.Lock()
+	delta := time.Duration(jitterRand.Int63n(int64(base))) // [0, base)
+	jitterRandMu.Unlock()
+
 	return base/2 + delta
 }
