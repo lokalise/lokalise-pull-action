@@ -215,6 +215,42 @@ func TestBuildDownloadParams_JSON_MergesAndOverrides(t *testing.T) {
 	}
 }
 
+func TestBuildDownloadParams_YAML_MergesAndOverrides(t *testing.T) {
+	cfg := DownloadConfig{
+		FileFormat:            "json",
+		GitHubRefName:         "release-2025-08-19",
+		SkipIncludeTags:       false,
+		SkipOriginalFilenames: false,
+		AsyncMode:             true,
+		AdditionalParams: `
+indentation: 2sp
+export_empty_as: skip
+export_sort: a_z
+replace_breaks: false
+include_tags:
+  - custom-1
+  - custom-2
+`,
+	}
+
+	params := buildDownloadParams(cfg)
+
+	want := client.DownloadParams{
+		"format":             "json",
+		"original_filenames": true,
+		"directory_prefix":   "/",
+		"include_tags":       []any{"custom-1", "custom-2"},
+		"indentation":        "2sp",
+		"export_empty_as":    "skip",
+		"export_sort":        "a_z",
+		"replace_breaks":     false,
+	}
+
+	if !reflect.DeepEqual(params, want) {
+		t.Fatalf("params mismatch.\n got: %#v\nwant: %#v", params, want)
+	}
+}
+
 func TestBuildDownloadParams_JSON_EmptyAdditional_UsesDefaults(t *testing.T) {
 	cfg := DownloadConfig{
 		FileFormat:            "yaml",
@@ -259,6 +295,19 @@ func TestBuildDownloadParams_JSON_Invalid_Aborts(t *testing.T) {
 		FileFormat:       "json",
 		GitHubRefName:    "ref",
 		AdditionalParams: `{"indentation": "2sp",`,
+	}
+
+	requirePanicExit(t, func() {
+		_ = buildDownloadParams(cfg)
+	})
+}
+
+func TestBuildDownloadParams_YAML_Invalid_Aborts(t *testing.T) {
+	cfg := DownloadConfig{
+		FileFormat:    "json",
+		GitHubRefName: "ref",
+		// invalid input
+		AdditionalParams: "~~~?? invalid !!",
 	}
 
 	requirePanicExit(t, func() {

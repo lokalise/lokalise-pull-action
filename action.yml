@@ -26,7 +26,7 @@ inputs:
     required: false
     default: ''
   additional_params:
-    description: 'Additional parameters for Lokalise API on pull. Find all supported options at https://developers.lokalise.com/reference/download-files'
+    description: 'Additional parameters for Lokalise API on pull. Must be a valid JSON or YAML. Find all supported options at https://developers.lokalise.com/reference/download-files'
     required: false
     default: ''
   temp_branch_prefix:
