@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	yaml "go.yaml.in/yaml/v4"
+
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 	"github.com/bodrovis/lokex/v2/client"
 )
@@ -177,7 +179,7 @@ func validateDownloadConfig(config DownloadConfig) {
 // Notes:
 // - When original_filenames=true, Lokalise exports per-original path and directory_prefix is respected.
 // - include_tags narrows the export to keys tagged with the current branch/tag (git-driven workflows).
-// - AdditionalParams allows advanced overrides (must be a JSON object).
+// - AdditionalParams allows advanced overrides (JSON object or YAML mapping).
 func buildDownloadParams(config DownloadConfig) client.DownloadParams {
 	params := client.DownloadParams{
 		"format": config.FileFormat,
@@ -195,20 +197,45 @@ func buildDownloadParams(config DownloadConfig) client.DownloadParams {
 		params["include_tags"] = []string{config.GitHubRefName}
 	}
 
-	// Allow advanced overrides via JSON. Example:
-	// {"filter_langs":["en","fr"],"disable_references":true}
 	ap := strings.TrimSpace(config.AdditionalParams)
 	if ap != "" {
-		add, err := parseJSONMap(ap)
+		add, err := parseAdditionalParams(ap)
 		if err != nil {
-			returnWithError("Invalid additional_params (must be JSON object): " + err.Error())
+			returnWithError("Invalid additional_params (must be JSON object or YAML mapping): " + err.Error())
 		}
-		// Merges without clobbering the original map reference.
 		// Caller-specified values win over our defaults if keys overlap.
 		maps.Copy(params, add)
 	}
 
 	return params
+}
+
+// parseAdditionalParams detects JSON vs YAML and returns a map[string]any.
+// Rule: if first non-space char is '{' => JSON object; otherwise YAML mapping.
+func parseAdditionalParams(s string) (map[string]any, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return map[string]any{}, nil
+	}
+
+	if strings.HasPrefix(s, "{") {
+		return parseJSONMap(s)
+	}
+
+	return parseYAMLMap(s)
+}
+
+// parseYAMLMap parses a YAML mapping into map[string]any.
+func parseYAMLMap(s string) (map[string]any, error) {
+	var m map[string]any
+	err := yaml.Unmarshal([]byte(s), &m)
+	if err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return nil, fmt.Errorf("YAML must be a mapping (key: value)")
+	}
+	return m, nil
 }
 
 // parseJSONMap parses a JSON object string into map[string]any.
@@ -217,6 +244,9 @@ func parseJSONMap(s string) (map[string]any, error) {
 	var m map[string]any
 	if err := json.Unmarshal([]byte(s), &m); err != nil {
 		return nil, err
+	}
+	if m == nil {
+		return nil, fmt.Errorf("JSON must be an object (not null)")
 	}
 	return m, nil
 }

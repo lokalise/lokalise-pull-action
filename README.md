@@ -124,7 +124,7 @@ file_ext: |
 - `flat_naming` (*default: `false`*) — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`.
 - `skip_include_tags` (*default: `false`*) — Skip setting the `"include_tags"` param during download. This will download all translation keys for the specified format, regardless of tags.
 - `skip_original_filenames` (*default: `false`*) — Skip setting the `"original_filenames": true` and `"directory_prefix": "/"` params during download. You can disable original filenames by setting `"original_filenames": false` explicitly via `additional_params`.
-- `additional_params` (*default: empty*) — Extra parameters to pass when sending [File download API request](https://developers.lokalise.com/reference/download-files). Must be valid JSON. For example, you can use `"indentation": "2sp"` to manage indentation. Multiple params can be specified:
+- `additional_params` (*default: empty*) — Extra parameters to pass when sending [File download API request](https://developers.lokalise.com/reference/download-files). Must be valid JSON or YAML. For example, you can use `"indentation": "2sp"` to manage indentation. Multiple params can be specified:
 
 ```yaml
 additional_params: >
@@ -138,6 +138,19 @@ additional_params: >
       {"original_language_iso": "en_US", "custom_language_iso": "en-US"}
     ]
   }
+
+# OR
+
+additional_params: |
+  indentation: 2sp
+  export_empty_as: skip
+  export_sort: a_z
+  replace_breaks: false
+  include_tags:
+    - release-2025-08-19
+  language_mapping:
+    - original_language_iso: en_US
+      custom_language_iso: en-US
 ```
 
 ### Post-processing
