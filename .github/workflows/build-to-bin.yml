@@ -60,7 +60,6 @@ jobs:
           go build \
             -trimpath \
             -buildvcs=false \
-            -mod=vendor \
             -ldflags "-buildid=" \
             -o "../../dist/${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}" \
             .
