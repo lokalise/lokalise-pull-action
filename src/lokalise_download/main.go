@@ -2,14 +2,10 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 	"strings"
 	"time"
-
-	yaml "go.yaml.in/yaml/v4"
 
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 	"github.com/bodrovis/lokex/v2/client"
@@ -197,58 +193,11 @@ func buildDownloadParams(config DownloadConfig) client.DownloadParams {
 		params["include_tags"] = []string{config.GitHubRefName}
 	}
 
-	ap := strings.TrimSpace(config.AdditionalParams)
-	if ap != "" {
-		add, err := parseAdditionalParams(ap)
-		if err != nil {
-			returnWithError("Invalid additional_params (must be JSON object or YAML mapping): " + err.Error())
-		}
-		// Caller-specified values win over our defaults if keys overlap.
-		maps.Copy(params, add)
+	if err := parsers.ParseAdditionalParamsAndMerge(params, config.AdditionalParams); err != nil {
+		returnWithError("Invalid additional_params (must be JSON object or YAML mapping): " + err.Error())
 	}
 
 	return params
-}
-
-// parseAdditionalParams detects JSON vs YAML and returns a map[string]any.
-// Rule: if first non-space char is '{' => JSON object; otherwise YAML mapping.
-func parseAdditionalParams(s string) (map[string]any, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return map[string]any{}, nil
-	}
-
-	if strings.HasPrefix(s, "{") {
-		return parseJSONMap(s)
-	}
-
-	return parseYAMLMap(s)
-}
-
-// parseYAMLMap parses a YAML mapping into map[string]any.
-func parseYAMLMap(s string) (map[string]any, error) {
-	var m map[string]any
-	err := yaml.Unmarshal([]byte(s), &m)
-	if err != nil {
-		return nil, err
-	}
-	if m == nil {
-		return nil, fmt.Errorf("YAML must be a mapping (key: value)")
-	}
-	return m, nil
-}
-
-// parseJSONMap parses a JSON object string into map[string]any.
-// Validation: we only accept objects; arrays/primitives are rejected by unmarshal error.
-func parseJSONMap(s string) (map[string]any, error) {
-	var m map[string]any
-	if err := json.Unmarshal([]byte(s), &m); err != nil {
-		return nil, err
-	}
-	if m == nil {
-		return nil, fmt.Errorf("JSON must be an object (not null)")
-	}
-	return m, nil
 }
 
 // downloadFiles orchestrates the vendor call respecting AsyncMode.

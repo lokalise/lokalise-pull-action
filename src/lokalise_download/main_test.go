@@ -118,8 +118,6 @@ func TestPrepareConfig_TokenAndRefFallbacks(t *testing.T) {
 	if cfg.FileFormat != "yaml" {
 		t.Fatalf("FileFormat mismatch: %q", cfg.FileFormat)
 	}
-
-	// булевые должны упасть в false
 	if cfg.SkipIncludeTags {
 		t.Fatal("SkipIncludeTags should be false on bad input")
 	}
