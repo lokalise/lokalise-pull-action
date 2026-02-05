@@ -369,9 +369,11 @@ func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) e
 }
 
 // checkoutRemoteWithLocalChanges tries to switch to origin/<ref> even when local changes block checkout.
-// Strategy:
-// - If local working tree already matches origin/<ref>, force-checkout is safe.
-// - Otherwise: stash -> checkout -> stash pop (and error if pop fails).
+// Strategy: If local working tree already matches origin/<ref>, force-checkout is safe.
+// Otherwise:
+//   stash -> checkout origin/<ref> -> restore stashed files by overwriting them
+//   (checkout stash@{0} -- <file>, fallback to stash@{0}^3 for untracked) -> reset -> drop stash.
+
 func checkoutRemoteWithLocalChanges(ref string, runner CommandRunner, cause error) error {
 	remote := "origin/" + ref
 
@@ -425,7 +427,9 @@ func checkoutRemoteWithLocalChanges(ref string, runner CommandRunner, cause erro
 			}
 		}
 
-		_ = runner.Run("git", "reset")
+		if err := runner.Run("git", "reset"); err != nil {
+			return fmt.Errorf("checked out %s but failed to reset index: %v", remote, err)
+		}
 
 		if err := runner.Run("git", "stash", "drop", stashRef); err != nil {
 			return fmt.Errorf("checked out %s but failed to drop %s: %v", remote, stashRef, err)
