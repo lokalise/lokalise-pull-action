@@ -31,20 +31,36 @@ type DefaultCommandRunner struct{}
 // If exit code != 0 we bubble up the error with captured output for debugging CI logs.
 func (d DefaultCommandRunner) Run(name string, args ...string) ([]string, error) {
 	cmd := exec.Command(name, args...)
-	outputBytes, err := cmd.CombinedOutput()
-	outputStr := strings.TrimSpace(string(outputBytes))
+
+	// capture stderr separately so we don't accidentally treat it as "changed file"
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+
+	// Output() returns stdout; stderr is captured via cmd.Stderr
+	stdoutBytes, err := cmd.Output()
+	stdoutStr := strings.TrimSpace(string(stdoutBytes))
+	stderrStr := strings.TrimSpace(stderr.String())
 
 	if err != nil {
-		return nil, fmt.Errorf("command '%s %s' failed: %v\nOutput:\n%s", name, strings.Join(args, " "), err, outputStr)
+		// include stderr + stdout for debugging
+		msg := fmt.Sprintf("command '%s %s' failed: %v", name, strings.Join(args, " "), err)
+		if stderrStr != "" {
+			msg += "\nStderr:\n" + stderrStr
+		}
+		if stdoutStr != "" {
+			msg += "\nStdout:\n" + stdoutStr
+		}
+		return nil, fmt.Errorf("%s", msg)
 	}
 
-	if outputStr == "" {
-		return nil, nil // no changes / no matches
+	// success but no stdout -> no matches / no changes
+	if stdoutStr == "" {
+		return nil, nil
 	}
 
-	lines := strings.Split(outputStr, "\n")
+	lines := strings.Split(stdoutStr, "\n")
+	results := make([]string, 0, len(lines))
 
-	var results []string
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line != "" {
@@ -228,11 +244,19 @@ func deduplicateFiles(statusFiles, untrackedFiles []string) []string {
 	fileSet := make(map[string]struct{})
 
 	for _, file := range statusFiles {
-		fileSet[filepath.ToSlash(strings.TrimSpace(file))] = struct{}{}
+		f := filepath.ToSlash(strings.TrimSpace(file))
+		if f == "" {
+			continue
+		}
+		fileSet[f] = struct{}{}
 	}
 
 	for _, file := range untrackedFiles {
-		fileSet[filepath.ToSlash(strings.TrimSpace(file))] = struct{}{}
+		f := filepath.ToSlash(strings.TrimSpace(file))
+		if f == "" {
+			continue
+		}
+		fileSet[f] = struct{}{}
 	}
 
 	allFiles := make([]string, 0, len(fileSet))

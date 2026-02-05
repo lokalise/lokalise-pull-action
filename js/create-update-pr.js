@@ -18,13 +18,26 @@ module.exports = async ({ github, context }) => {
     const branchName = (process.env.BRANCH_NAME || "").trim();
     const prTitle = process.env.PR_TITLE || "Lokalise: sync translations";
     const prBody = process.env.PR_BODY || "";
-    const prDraft = String(process.env.PR_DRAFT || "false").toLowerCase() === "true";
+    const prDraft =
+      String(process.env.PR_DRAFT || "false").toLowerCase() === "true";
 
     // Comma-separated env vars → arrays with trimming; empty pieces dropped.
-    const prLabels = (process.env.PR_LABELS || "").split(",").map(s => s.trim()).filter(Boolean);
-    const prReviewers = (process.env.PR_REVIEWERS || "").split(",").map(s => s.trim()).filter(Boolean);
-    const prTeams = (process.env.PR_TEAMS_REVIEWERS || "").split(",").map(s => s.trim()).filter(Boolean);
-    const prAssignees = (process.env.PR_ASSIGNEES || "").split(",").map(s => s.trim()).filter(Boolean);
+    const prLabels = (process.env.PR_LABELS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const prReviewers = (process.env.PR_REVIEWERS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const prTeams = (process.env.PR_TEAMS_REVIEWERS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const prAssignees = (process.env.PR_ASSIGNEES || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
     if (!branchName) {
       // Hard requirement: the commit step must pass branch_name as BRANCH_NAME.
@@ -35,13 +48,21 @@ module.exports = async ({ github, context }) => {
     baseRef = baseRef.replace(/^refs\/heads\//, "");
 
     // CI often feeds synthetic refs for PR events (e.g. "123/merge").
-    const looksLikeSynthetic = /^(\d+)\/(merge|head)$/.test(baseRef) || baseRef === "merge" || baseRef === "head";
+    const looksLikeSynthetic =
+      /^(\d+)\/(merge|head)$/.test(baseRef) ||
+      baseRef === "merge" ||
+      baseRef === "head";
 
     if (!baseRef || looksLikeSynthetic) {
       // Fall back to repository default branch (e.g., "main"). Robust for non-standard setups.
-      const { data: repoInfo } = await github.rest.repos.get({ owner: repo.owner, repo: repo.repo });
+      const { data: repoInfo } = await github.rest.repos.get({
+        owner: repo.owner,
+        repo: repo.repo,
+      });
       baseRef = repoInfo.default_branch;
-      console.log(`BASE_REF was invalid/synthetic, using default branch: ${baseRef}`);
+      console.log(
+        `BASE_REF was invalid/synthetic, using default branch: ${baseRef}`,
+      );
     }
 
     // ─────────── Detect head owner (fork-safe) ───────────
@@ -100,12 +121,16 @@ module.exports = async ({ github, context }) => {
 
       // Apply labels if provided (idempotent; GH dedupes).
       if (prLabels.length) {
-        await github.rest.issues.addLabels({
-          owner: repo.owner,
-          repo: repo.repo,
-          issue_number: prNumber,
-          labels: prLabels,
-        });
+        try {
+          await github.rest.issues.addLabels({
+            owner: repo.owner,
+            repo: repo.repo,
+            issue_number: prNumber,
+            labels: prLabels,
+          });
+        } catch (err) {
+          console.warn(`Cannot add labels: ${err.message}`);
+        }
       }
 
       // Request reviewers (users/teams). Some combos can fail (e.g., missing org perms).
@@ -138,7 +163,10 @@ module.exports = async ({ github, context }) => {
         }
       }
 
-      return { created: false, pr: { number: prNumber, id: existing.id, html_url: existing.html_url } };
+      return {
+        created: false,
+        pr: { number: prNumber, id: existing.id, html_url: existing.html_url },
+      };
     }
 
     /* ─────────── CREATE PR ─────────── */
@@ -194,7 +222,10 @@ module.exports = async ({ github, context }) => {
     }
 
     console.log(`Created new PR: ${newPr.html_url}`);
-    return { created: true, pr: { number: newPr.number, id: newPr.id, html_url: newPr.html_url } };
+    return {
+      created: true,
+      pr: { number: newPr.number, id: newPr.id, html_url: newPr.html_url },
+    };
   } catch (error) {
     // We deliberately do not throw here as the composite action expects a structured return.
     console.error(`Failed to create or update pull request: ${error.message}`);
