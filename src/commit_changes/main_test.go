@@ -653,6 +653,8 @@ func TestCheckoutBranch(t *testing.T) {
 					dropped = true
 					return nil
 
+				case len(args) == 1 && args[0] == "reset":
+					return nil
 				default:
 					return fmt.Errorf("unexpected command: git %v", args)
 				}
@@ -813,6 +815,10 @@ func TestCheckoutBranch_RemoteBranch_StashRestore_MultipleFiles(t *testing.T) {
 
 			// stash push
 			if len(args) == 5 && args[0] == "stash" && args[1] == "push" && args[2] == "-u" && args[3] == "-m" && args[4] == "lokalise-temp" {
+				return nil
+			}
+
+			if len(args) == 1 && args[0] == "reset" {
 				return nil
 			}
 
