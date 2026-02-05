@@ -380,30 +380,26 @@ func checkoutRemoteWithLocalChanges(ref string, runner CommandRunner, cause erro
 		return fmt.Errorf("failed to check status: %v\nOutput: %s", stErr, status)
 	}
 	if strings.TrimSpace(status) == "" {
-		// repo clean -> checkout failed for some other reason
 		return cause
 	}
 
 	hasUntracked := strings.Contains(status, "?? ")
 
-	// If working tree already equals remote, we can safely drop local changes.
 	same, err := worktreeEqualsRef(remote, runner)
 	if err == nil && same && !hasUntracked {
-		// -f discards local changes (safe because identical)
 		if err := runner.Run("git", "checkout", "-f", "-B", ref, remote); err != nil {
 			return fmt.Errorf("failed to force-checkout %s: %v", remote, err)
 		}
 		return nil
 	}
 
-	// Otherwise stash local changes and retry.
 	didStash, err := stashIfDirty(runner, "lokalise-temp")
 	if err != nil {
 		return err
 	}
 
 	if err := runner.Run("git", "checkout", "-B", ref, remote); err != nil {
-		// attempt to restore stash back (best effort) before returning error
+		// best effort
 		if didStash {
 			_ = runner.Run("git", "stash", "pop")
 		}
@@ -411,13 +407,44 @@ func checkoutRemoteWithLocalChanges(ref string, runner CommandRunner, cause erro
 	}
 
 	if didStash {
-		// --index to restore staged state too (usually harmless)
-		if err := runner.Run("git", "stash", "pop", "--index"); err != nil {
-			// Don't auto-drop stash on failure; Git keeps it if pop conflicts.
-			return fmt.Errorf("checked out %s but failed to reapply stash (possible conflicts): %v", remote, err)
+		stashRef := "stash@{0}"
+
+		out, err := runner.Capture("git", "stash", "show", "--name-only", "--include-untracked", stashRef)
+		if err != nil {
+			return fmt.Errorf("checked out %s but failed to list stashed files: %v\nOutput: %s", remote, err, out)
+		}
+
+		files := splitNonEmptyLines(out)
+
+		for _, f := range files {
+			if err := runner.Run("git", "checkout", stashRef, "--", f); err == nil {
+				continue
+			}
+			if err := runner.Run("git", "checkout", stashRef+"^3", "--", f); err != nil {
+				return fmt.Errorf("checked out %s but failed to restore %s from %s or %s^3: %v", remote, f, stashRef, stashRef, err)
+			}
+		}
+
+		_ = runner.Run("git", "reset")
+
+		if err := runner.Run("git", "stash", "drop", stashRef); err != nil {
+			return fmt.Errorf("checked out %s but failed to drop %s: %v", remote, stashRef, err)
 		}
 	}
+
 	return nil
+}
+
+func splitNonEmptyLines(s string) []string {
+	var res []string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		res = append(res, line)
+	}
+	return res
 }
 
 func stashIfDirty(runner CommandRunner, msg string) (bool, error) {
