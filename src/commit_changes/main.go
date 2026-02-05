@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -306,33 +307,56 @@ func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) e
 			fmt.Sprintf("+refs/heads/%[1]s:refs/remotes/origin/%[1]s", ref))
 	}
 
-	// In rare cases (when using overrides) this branch name might already exist, so let's try to base on that
+	// helper to set upstream quietly
+	setUpstream := func(ref string) {
+		_ = runner.Run("git", "branch", "--set-upstream-to=origin/"+ref, branchName)
+	}
+
+	// 1) If remote branch for branchName exists (override branch case) -> MUST base on it.
 	if hasRemote(runner, branchName) {
 		fetch(branchName)
-		if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+branchName); err == nil {
-			_ = runner.Run("git", "branch", "--set-upstream-to=origin/"+branchName, branchName)
+
+		remote := "origin/" + branchName
+
+		// Try normal checkout first
+		if err := runner.Run("git", "checkout", "-B", branchName, remote); err == nil {
+			setUpstream(branchName)
+			return nil
+		} else {
+			// If checkout failed, try to resolve local changes; if repo is clean -> return original error
+			if err2 := checkoutRemoteWithLocalChanges(branchName, runner, err); err2 != nil {
+				return err2
+			}
+			setUpstream(branchName)
 			return nil
 		}
 	}
 
-	// Updating an existing PR head? Recreate branch from origin/headRef.
+	// 2) Updating an existing PR head? Recreate branch from origin/headRef.
 	if headRef != "" && branchName == headRef {
 		fetch(headRef)
-		if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+headRef); err == nil {
-			_ = runner.Run("git", "branch", "--set-upstream-to=origin/"+headRef, branchName)
-			return nil
-		}
 
-		// Fallback to local ref if remote-tracking ref is absent.
+		remote := "origin/" + headRef
+
+		if err := runner.Run("git", "checkout", "-B", branchName, remote); err == nil {
+			setUpstream(headRef)
+			return nil
+		} else {
+			// resolve local changes; if repo clean -> return original error
+			if err2 := checkoutRemoteWithLocalChanges(headRef, runner, err); err2 == nil {
+				setUpstream(headRef)
+				return nil
+			}
+			// If we couldn't resolve via stash/force, continue with old fallbacks
+		}
+		// Fallbacks...
 		if err := runner.Run("git", "checkout", "-B", branchName, headRef); err == nil {
 			return nil
 		}
-
-		// Last resort: try a plain checkout (branch must already exist locally).
 		return runner.Run("git", "checkout", branchName)
 	}
 
-	// Creating/resetting a temp branch based on the base ref.
+	// 3) Otherwise create/reset a temp branch based on the base ref.
 	fetch(baseRef)
 	if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+baseRef); err == nil {
 		_ = runner.Run("git", "branch", "--unset-upstream")
@@ -342,6 +366,108 @@ func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) e
 		return nil
 	}
 	return runner.Run("git", "checkout", branchName)
+}
+
+// checkoutRemoteWithLocalChanges tries to switch to origin/<ref> even when local changes block checkout.
+// Strategy:
+// - If local working tree already matches origin/<ref>, force-checkout is safe.
+// - Otherwise: stash -> checkout -> stash pop (and error if pop fails).
+func checkoutRemoteWithLocalChanges(ref string, runner CommandRunner, cause error) error {
+	remote := "origin/" + ref
+
+	status, stErr := runner.Capture("git", "status", "--porcelain")
+	if stErr != nil {
+		return fmt.Errorf("failed to check status: %v\nOutput: %s", stErr, status)
+	}
+	if strings.TrimSpace(status) == "" {
+		// repo clean -> checkout failed for some other reason
+		return cause
+	}
+
+	hasUntracked := strings.Contains(status, "?? ")
+
+	// If working tree already equals remote, we can safely drop local changes.
+	same, err := worktreeEqualsRef(remote, runner)
+	if err == nil && same && !hasUntracked {
+		// -f discards local changes (safe because identical)
+		if err := runner.Run("git", "checkout", "-f", "-B", ref, remote); err != nil {
+			return fmt.Errorf("failed to force-checkout %s: %v", remote, err)
+		}
+		return nil
+	}
+
+	// Otherwise stash local changes and retry.
+	didStash, err := stashIfDirty(runner, "lokalise-temp")
+	if err != nil {
+		return err
+	}
+
+	if err := runner.Run("git", "checkout", "-B", ref, remote); err != nil {
+		// attempt to restore stash back (best effort) before returning error
+		if didStash {
+			_ = runner.Run("git", "stash", "pop")
+		}
+		return fmt.Errorf("failed to checkout %s after stashing: %v", remote, err)
+	}
+
+	if didStash {
+		// --index to restore staged state too (usually harmless)
+		if err := runner.Run("git", "stash", "pop", "--index"); err != nil {
+			// Don't auto-drop stash on failure; Git keeps it if pop conflicts.
+			return fmt.Errorf("checked out %s but failed to reapply stash (possible conflicts): %v", remote, err)
+		}
+	}
+	return nil
+}
+
+func stashIfDirty(runner CommandRunner, msg string) (bool, error) {
+	out, err := runner.Capture("git", "status", "--porcelain")
+	if err != nil {
+		return false, fmt.Errorf("failed to check git status: %v\nOutput: %s", err, out)
+	}
+	if strings.TrimSpace(out) == "" {
+		return false, nil
+	}
+
+	// -u to include untracked files just in case lokalise writes new files
+	if err := runner.Run("git", "stash", "push", "-u", "-m", msg); err != nil {
+		return false, fmt.Errorf("failed to stash changes: %v", err)
+	}
+	return true, nil
+}
+
+// worktreeEqualsRef checks if BOTH working tree and index match <ref>.
+// If yes -> safe to force-checkout.
+// It uses `git diff --quiet` exit codes.
+func worktreeEqualsRef(ref string, runner CommandRunner) (bool, error) {
+	// working tree vs ref
+	_, err1 := runner.Capture("git", "diff", "--quiet", ref)
+	if err1 != nil && !isExitCode(err1, 1) {
+		return false, fmt.Errorf("git diff failed: %v", err1)
+	}
+	if isExitCode(err1, 1) {
+		return false, nil // differences exist
+	}
+
+	// index vs ref
+	_, err2 := runner.Capture("git", "diff", "--quiet", "--cached", ref)
+	if err2 != nil && !isExitCode(err2, 1) {
+		return false, fmt.Errorf("git diff --cached failed: %v", err2)
+	}
+	if isExitCode(err2, 1) {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// isExitCode checks whether err is an ExitError with given code.
+func isExitCode(err error, code int) bool {
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		return false
+	}
+	return ee.ExitCode() == code
 }
 
 // buildGitAddArgs constructs git pathspecs for `git add` that:
@@ -399,7 +525,7 @@ func commitAndPush(branchName string, runner CommandRunner, config *Config) erro
 	output, err := runner.Capture("git", commitArgs...)
 	if err == nil {
 		if config.ForcePush {
-			return runner.Run("git", "push", "--force", "origin", branchName)
+			return runner.Run("git", "push", "--force-with-lease", "origin", branchName)
 		}
 		return runner.Run("git", "push", "origin", branchName)
 	}
