@@ -183,12 +183,16 @@ module.exports = async ({ github, context }) => {
 
     // Labels after creation (API limitation: labels on issues endpoint).
     if (prLabels.length) {
-      await github.rest.issues.addLabels({
-        owner: repo.owner,
-        repo: repo.repo,
-        issue_number: newPr.number,
-        labels: prLabels,
-      });
+      try {
+        await github.rest.issues.addLabels({
+          owner: repo.owner,
+          repo: repo.repo,
+          issue_number: newPr.number,
+          labels: prLabels,
+        });
+      } catch (err) {
+        console.warn(`Cannot add labels: ${err.message}`);
+      }
     }
 
     // Request reviewers (tolerate failures).
