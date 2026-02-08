@@ -31,6 +31,11 @@ func (m *MockCommandRunner) Capture(name string, args ...string) (string, error)
 	return "", nil
 }
 
+type mockExitError struct{ code int }
+
+func (e *mockExitError) Error() string { return fmt.Sprintf("exit status %d", e.code) }
+func (e *mockExitError) ExitCode() int { return e.code }
+
 func TestEnvVarsToConfig(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -439,16 +444,14 @@ func TestCheckoutBranch(t *testing.T) {
 			return "", fmt.Errorf("unexpected binary: %s", name)
 		}
 		if len(args) >= 1 && args[0] == "ls-remote" {
-			// hasRemote() must return false in these tests
-			return "", fmt.Errorf("not found")
+			// emulate: no remote branch found -> exit code 2
+			return "", &mockExitError{code: 2}
 		}
-		// allow fetch noise
 		if len(args) >= 1 && args[0] == "fetch" {
 			return "", nil
 		}
 		return "", nil
 	}
-
 	t.Run("creates from origin base", func(t *testing.T) {
 		runner := &MockCommandRunner{
 			CaptureFunc: captureNoRemote,
@@ -1259,7 +1262,7 @@ func TestCheckoutBranch_FetchesCorrectRefspec(t *testing.T) {
 
 			// make hasRemote() return false for branchName
 			if len(args) >= 1 && args[0] == "ls-remote" {
-				return "", fmt.Errorf("not found")
+				return "", &mockExitError{code: 2}
 			}
 
 			if len(args) >= 1 && args[0] == "fetch" {
@@ -1374,7 +1377,7 @@ func TestCheckoutBranch_OverrideMissing_FallbackToOriginBase_UnsetUpstream(t *te
 
 			// hasRemote() -> ls-remote ... branch
 			if len(args) >= 1 && args[0] == "ls-remote" {
-				return "", fmt.Errorf("not found")
+				return "", &mockExitError{code: 2}
 			}
 
 			// fetch --no-tags --prune origin <refspec>  (== 5 args)
@@ -1423,7 +1426,7 @@ func TestCheckoutBranch_HeadRefMatches_UsesRemoteHeadAndSetsUpstream(t *testing.
 
 			// make hasRemote(branchName) == false so code goes to headRef branch
 			if len(args) >= 1 && args[0] == "ls-remote" {
-				return "", fmt.Errorf("not found")
+				return "", &mockExitError{code: 2}
 			}
 
 			// allow fetch noise
@@ -1484,7 +1487,7 @@ func TestCommitAndPushChanges_ForcePush_UsesForceWithLease(t *testing.T) {
 				t.Fatalf("unexpected binary: %s", name)
 			}
 			if len(args) == 5 && args[0] == "ls-remote" {
-				return "", fmt.Errorf("not found")
+				return "", &mockExitError{code: 2}
 			}
 			if len(args) == 5 && args[0] == "fetch" {
 				return "", nil
@@ -1561,7 +1564,7 @@ func TestCommitAndPushChanges_HappyPath_NoForce_NoOverride(t *testing.T) {
 
 			// hasRemote(branchName) -> false (no override remote branch)
 			if len(args) == 5 && args[0] == "ls-remote" && args[1] == "--exit-code" && args[2] == "--heads" && args[3] == "origin" {
-				return "", fmt.Errorf("not found")
+				return "", &mockExitError{code: 2}
 			}
 
 			// fetch main
@@ -1710,7 +1713,7 @@ func TestCommitAndPushChanges_NoChanges_ReturnsErrNoChanges_NoPush(t *testing.T)
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
 			if len(args) == 5 && args[0] == "ls-remote" {
-				return "", fmt.Errorf("not found")
+				return "", &mockExitError{code: 2}
 			}
 			if len(args) == 5 && args[0] == "fetch" {
 				return "", nil
@@ -1810,7 +1813,7 @@ func TestCommitAndPushChanges_SyntheticBase_UsesRemoteHEAD(t *testing.T) {
 				args[1] == "--exit-code" &&
 				args[2] == "--heads" &&
 				args[3] == "origin" {
-				return "", fmt.Errorf("not found")
+				return "", &mockExitError{code: 2}
 			}
 
 			// fetch capture

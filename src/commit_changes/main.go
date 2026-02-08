@@ -572,13 +572,19 @@ func worktreeEqualsRef(ref string, runner CommandRunner) (bool, error) {
 	return true, nil
 }
 
-// isExitCode checks whether err is an ExitError with given code.
+// isExitCode checks whether err has the given exit code.
+// Supports both *exec.ExitError and any custom error type implementing ExitCode() int.
 func isExitCode(err error, code int) bool {
-	var ee *exec.ExitError
-	if !errors.As(err, &ee) {
-		return false
+	type exitCoder interface {
+		ExitCode() int
 	}
-	return ee.ExitCode() == code
+
+	var ec exitCoder
+	if errors.As(err, &ec) {
+		return ec.ExitCode() == code
+	}
+
+	return false
 }
 
 // buildGitAddArgs constructs git pathspecs for `git add` that:
