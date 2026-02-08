@@ -1832,6 +1832,18 @@ func TestCommitAndPushChanges_SyntheticBase_UsesRemoteHEAD(t *testing.T) {
 				return "ok", nil
 			}
 
+			// validate generated branch name (generateBranchName -> check-ref-format)
+			if len(args) == 3 &&
+				args[0] == "check-ref-format" &&
+				args[1] == "--branch" {
+
+				if !strings.HasPrefix(args[2], "lok_master_123456_") {
+					t.Fatalf("unexpected branch name for validation: %q", args[2])
+				}
+
+				return "", nil
+			}
+
 			t.Fatalf("unexpected capture: git %v", args)
 			return "", nil
 		},
