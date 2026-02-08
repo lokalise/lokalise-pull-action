@@ -26,8 +26,7 @@ type CommandRunner interface {
 // DefaultCommandRunner executes commands via os/exec and returns non-empty stdout lines.
 type DefaultCommandRunner struct{}
 
-// Run executes the command and returns trimmed, non-empty lines of combined stdout/stderr.
-// Rationale: git may emit warnings; we still want the file list from stdout.
+// Run executes the command and returns trimmed, non-empty lines of stdout.
 // If exit code != 0 we bubble up the error with captured output for debugging CI logs.
 func (d DefaultCommandRunner) Run(name string, args ...string) ([]string, error) {
 	cmd := exec.Command(name, args...)
@@ -161,17 +160,21 @@ func gitDiff(config *Config, runner CommandRunner) ([]string, error) {
 	// Staged changes (index vs HEAD).
 	argsCached := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only", "--cached")
 	if hasPathspec(argsCached) {
-		if out, err := runner.Run("git", argsCached...); err == nil {
-			all = append(all, out...)
+		out, err := runner.Run("git", argsCached...)
+		if err != nil {
+			return nil, fmt.Errorf("git diff --cached (no HEAD) failed: %w", err)
 		}
+		all = append(all, out...)
 	}
 
 	// Unstaged changes (worktree vs index).
 	argsWT := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only")
 	if hasPathspec(argsWT) {
-		if out, err := runner.Run("git", argsWT...); err == nil {
-			all = append(all, out...)
+		out, err := runner.Run("git", argsWT...)
+		if err != nil {
+			return nil, fmt.Errorf("git diff (worktree) failed: %w", err)
 		}
+		all = append(all, out...)
 	}
 
 	// Deduplicate and normalize before returning.

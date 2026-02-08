@@ -515,6 +515,8 @@ func TestDetectChangedFiles_AllChangesExcluded_Flat_PerExt(t *testing.T) {
 
 	mockRunner := MockCommandRunner{
 		Output: map[string][]string{
+			makeKey([]string{"rev-parse", "--verify", "HEAD"}): {"ok"},
+
 			makeKey(diffArgs): {
 				filepath.ToSlash("ios/Loc/en.strings"),
 				filepath.ToSlash("ios/Loc/en.stringsdict"),
