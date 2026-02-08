@@ -114,8 +114,15 @@ func commitAndPushChanges(runner CommandRunner) (string, error) {
 	}
 	fmt.Printf("Using base branch: %s\n", realBase)
 
+	// Let's use realBase for branch name generation
+	// We still need other config but it's probably not
+	// the best idea to rewrite BaseRef for the original
+	// config (just to avoid potential side-effects)
+	cfgForName := *config
+	cfgForName.BaseRef = realBase
+
 	// Compute a safe branch name. Either static (override) or temp with prefix/ref/sha/timestamp.
-	branchName, err := generateBranchName(config)
+	branchName, err := generateBranchName(&cfgForName, runner)
 	if err != nil {
 		return "", err
 	}
@@ -271,14 +278,23 @@ func setGitUser(config *Config, runner CommandRunner) error {
 	return nil
 }
 
-// generateBranchName returns either the override branch (sanitized) or a temp branch
+// generateBranchName returns either the override branch (validated) or a temp branch
 // with pattern "<prefix>_<base>_<sha6>_<unixTs>".
 // Notes:
-// - We keep "/" allowed to support hierarchical branch names (e.g., lok/feature/...).
-// - Length is capped to 255 to satisfy git ref constraints.
-func generateBranchName(config *Config) (string, error) {
+//   - For override branch names, we DO NOT sanitize (to avoid breaking valid refs like "feature/foo+bar").
+//     Instead we validate using `git check-ref-format --branch`.
+//   - For auto-generated names, we sanitize to keep them safe and predictable.
+//   - Length is capped to 255 to satisfy git ref constraints.
+func generateBranchName(config *Config, runner CommandRunner) (string, error) {
 	if config.OverrideBranchName != "" {
-		return sanitizeString(config.OverrideBranchName, 255), nil
+		override := strings.TrimSpace(config.OverrideBranchName)
+		if override == "" {
+			return "", fmt.Errorf("override branch name is empty after trimming")
+		}
+		if err := validateBranchName(override, runner); err != nil {
+			return "", err
+		}
+		return override, nil
 	}
 
 	timestamp := time.Now().Unix()
@@ -290,31 +306,82 @@ func generateBranchName(config *Config) (string, error) {
 
 	githubRefName := config.BaseRef
 	safeRefName := sanitizeString(githubRefName, 50)
+	if safeRefName == "" {
+		// if BaseRef is synthetic/empty, still generate a usable branch name
+		safeRefName = "base"
+	}
 
-	tempBranchPrefix := config.TempBranchPrefix
+	tempBranchPrefix := strings.TrimSpace(config.TempBranchPrefix)
+	if tempBranchPrefix == "" {
+		tempBranchPrefix = "lok"
+	}
+
 	branchName := fmt.Sprintf("%s_%s_%s_%d", tempBranchPrefix, safeRefName, shortSHA, timestamp)
+	branchName = sanitizeString(branchName, 255)
 
-	return sanitizeString(branchName, 255), nil
+	if branchName == "" {
+		return "", fmt.Errorf("generated branch name is empty after sanitization")
+	}
+
+	// Optional: validate generated name too (belt & suspenders)
+	if err := validateBranchName(branchName, runner); err != nil {
+		return "", err
+	}
+
+	return branchName, nil
+}
+
+func validateBranchName(name string, runner CommandRunner) error {
+	out, err := runner.Capture("git", "check-ref-format", "--branch", name)
+	if err != nil {
+		// `check-ref-format` usually prints why it failed; keep it for debugging
+		out = strings.TrimSpace(out)
+		if out != "" {
+			return fmt.Errorf("invalid branch name %q: %v (git output: %s)", name, err, out)
+		}
+		return fmt.Errorf("invalid branch name %q: %v", name, err)
+	}
+	return nil
 }
 
 // checkoutBranch bases the working branch off either the PR head (when updating an existing PR)
 // or the base branch. We fetch the exact remote ref to work with shallow clones reliably.
 func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) error {
-	// Helper: fetch one remote branch ref without tags and prune stale ones.
-	fetch := func(ref string) {
+	// Fetch one remote branch ref without tags and prune stale ones.
+	// Returns detailed error if fetch fails.
+	fetch := func(ref string) error {
 		// "+A:B" syntax forces update of the local remote-tracking ref.
-		_, _ = runner.Capture("git", "fetch", "--no-tags", "--prune", "origin",
-			fmt.Sprintf("+refs/heads/%[1]s:refs/remotes/origin/%[1]s", ref))
+		spec := fmt.Sprintf("+refs/heads/%[1]s:refs/remotes/origin/%[1]s", ref)
+		out, err := runner.Capture("git", "fetch", "--no-tags", "--prune", "origin", spec)
+		if err != nil {
+			return fmt.Errorf("git fetch failed for %q (spec=%q): %v\nOutput: %s", ref, spec, err, strings.TrimSpace(out))
+		}
+		return nil
 	}
 
-	// helper to set upstream quietly
+	// Best-effort upstream set, but log failures (don’t hard-fail).
 	setUpstream := func(ref string) {
-		_ = runner.Run("git", "branch", "--set-upstream-to=origin/"+ref, branchName)
+		if err := runner.Run("git", "branch", "--set-upstream-to=origin/"+ref, branchName); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to set upstream for %q to origin/%s: %v\n", branchName, ref, err)
+		}
+	}
+
+	unsetUpstream := func() {
+		if err := runner.Run("git", "branch", "--unset-upstream"); err != nil {
+			// not fatal, but useful in logs
+			fmt.Fprintf(os.Stderr, "Warning: failed to unset upstream for %q: %v\n", branchName, err)
+		}
 	}
 
 	// 1) If remote branch for branchName exists (override branch case) -> MUST base on it.
-	if hasRemote(runner, branchName) {
-		fetch(branchName)
+	remoteExists, err := hasRemote(runner, branchName)
+	if err != nil {
+		return err
+	}
+	if remoteExists {
+		if err := fetch(branchName); err != nil {
+			return err
+		}
 
 		remote := "origin/" + branchName
 
@@ -334,7 +401,9 @@ func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) e
 
 	// 2) Updating an existing PR head? Recreate branch from origin/headRef.
 	if headRef != "" && branchName == headRef {
-		fetch(headRef)
+		if err := fetch(headRef); err != nil {
+			return err
+		}
 
 		remote := "origin/" + headRef
 
@@ -357,11 +426,22 @@ func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) e
 	}
 
 	// 3) Otherwise create/reset a temp branch based on the base ref.
-	fetch(baseRef)
-	if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+baseRef); err == nil {
-		_ = runner.Run("git", "branch", "--unset-upstream")
-		return nil
+	// Fetch base; if fetch fails, return a detailed error.
+	if err := fetch(baseRef); err != nil {
+		return err
 	}
+	if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+baseRef); err == nil {
+		unsetUpstream()
+		return nil
+	} else {
+		// Helpful debug info: show whether origin/<baseRef> exists
+		refCheckOut, refCheckErr := runner.Capture("git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+baseRef)
+		if refCheckErr != nil {
+			_ = refCheckOut // ignore, but keep structure for clarity
+			fmt.Fprintf(os.Stderr, "Warning: origin/%s not found locally after fetch (show-ref failed): %v\n", baseRef, refCheckErr)
+		}
+	}
+
 	if err := runner.Run("git", "checkout", "-B", branchName, baseRef); err == nil {
 		return nil
 	}
@@ -715,7 +795,17 @@ func joinSlash(elem ...string) string {
 	return filepath.ToSlash(filepath.Join(elem...))
 }
 
-func hasRemote(runner CommandRunner, ref string) bool {
-	_, err := runner.Capture("git", "ls-remote", "--exit-code", "--heads", "origin", ref)
-	return err == nil
+func hasRemote(runner CommandRunner, ref string) (bool, error) {
+	out, err := runner.Capture("git", "ls-remote", "--exit-code", "--heads", "origin", ref)
+	if err == nil {
+		return true, nil
+	}
+
+	// `ls-remote --exit-code --heads origin <ref>` returns exit code 2 when no matches found.
+	// Other exit codes usually mean auth/network/remote problems.
+	if isExitCode(err, 2) {
+		return false, nil
+	}
+
+	return false, fmt.Errorf("git ls-remote failed for ref %q: %v\nOutput: %s", ref, err, strings.TrimSpace(out))
 }
