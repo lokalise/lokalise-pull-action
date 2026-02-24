@@ -1,6 +1,7 @@
 # GitHub action to pull translation files from Lokalise
 
 ![GitHub Release](https://img.shields.io/github/v/release/lokalise/lokalise-pull-action)
+![CI](https://github.com/lokalise/lokalise-pull-action/actions/workflows/ci.yml/badge.svg)
 
 GitHub action to download translation files from [Lokalise TMS](https://lokalise.com/) to your GitHub repository in the form of a pull request.
 
