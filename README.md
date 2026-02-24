@@ -245,11 +245,11 @@ with open(file_path, "w", encoding="utf-8") as f:
 
 ### Platform support
 
-- `os_platform` (*default: `"linux_amd64"`*) — Target platform for the precompiled binaries used by this action. These binaries handle tasks like downloading and processing translations. Typically, you don't need to change this, as the default works for common environments. Override if running on a macOS runner or a different architecture. Supported values:
-  + `linux_amd64`
-  + `linux_arm64`
-  + `mac_amd64`
-  + `mac_arm64`
+- `os_platform` (*default: empty — auto-detected*) — Platform for the precompiled binaries used by this action. If not set, the action automatically determines the correct platform based on the GitHub runner. You only need to set this manually when using unusual or self-hosted runners. In all other cases, auto-detection should work. Supported values:
+  - `linux_amd64`
+  - `linux_arm64`
+  - `mac_amd64`
+  - `mac_arm64`
 
 ### Configuring GitHub permissions
 
