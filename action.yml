@@ -198,9 +198,23 @@ runs:
       run: |
         set -euo pipefail
 
-        OS_PLATFORM="$(printf '%s' "${OS_PLATFORM:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/[[:space:]]//g' | tr '[:upper:]' '[:lower:]')"
+        OS_PLATFORM="$(printf '%s' "${OS_PLATFORM:-}" \
+          | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/[[:space:]]//g' \
+          | tr '[:upper:]' '[:lower:]')"
+
+        validate_platform() {
+          case "$1" in
+            linux_amd64|linux_arm64|mac_amd64|mac_arm64) return 0 ;;
+            *) return 1 ;;
+          esac
+        }
 
         if [[ -n "$OS_PLATFORM" ]]; then
+          if ! validate_platform "$OS_PLATFORM"; then
+            echo "Error: unsupported 'os_platform' input: '$OS_PLATFORM'"
+            echo "Supported values: linux_amd64, linux_arm64, mac_amd64, mac_arm64"
+            exit 1
+          fi
           echo "Using user-provided platform: $OS_PLATFORM"
           PLATFORM="$OS_PLATFORM"
         else
