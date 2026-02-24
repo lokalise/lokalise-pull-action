@@ -218,9 +218,9 @@ runs:
           echo "Using user-provided platform: $OS_PLATFORM"
           PLATFORM="$OS_PLATFORM"
         else
-          echo "Auto-detecting platform from runner: OS=$RUNNER_OS ARCH=$RUNNER_ARCH"
+          echo "Auto-detecting platform from runner: OS=${RUNNER_OS:-} ARCH=${RUNNER_ARCH:-}"
 
-          case "${RUNNER_OS}/${RUNNER_ARCH}" in
+          case "${RUNNER_OS:-}/${RUNNER_ARCH:-}" in
             Linux/X64)   PLATFORM="linux_amd64" ;;
             Linux/ARM64) PLATFORM="linux_arm64" ;;
             macOS/X64)   PLATFORM="mac_amd64" ;;
