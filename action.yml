@@ -106,9 +106,9 @@ inputs:
     required: false
     default: '120'
   os_platform:
-    description: 'Target platform for the binary (linux_amd64, linux_arm64, mac_amd64, mac_arm64)'
+    description: 'Target platform for the binary (linux_amd64, linux_arm64, mac_amd64, mac_arm64). If not set, the action will auto-detect based on the runner.'
     required: false
-    default: 'linux_amd64'
+    default: ''
   git_user_name:
     description: 'Git username to set in git config. If not provided, defaults to GitHub actor.'
     required: false
@@ -190,6 +190,36 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Detect platform
+      id: detect-platform
+      shell: bash
+      env:
+        OS_PLATFORM: "${{ inputs.os_platform }}"
+      run: |
+        set -euo pipefail
+
+        if [[ -n "$OS_PLATFORM" ]]; then
+          echo "Using user-provided platform: $OS_PLATFORM"
+          PLATFORM="$OS_PLATFORM"
+        else
+          echo "Auto-detecting platform from runner: OS=$RUNNER_OS ARCH=$RUNNER_ARCH"
+
+          case "${RUNNER_OS}/${RUNNER_ARCH}" in
+            Linux/X64)   PLATFORM="linux_amd64" ;;
+            Linux/ARM64) PLATFORM="linux_arm64" ;;
+            macOS/X64)   PLATFORM="mac_amd64" ;;
+            macOS/ARM64) PLATFORM="mac_arm64" ;;
+            *)
+              echo "Error: unsupported runner platform: ${RUNNER_OS}/${RUNNER_ARCH}"
+              echo "Please set 'os_platform' input explicitly to one of: linux_amd64, linux_arm64, mac_amd64, mac_arm64"
+              exit 1
+              ;;
+          esac
+        fi
+
+        echo "Detected platform: $PLATFORM"
+        echo "platform=$PLATFORM" >> "$GITHUB_OUTPUT"
+
     - name: Pull translation files from Lokalise
       id: pull-files
       shell: bash
@@ -209,7 +239,7 @@ runs:
         DOWNLOAD_TIMEOUT: "${{ inputs.download_timeout }}"
         SKIP_INCLUDE_TAGS: "${{ inputs.skip_include_tags }}"
         SKIP_ORIGINAL_FILENAMES: "${{ inputs.skip_original_filenames }}"
-        PLATFORM: "${{ inputs.os_platform }}"
+        PLATFORM: "${{ steps.detect-platform.outputs.platform }}"
         ASYNC_MODE: "${{ inputs.async_mode }}"
         ASYNC_POLL_INITIAL_WAIT: "${{ inputs.async_poll_initial_wait }}"
         ASYNC_POLL_MAX_WAIT: "${{ inputs.async_poll_max_wait }}"
@@ -250,7 +280,7 @@ runs:
         TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
         BASE_LANG: "${{ inputs.base_lang }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
-        PLATFORM: "${{ inputs.os_platform }}"
+        PLATFORM: "${{ steps.detect-platform.outputs.platform }}"
         STRICT: "${{ inputs.post_process_strict }}"
         POST_CMD: "${{ inputs.post_process_command }}"
       shell: bash
@@ -285,7 +315,7 @@ runs:
         ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
         FLAT_NAMING: "${{ inputs.flat_naming }}"
         TEMP_BRANCH_PREFIX: "${{ inputs.temp_branch_prefix }}"
-        PLATFORM: "${{ inputs.os_platform }}"
+        PLATFORM: "${{ steps.detect-platform.outputs.platform }}"
         GIT_USER_NAME: "${{ inputs.git_user_name }}"
         GIT_USER_EMAIL: "${{ inputs.git_user_email }}"
         GIT_COMMIT_MESSAGE: "${{ inputs.git_commit_message }}"
