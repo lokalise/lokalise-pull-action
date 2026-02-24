@@ -165,7 +165,7 @@ func validateDownloadConfig(config DownloadConfig) {
 	// include_tags requires a non-empty ref. Users can opt-out via SKIP_INCLUDE_TAGS=true.
 	if !config.SkipIncludeTags && config.GitHubRefName == "" {
 		returnWithError(
-			"GITHUB_REF_NAME is required when include_tags are enabled. " +
+			"GITHUB_REF_NAME or GITHUB_HEAD_REF is required when include_tags are enabled. " +
 				"Set SKIP_INCLUDE_TAGS=true to disable tag filtering.",
 		)
 	}

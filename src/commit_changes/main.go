@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -113,8 +114,15 @@ func commitAndPushChanges(runner CommandRunner) (string, error) {
 	}
 	fmt.Printf("Using base branch: %s\n", realBase)
 
+	// Let's use realBase for branch name generation
+	// We still need other config but it's probably not
+	// the best idea to rewrite BaseRef for the original
+	// config (just to avoid potential side-effects)
+	cfgForName := *config
+	cfgForName.BaseRef = realBase
+
 	// Compute a safe branch name. Either static (override) or temp with prefix/ref/sha/timestamp.
-	branchName, err := generateBranchName(config)
+	branchName, err := generateBranchName(&cfgForName, runner)
 	if err != nil {
 		return "", err
 	}
@@ -270,14 +278,23 @@ func setGitUser(config *Config, runner CommandRunner) error {
 	return nil
 }
 
-// generateBranchName returns either the override branch (sanitized) or a temp branch
+// generateBranchName returns either the override branch (validated) or a temp branch
 // with pattern "<prefix>_<base>_<sha6>_<unixTs>".
 // Notes:
-// - We keep "/" allowed to support hierarchical branch names (e.g., lok/feature/...).
-// - Length is capped to 255 to satisfy git ref constraints.
-func generateBranchName(config *Config) (string, error) {
+//   - For override branch names, we DO NOT sanitize (to avoid breaking valid refs like "feature/foo+bar").
+//     Instead we validate using `git check-ref-format --branch`.
+//   - For auto-generated names, we sanitize to keep them safe and predictable.
+//   - Length is capped to 255 to satisfy git ref constraints.
+func generateBranchName(config *Config, runner CommandRunner) (string, error) {
 	if config.OverrideBranchName != "" {
-		return sanitizeString(config.OverrideBranchName, 255), nil
+		override := strings.TrimSpace(config.OverrideBranchName)
+		if override == "" {
+			return "", fmt.Errorf("override branch name is empty after trimming")
+		}
+		if err := validateBranchName(override, runner); err != nil {
+			return "", err
+		}
+		return override, nil
 	}
 
 	timestamp := time.Now().Unix()
@@ -289,59 +306,284 @@ func generateBranchName(config *Config) (string, error) {
 
 	githubRefName := config.BaseRef
 	safeRefName := sanitizeString(githubRefName, 50)
+	if safeRefName == "" {
+		// if BaseRef is synthetic/empty, still generate a usable branch name
+		safeRefName = "base"
+	}
 
-	tempBranchPrefix := config.TempBranchPrefix
+	tempBranchPrefix := strings.TrimSpace(config.TempBranchPrefix)
+	if tempBranchPrefix == "" {
+		tempBranchPrefix = "lok"
+	}
+
 	branchName := fmt.Sprintf("%s_%s_%s_%d", tempBranchPrefix, safeRefName, shortSHA, timestamp)
+	branchName = sanitizeString(branchName, 255)
 
-	return sanitizeString(branchName, 255), nil
+	if branchName == "" {
+		return "", fmt.Errorf("generated branch name is empty after sanitization")
+	}
+
+	// Optional: validate generated name too (belt & suspenders)
+	if err := validateBranchName(branchName, runner); err != nil {
+		return "", err
+	}
+
+	return branchName, nil
+}
+
+func validateBranchName(name string, runner CommandRunner) error {
+	out, err := runner.Capture("git", "check-ref-format", "--branch", name)
+	if err != nil {
+		// `check-ref-format` usually prints why it failed; keep it for debugging
+		out = strings.TrimSpace(out)
+		if out != "" {
+			return fmt.Errorf("invalid branch name %q: %v (git output: %s)", name, err, out)
+		}
+		return fmt.Errorf("invalid branch name %q: %v", name, err)
+	}
+	return nil
 }
 
 // checkoutBranch bases the working branch off either the PR head (when updating an existing PR)
 // or the base branch. We fetch the exact remote ref to work with shallow clones reliably.
 func checkoutBranch(branchName, baseRef, headRef string, runner CommandRunner) error {
-	// Helper: fetch one remote branch ref without tags and prune stale ones.
-	fetch := func(ref string) {
+	// Fetch one remote branch ref without tags and prune stale ones.
+	// Returns detailed error if fetch fails.
+	fetch := func(ref string) error {
 		// "+A:B" syntax forces update of the local remote-tracking ref.
-		_, _ = runner.Capture("git", "fetch", "--no-tags", "--prune", "origin",
-			fmt.Sprintf("+refs/heads/%[1]s:refs/remotes/origin/%[1]s", ref))
+		spec := fmt.Sprintf("+refs/heads/%[1]s:refs/remotes/origin/%[1]s", ref)
+		out, err := runner.Capture("git", "fetch", "--no-tags", "--prune", "origin", spec)
+		if err != nil {
+			return fmt.Errorf("git fetch failed for %q (spec=%q): %v\nOutput: %s", ref, spec, err, strings.TrimSpace(out))
+		}
+		return nil
 	}
 
-	// In rare cases (when using overrides) this branch name might already exist, so let's try to base on that
-	if hasRemote(runner, branchName) {
-		fetch(branchName)
-		if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+branchName); err == nil {
-			_ = runner.Run("git", "branch", "--set-upstream-to=origin/"+branchName, branchName)
+	// Best-effort upstream set, but log failures (don’t hard-fail).
+	setUpstream := func(ref string) {
+		if err := runner.Run("git", "branch", "--set-upstream-to=origin/"+ref, branchName); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to set upstream for %q to origin/%s: %v\n", branchName, ref, err)
+		}
+	}
+
+	unsetUpstream := func() {
+		if err := runner.Run("git", "branch", "--unset-upstream"); err != nil {
+			// not fatal, but useful in logs
+			fmt.Fprintf(os.Stderr, "Warning: failed to unset upstream for %q: %v\n", branchName, err)
+		}
+	}
+
+	// 1) If remote branch for branchName exists (override branch case) -> MUST base on it.
+	remoteExists, err := hasRemote(runner, branchName)
+	if err != nil {
+		return err
+	}
+	if remoteExists {
+		if err := fetch(branchName); err != nil {
+			return err
+		}
+
+		remote := "origin/" + branchName
+
+		// Try normal checkout first
+		if err := runner.Run("git", "checkout", "-B", branchName, remote); err == nil {
+			setUpstream(branchName)
+			return nil
+		} else {
+			// If checkout failed, try to resolve local changes; if repo is clean -> return original error
+			if err2 := checkoutRemoteWithLocalChanges(branchName, runner, err); err2 != nil {
+				return err2
+			}
+			setUpstream(branchName)
 			return nil
 		}
 	}
 
-	// Updating an existing PR head? Recreate branch from origin/headRef.
+	// 2) Updating an existing PR head? Recreate branch from origin/headRef.
 	if headRef != "" && branchName == headRef {
-		fetch(headRef)
-		if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+headRef); err == nil {
-			_ = runner.Run("git", "branch", "--set-upstream-to=origin/"+headRef, branchName)
-			return nil
+		if err := fetch(headRef); err != nil {
+			return err
 		}
 
-		// Fallback to local ref if remote-tracking ref is absent.
+		remote := "origin/" + headRef
+
+		if err := runner.Run("git", "checkout", "-B", branchName, remote); err == nil {
+			setUpstream(headRef)
+			return nil
+		} else {
+			// resolve local changes; if repo clean -> return original error
+			if err2 := checkoutRemoteWithLocalChanges(headRef, runner, err); err2 == nil {
+				setUpstream(headRef)
+				return nil
+			}
+			// If we couldn't resolve via stash/force, continue with old fallbacks
+		}
+		// Fallbacks...
 		if err := runner.Run("git", "checkout", "-B", branchName, headRef); err == nil {
 			return nil
 		}
-
-		// Last resort: try a plain checkout (branch must already exist locally).
 		return runner.Run("git", "checkout", branchName)
 	}
 
-	// Creating/resetting a temp branch based on the base ref.
-	fetch(baseRef)
-	if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+baseRef); err == nil {
-		_ = runner.Run("git", "branch", "--unset-upstream")
-		return nil
+	// 3) Otherwise create/reset a temp branch based on the base ref.
+	// Fetch base; if fetch fails, return a detailed error.
+	if err := fetch(baseRef); err != nil {
+		return err
 	}
+	if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+baseRef); err == nil {
+		unsetUpstream()
+		return nil
+	} else {
+		// Helpful debug info: show whether origin/<baseRef> exists
+		refCheckOut, refCheckErr := runner.Capture("git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+baseRef)
+		if refCheckErr != nil {
+			_ = refCheckOut // ignore, but keep structure for clarity
+			fmt.Fprintf(os.Stderr, "Warning: origin/%s not found locally after fetch (show-ref failed): %v\n", baseRef, refCheckErr)
+		}
+	}
+
 	if err := runner.Run("git", "checkout", "-B", branchName, baseRef); err == nil {
 		return nil
 	}
 	return runner.Run("git", "checkout", branchName)
+}
+
+// checkoutRemoteWithLocalChanges tries to switch to origin/<ref> even when local changes block checkout.
+// Strategy: If local working tree already matches origin/<ref>, force-checkout is safe.
+// Otherwise:
+//   stash -> checkout origin/<ref> -> restore stashed files by overwriting them
+//   (checkout stash@{0} -- <file>, fallback to stash@{0}^3 for untracked) -> reset -> drop stash.
+
+func checkoutRemoteWithLocalChanges(ref string, runner CommandRunner, cause error) error {
+	remote := "origin/" + ref
+
+	status, stErr := runner.Capture("git", "status", "--porcelain")
+	if stErr != nil {
+		return fmt.Errorf("failed to check status: %v\nOutput: %s", stErr, status)
+	}
+	if strings.TrimSpace(status) == "" {
+		return cause
+	}
+
+	hasUntracked := strings.Contains(status, "?? ")
+
+	same, err := worktreeEqualsRef(remote, runner)
+	if err == nil && same && !hasUntracked {
+		if err := runner.Run("git", "checkout", "-f", "-B", ref, remote); err != nil {
+			return fmt.Errorf("failed to force-checkout %s: %v", remote, err)
+		}
+		return nil
+	}
+
+	didStash, err := stashIfDirty(runner, "lokalise-temp")
+	if err != nil {
+		return err
+	}
+
+	if err := runner.Run("git", "checkout", "-B", ref, remote); err != nil {
+		// best effort
+		if didStash {
+			_ = runner.Run("git", "stash", "pop")
+		}
+		return fmt.Errorf("failed to checkout %s after stashing: %v", remote, err)
+	}
+
+	if didStash {
+		stashRef := "stash@{0}"
+
+		out, err := runner.Capture("git", "stash", "show", "--name-only", "--include-untracked", stashRef)
+		if err != nil {
+			return fmt.Errorf("checked out %s but failed to list stashed files: %v\nOutput: %s", remote, err, out)
+		}
+
+		files := splitNonEmptyLines(out)
+
+		for _, f := range files {
+			if err := runner.Run("git", "checkout", stashRef, "--", f); err == nil {
+				continue
+			}
+			if err := runner.Run("git", "checkout", stashRef+"^3", "--", f); err != nil {
+				return fmt.Errorf("checked out %s but failed to restore %s from %s or %s^3: %v", remote, f, stashRef, stashRef, err)
+			}
+		}
+
+		if err := runner.Run("git", "reset"); err != nil {
+			return fmt.Errorf("checked out %s but failed to reset index: %v", remote, err)
+		}
+
+		if err := runner.Run("git", "stash", "drop", stashRef); err != nil {
+			return fmt.Errorf("checked out %s but failed to drop %s: %v", remote, stashRef, err)
+		}
+	}
+
+	return nil
+}
+
+func splitNonEmptyLines(s string) []string {
+	var res []string
+	for line := range strings.SplitSeq(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		res = append(res, line)
+	}
+	return res
+}
+
+func stashIfDirty(runner CommandRunner, msg string) (bool, error) {
+	out, err := runner.Capture("git", "status", "--porcelain")
+	if err != nil {
+		return false, fmt.Errorf("failed to check git status: %v\nOutput: %s", err, out)
+	}
+	if strings.TrimSpace(out) == "" {
+		return false, nil
+	}
+
+	// -u to include untracked files just in case lokalise writes new files
+	if err := runner.Run("git", "stash", "push", "-u", "-m", msg); err != nil {
+		return false, fmt.Errorf("failed to stash changes: %v", err)
+	}
+	return true, nil
+}
+
+// worktreeEqualsRef checks if BOTH working tree and index match <ref>.
+// If yes -> safe to force-checkout.
+// It uses `git diff --quiet` exit codes.
+func worktreeEqualsRef(ref string, runner CommandRunner) (bool, error) {
+	// working tree vs ref
+	_, err1 := runner.Capture("git", "diff", "--quiet", ref)
+	if err1 != nil && !isExitCode(err1, 1) {
+		return false, fmt.Errorf("git diff failed: %v", err1)
+	}
+	if isExitCode(err1, 1) {
+		return false, nil // differences exist
+	}
+
+	// index vs ref
+	_, err2 := runner.Capture("git", "diff", "--quiet", "--cached", ref)
+	if err2 != nil && !isExitCode(err2, 1) {
+		return false, fmt.Errorf("git diff --cached failed: %v", err2)
+	}
+	if isExitCode(err2, 1) {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// isExitCode checks whether err has the given exit code.
+// Supports both *exec.ExitError and any custom error type implementing ExitCode() int.
+func isExitCode(err error, code int) bool {
+	type exitCoderError interface {
+		error
+		ExitCode() int
+	}
+
+	if ec, ok := errors.AsType[exitCoderError](err); ok {
+		return ec.ExitCode() == code
+	}
+	return false
 }
 
 // buildGitAddArgs constructs git pathspecs for `git add` that:
@@ -399,7 +641,7 @@ func commitAndPush(branchName string, runner CommandRunner, config *Config) erro
 	output, err := runner.Capture("git", commitArgs...)
 	if err == nil {
 		if config.ForcePush {
-			return runner.Run("git", "push", "--force", "origin", branchName)
+			return runner.Run("git", "push", "--force-with-lease", "origin", branchName)
 		}
 		return runner.Run("git", "push", "origin", branchName)
 	}
@@ -558,7 +800,17 @@ func joinSlash(elem ...string) string {
 	return filepath.ToSlash(filepath.Join(elem...))
 }
 
-func hasRemote(runner CommandRunner, ref string) bool {
-	_, err := runner.Capture("git", "ls-remote", "--exit-code", "--heads", "origin", ref)
-	return err == nil
+func hasRemote(runner CommandRunner, ref string) (bool, error) {
+	out, err := runner.Capture("git", "ls-remote", "--exit-code", "--heads", "origin", ref)
+	if err == nil {
+		return true, nil
+	}
+
+	// `ls-remote --exit-code --heads origin <ref>` returns exit code 2 when no matches found.
+	// Other exit codes usually mean auth/network/remote problems.
+	if isExitCode(err, 2) {
+		return false, nil
+	}
+
+	return false, fmt.Errorf("git ls-remote failed for ref %q: %v\nOutput: %s", ref, err, strings.TrimSpace(out))
 }

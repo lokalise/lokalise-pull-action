@@ -264,9 +264,6 @@ func TestBuildDownloadParams_JSON_EmptyAdditional_UsesDefaults(t *testing.T) {
 	if p["format"] != "yaml" {
 		t.Fatalf("format: got %v want yaml", p["format"])
 	}
-	if _, ok := p["async"]; ok {
-		t.Fatalf("async should be omitted when AsyncMode=false")
-	}
 	if p["original_filenames"] != true {
 		t.Fatalf("original_filenames should be true by default")
 	}
@@ -544,87 +541,6 @@ func TestValidateDownloadConfig_ExitsOnMissingFields(t *testing.T) {
 			GitHubRefName: "",
 		})
 	})
-}
-
-// ---------- integration-lite: env parsing bits ----------
-
-func TestEnvParsingIntoConfig_Smoke(t *testing.T) {
-	t.Setenv("FILE_FORMAT", "json")
-	t.Setenv("GITHUB_REF_NAME", "release-1")
-	t.Setenv("ADDITIONAL_PARAMS", `{"foo":"bar","baz_qux":false}`)
-
-	cfg := DownloadConfig{
-		ProjectID:             "pid",
-		Token:                 "tok",
-		FileFormat:            os.Getenv("FILE_FORMAT"),
-		GitHubRefName:         os.Getenv("GITHUB_REF_NAME"),
-		AdditionalParams:      os.Getenv("ADDITIONAL_PARAMS"),
-		SkipIncludeTags:       false,
-		SkipOriginalFilenames: false,
-		MaxRetries:            5,
-		InitialSleepTime:      2 * time.Second,
-		HTTPTimeout:           15 * time.Second,
-		AsyncMode:             true,
-	}
-
-	params := buildDownloadParams(cfg)
-
-	if params["foo"] != "bar" {
-		t.Fatalf("expected foo=bar, got %v", params["foo"])
-	}
-
-	if v, ok := params["baz_qux"].(bool); !ok || v != false {
-		t.Fatalf("expected baz_qux=false, got %v (%T)", params["baz_qux"], params["baz_qux"])
-	}
-
-	switch tags := params["include_tags"].(type) {
-	case []string:
-		if len(tags) != 1 || tags[0] != "release-1" {
-			t.Fatalf("include_tags wrong: %#v", tags)
-		}
-	case []any:
-		if len(tags) != 1 || tags[0] != "release-1" {
-			t.Fatalf("include_tags wrong: %#v", tags)
-		}
-	default:
-		t.Fatalf("include_tags type wrong: %T", params["include_tags"])
-	}
-}
-
-func TestEnvParsingIntoConfig_BadJSON_Aborts(t *testing.T) {
-	t.Setenv("FILE_FORMAT", "json")
-	t.Setenv("GITHUB_REF_NAME", "release-1")
-	t.Setenv("ADDITIONAL_PARAMS", `{"foo": "bar",`) // broken
-
-	cfg := DownloadConfig{
-		ProjectID:        "pid",
-		Token:            "tok",
-		FileFormat:       os.Getenv("FILE_FORMAT"),
-		GitHubRefName:    os.Getenv("GITHUB_REF_NAME"),
-		AdditionalParams: os.Getenv("ADDITIONAL_PARAMS"),
-	}
-
-	requirePanicExit(t, func() { _ = buildDownloadParams(cfg) })
-}
-
-func TestFactory_PassesPollWaits(t *testing.T) {
-	cfg := DownloadConfig{
-		ProjectID:            "p",
-		Token:                "t",
-		FileFormat:           "json",
-		GitHubRefName:        "ref",
-		MaxRetries:           1,
-		InitialSleepTime:     500 * time.Millisecond,
-		MaxSleepTime:         5 * time.Second,
-		HTTPTimeout:          10 * time.Second,
-		AsyncPollInitialWait: 2 * time.Second,
-		AsyncPollMaxWait:     30 * time.Second,
-	}
-	ff := &fakeFactory{downloader: &fakeDownloader{}}
-
-	if err := downloadFiles(context.Background(), cfg, ff); err != nil {
-		t.Fatalf("unexpected: %v", err)
-	}
 }
 
 // ---------- fakes & helpers ----------

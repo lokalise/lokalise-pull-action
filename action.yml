@@ -311,7 +311,7 @@ runs:
           exit 1
         }
 
-        echo "Changes have been committed!"
+        echo "Commit changes script has been executed."
 
     - name: Create or Update Pull Request
       if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'

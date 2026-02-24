@@ -26,25 +26,40 @@ type CommandRunner interface {
 // DefaultCommandRunner executes commands via os/exec and returns non-empty stdout lines.
 type DefaultCommandRunner struct{}
 
-// Run executes the command and returns trimmed, non-empty lines of combined stdout/stderr.
-// Rationale: git may emit warnings; we still want the file list from stdout.
+// Run executes the command and returns trimmed, non-empty lines of stdout.
 // If exit code != 0 we bubble up the error with captured output for debugging CI logs.
 func (d DefaultCommandRunner) Run(name string, args ...string) ([]string, error) {
 	cmd := exec.Command(name, args...)
-	outputBytes, err := cmd.CombinedOutput()
-	outputStr := strings.TrimSpace(string(outputBytes))
+
+	// capture stderr separately so we don't accidentally treat it as "changed file"
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+
+	// Output() returns stdout; stderr is captured via cmd.Stderr
+	stdoutBytes, err := cmd.Output()
+	stdoutStr := strings.TrimSpace(string(stdoutBytes))
+	stderrStr := strings.TrimSpace(stderr.String())
 
 	if err != nil {
-		return nil, fmt.Errorf("command '%s %s' failed: %v\nOutput:\n%s", name, strings.Join(args, " "), err, outputStr)
+		// include stderr + stdout for debugging
+		msg := fmt.Sprintf("command '%s %s' failed: %v", name, strings.Join(args, " "), err)
+		if stderrStr != "" {
+			msg += "\nStderr:\n" + stderrStr
+		}
+		if stdoutStr != "" {
+			msg += "\nStdout:\n" + stdoutStr
+		}
+		return nil, fmt.Errorf("%s", msg)
 	}
 
-	if outputStr == "" {
-		return nil, nil // no changes / no matches
+	// success but no stdout -> no matches / no changes
+	if stdoutStr == "" {
+		return nil, nil
 	}
 
-	lines := strings.Split(outputStr, "\n")
+	lines := strings.Split(stdoutStr, "\n")
+	results := make([]string, 0, len(lines))
 
-	var results []string
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line != "" {
@@ -145,17 +160,21 @@ func gitDiff(config *Config, runner CommandRunner) ([]string, error) {
 	// Staged changes (index vs HEAD).
 	argsCached := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only", "--cached")
 	if hasPathspec(argsCached) {
-		if out, err := runner.Run("git", argsCached...); err == nil {
-			all = append(all, out...)
+		out, err := runner.Run("git", argsCached...)
+		if err != nil {
+			return nil, fmt.Errorf("git diff --cached (no HEAD) failed: %w", err)
 		}
+		all = append(all, out...)
 	}
 
 	// Unstaged changes (worktree vs index).
 	argsWT := buildGitStatusArgs(config.Paths, config.FileExt, config.FlatNaming, "diff", "--name-only")
 	if hasPathspec(argsWT) {
-		if out, err := runner.Run("git", argsWT...); err == nil {
-			all = append(all, out...)
+		out, err := runner.Run("git", argsWT...)
+		if err != nil {
+			return nil, fmt.Errorf("git diff (worktree) failed: %w", err)
 		}
+		all = append(all, out...)
 	}
 
 	// Deduplicate and normalize before returning.
@@ -228,11 +247,19 @@ func deduplicateFiles(statusFiles, untrackedFiles []string) []string {
 	fileSet := make(map[string]struct{})
 
 	for _, file := range statusFiles {
-		fileSet[filepath.ToSlash(strings.TrimSpace(file))] = struct{}{}
+		f := filepath.ToSlash(strings.TrimSpace(file))
+		if f == "" {
+			continue
+		}
+		fileSet[f] = struct{}{}
 	}
 
 	for _, file := range untrackedFiles {
-		fileSet[filepath.ToSlash(strings.TrimSpace(file))] = struct{}{}
+		f := filepath.ToSlash(strings.TrimSpace(file))
+		if f == "" {
+			continue
+		}
+		fileSet[f] = struct{}{}
 	}
 
 	allFiles := make([]string, 0, len(fileSet))

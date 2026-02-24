@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -429,11 +430,16 @@ func TestDetectChangedFiles(t *testing.T) {
 	fileExts := []string{"json"}
 	flat := true
 
+	revParseKey := filepath.ToSlash("git rev-parse --verify HEAD")
+
 	diffArgs := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only", "HEAD")
 	lsArgs := buildGitStatusArgs(paths, fileExts, flat, "ls-files", "--others", "--exclude-standard")
 
 	mockRunner := MockCommandRunner{
 		Output: map[string][]string{
+			// Make HEAD "exist" so gitDiff uses the HEAD-based diff path.
+			revParseKey: {"ok"},
+
 			makeKey(diffArgs): {
 				filepath.ToSlash("path/to/translations/file1.json"),
 				filepath.ToSlash("path/to/translations/file2.json"),
@@ -466,11 +472,16 @@ func TestDetectChangedFiles_NoChanges(t *testing.T) {
 	fileExts := []string{"json"}
 	flat := true
 
+	revParseKey := filepath.ToSlash("git rev-parse --verify HEAD")
+
 	diffArgs := buildGitStatusArgs(paths, fileExts, flat, "diff", "--name-only", "HEAD")
 	lsArgs := buildGitStatusArgs(paths, fileExts, flat, "ls-files", "--others", "--exclude-standard")
 
 	mockRunner := MockCommandRunner{
 		Output: map[string][]string{
+			// Make HEAD "exist" so we're testing the main path.
+			revParseKey: {"ok"},
+
 			makeKey(diffArgs): {},
 			makeKey(lsArgs):   {},
 		},
@@ -481,6 +492,8 @@ func TestDetectChangedFiles_NoChanges(t *testing.T) {
 		FileExt:        fileExts,
 		FlatNaming:     flat,
 		AlwaysPullBase: true,
+		// BaseLang isn't needed here because AlwaysPullBase=true (no exclusion),
+		// but leaving it out is fine.
 	}
 
 	changed, err := detectChangedFiles(config, mockRunner)
@@ -502,6 +515,8 @@ func TestDetectChangedFiles_AllChangesExcluded_Flat_PerExt(t *testing.T) {
 
 	mockRunner := MockCommandRunner{
 		Output: map[string][]string{
+			makeKey([]string{"rev-parse", "--verify", "HEAD"}): {"ok"},
+
 			makeKey(diffArgs): {
 				filepath.ToSlash("ios/Loc/en.strings"),
 				filepath.ToSlash("ios/Loc/en.stringsdict"),
@@ -844,6 +859,62 @@ func TestBuildExcludePatterns(t *testing.T) {
 				t.Errorf("Expected patterns %v, got %v", normalizedExpectedPatterns, normalizedPatternStrings)
 			}
 		})
+	}
+}
+
+func TestHelperProcess_CommandRunner(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+
+	write := func(f *os.File, s string) {
+		if _, err := f.WriteString(s); err != nil {
+			// hard exit: we're in helper process anyway
+			os.Exit(3)
+		}
+	}
+
+	switch os.Getenv("HELPER_MODE") {
+	case "ok":
+		write(os.Stdout, "path/to/translations/a.json\n")
+		write(os.Stderr, "warning: not a file\n")
+		os.Exit(0)
+	case "fail":
+		write(os.Stdout, "path/to/translations/b.json\n")
+		write(os.Stderr, "boom\n")
+		os.Exit(2)
+	default:
+		os.Exit(0)
+	}
+}
+
+func TestDefaultCommandRunner_IgnoresStderrOnSuccess(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Setenv("HELPER_MODE", "ok")
+
+	r := DefaultCommandRunner{}
+	out, err := r.Run(os.Args[0], "-test.run=TestHelperProcess_CommandRunner")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+
+	want := []string{"path/to/translations/a.json"}
+	if !reflect.DeepEqual(out, want) {
+		t.Fatalf("out mismatch. got=%v want=%v", out, want)
+	}
+}
+
+func TestDefaultCommandRunner_IncludesStderrInError(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Setenv("HELPER_MODE", "fail")
+
+	r := DefaultCommandRunner{}
+	_, err := r.Run(os.Args[0], "-test.run=TestHelperProcess_CommandRunner")
+	if err == nil {
+		t.Fatalf("expected err")
+	}
+	if !strings.Contains(err.Error(), "Stderr:") || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected stderr in error, got: %v", err)
 	}
 }
 
