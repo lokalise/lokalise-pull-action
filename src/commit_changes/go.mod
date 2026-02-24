@@ -1,8 +1,8 @@
 module commit_changes
 
-go 1.25
+go 1.26
 
-toolchain go1.25.6
+toolchain go1.26.0
 
 require github.com/bodrovis/lokalise-actions-common/v2 v2.5.0
 

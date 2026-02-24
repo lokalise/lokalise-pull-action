@@ -521,7 +521,7 @@ func checkoutRemoteWithLocalChanges(ref string, runner CommandRunner, cause erro
 
 func splitNonEmptyLines(s string) []string {
 	var res []string
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -575,15 +575,14 @@ func worktreeEqualsRef(ref string, runner CommandRunner) (bool, error) {
 // isExitCode checks whether err has the given exit code.
 // Supports both *exec.ExitError and any custom error type implementing ExitCode() int.
 func isExitCode(err error, code int) bool {
-	type exitCoder interface {
+	type exitCoderError interface {
+		error
 		ExitCode() int
 	}
 
-	var ec exitCoder
-	if errors.As(err, &ec) {
+	if ec, ok := errors.AsType[exitCoderError](err); ok {
 		return ec.ExitCode() == code
 	}
-
 	return false
 }
 
