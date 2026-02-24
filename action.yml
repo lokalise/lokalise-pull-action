@@ -198,6 +198,8 @@ runs:
       run: |
         set -euo pipefail
 
+        OS_PLATFORM="$(printf '%s' "${OS_PLATFORM:-}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/[[:space:]]//g' | tr '[:upper:]' '[:lower:]')"
+
         if [[ -n "$OS_PLATFORM" ]]; then
           echo "Using user-provided platform: $OS_PLATFORM"
           PLATFORM="$OS_PLATFORM"
