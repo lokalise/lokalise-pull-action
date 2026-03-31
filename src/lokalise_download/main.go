@@ -9,6 +9,7 @@ import (
 
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 	"github.com/bodrovis/lokex/v2/client"
+	"github.com/bodrovis/lokex/v2/client/download"
 )
 
 // exitFunc is a function variable that defaults to os.Exit.
@@ -50,12 +51,12 @@ type DownloadConfig struct {
 // Downloader abstracts the concrete lokex downloader. Useful for tests.
 type Downloader interface {
 	// Download stores files into dest
-	Download(ctx context.Context, dest string, params client.DownloadParams) (string, error)
+	Download(ctx context.Context, dest string, params download.DownloadParams) (string, error)
 }
 
 // AsyncDownloader is an optional extension used when AsyncMode = true.
 type AsyncDownloader interface {
-	DownloadAsync(ctx context.Context, dest string, params client.DownloadParams) (string, error)
+	DownloadAsync(ctx context.Context, dest string, params download.DownloadParams) (string, error)
 }
 
 // ClientFactory allows injecting a fake client in tests and keeping main() thin.
@@ -82,7 +83,7 @@ func (f *LokaliseFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) 
 	if err != nil {
 		return nil, err
 	}
-	return client.NewDownloader(lokaliseClient), nil
+	return download.NewDownloader(lokaliseClient), nil
 }
 
 func main() {
@@ -176,8 +177,8 @@ func validateDownloadConfig(config DownloadConfig) {
 // - When original_filenames=true, Lokalise exports per-original path and directory_prefix is respected.
 // - include_tags narrows the export to keys tagged with the current branch/tag (git-driven workflows).
 // - AdditionalParams allows advanced overrides (JSON object or YAML mapping).
-func buildDownloadParams(config DownloadConfig) client.DownloadParams {
-	params := client.DownloadParams{
+func buildDownloadParams(config DownloadConfig) download.DownloadParams {
+	params := download.DownloadParams{
 		"format": config.FileFormat,
 	}
 

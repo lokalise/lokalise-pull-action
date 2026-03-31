@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bodrovis/lokex/v2/client"
+	"github.com/bodrovis/lokex/v2/client/download"
 )
 
 func TestMain(m *testing.M) {
@@ -197,7 +197,7 @@ func TestBuildDownloadParams_JSON_MergesAndOverrides(t *testing.T) {
 
 	params := buildDownloadParams(cfg)
 
-	want := client.DownloadParams{
+	want := download.DownloadParams{
 		"format":             "json",
 		"original_filenames": true,
 		"directory_prefix":   "/",
@@ -233,7 +233,7 @@ include_tags:
 
 	params := buildDownloadParams(cfg)
 
-	want := client.DownloadParams{
+	want := download.DownloadParams{
 		"format":             "json",
 		"original_filenames": true,
 		"directory_prefix":   "/",
@@ -549,12 +549,12 @@ type fakeDownloader struct {
 	called     bool
 	gotCtx     context.Context
 	gotDest    string
-	gotParams  client.DownloadParams
+	gotParams  download.DownloadParams
 	returnPath string
 	returnErr  error
 }
 
-func (f *fakeDownloader) Download(ctx context.Context, dest string, params client.DownloadParams) (string, error) {
+func (f *fakeDownloader) Download(ctx context.Context, dest string, params download.DownloadParams) (string, error) {
 	f.called = true
 	f.gotCtx = ctx
 	f.gotDest = dest
@@ -567,7 +567,7 @@ type fakeAsyncDownloader struct {
 	asyncCalled bool
 }
 
-func (f *fakeAsyncDownloader) DownloadAsync(ctx context.Context, dest string, params client.DownloadParams) (string, error) {
+func (f *fakeAsyncDownloader) DownloadAsync(ctx context.Context, dest string, params download.DownloadParams) (string, error) {
 	f.asyncCalled = true
 	// reuse capture from base
 	return f.Download(ctx, dest, params)
