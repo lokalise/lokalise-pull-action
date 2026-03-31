@@ -5,8 +5,6 @@
 
 GitHub action to download translation files from [Lokalise TMS](https://lokalise.com/) to your GitHub repository in the form of a pull request.
 
-*To find documentation for the **stable version 3**, [browse the v3 tag](https://github.com/lokalise/lokalise-pull-action/tree/v3).*
-
 * Step-by-step tutorial covering the usage of this action is available on [Lokalise Developer Hub](https://developers.lokalise.com/docs/github-actions)
 * If you're looking for an in-depth tutorial, [check out our blog post](https://lokalise.com/blog/github-actions-for-lokalise-translation/)
 * If you're experiencing issues, [check the Troubleshooting guide](https://github.com/lokalise/lokalise-pull-action/wiki/Troubleshooting-common-problems)
