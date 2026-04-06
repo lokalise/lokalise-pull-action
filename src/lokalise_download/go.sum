@@ -1,5 +1,5 @@
-github.com/bodrovis/lokalise-actions-common/v2 v2.5.0 h1:PypnmylbpBd8pXGEgR9CCUjJCsPf8cci4E7Hbuxi2jc=
-github.com/bodrovis/lokalise-actions-common/v2 v2.5.0/go.mod h1:fE6mqYujDZMJlJ3HI10pZJ21CwIz+SGS+K1uC05y+n0=
+github.com/bodrovis/lokalise-actions-common/v2 v2.6.0 h1:V/dR123b3kvfLipeX6mkKFhCD7WIvrRmD7QudBthcrk=
+github.com/bodrovis/lokalise-actions-common/v2 v2.6.0/go.mod h1:88SmZPu9eFeotkb2Tbc8E5isll5LqhdMDIfBPuaHuZw=
 github.com/bodrovis/lokex/v2 v2.2.0 h1:Gv9Wfst3+wzInwtdOH81NDPOFbCPb11SZs0JcaFz2yA=
 github.com/bodrovis/lokex/v2 v2.2.0/go.mod h1:cj+UkLkaG6Q9bhdah62G2EDGMpS/Awi3/ANkVn2LR6g=
 github.com/jarcoal/httpmock v1.4.1 h1:0Ju+VCFuARfFlhVXFc2HxlcQkfB+Xq12/EotHko+x2A=
