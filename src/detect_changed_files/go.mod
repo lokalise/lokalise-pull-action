@@ -2,8 +2,8 @@ module detect_changed_files
 
 go 1.26
 
-toolchain go1.26.0
+toolchain go1.26.2
 
-require github.com/bodrovis/lokalise-actions-common/v2 v2.6.0
+require github.com/bodrovis/lokalise-actions-common/v2 v2.10.1
 
 require go.yaml.in/yaml/v4 v4.0.0-rc.4 // indirect

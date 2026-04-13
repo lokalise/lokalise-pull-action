@@ -1,1 +1,9 @@
 cosign.exe
+
+coverage.out
+
+.cache
+
+.DS_Store
+
+.env
