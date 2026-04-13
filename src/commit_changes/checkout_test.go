@@ -173,7 +173,7 @@ func TestCheckoutBranch(t *testing.T) {
 					return "", exitErr1
 				}
 
-				// status --porcelain (и тут, и внутри stashIfDirty)
+				// status --porcelain (used here and inside stashIfDirty)
 				if len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain" {
 					return " M locales/fr.json\n", nil
 				}
@@ -672,7 +672,6 @@ func TestCheckoutBranch_RemoteBranch_RestoreFails_NoDrop_StopsEarly(t *testing.T
 				return "", exitErr1
 			}
 
-			// ✅ ВОТ ЭТО КЛЮЧЕВО: include-untracked
 			if len(args) == 5 &&
 				args[0] == "stash" && args[1] == "show" &&
 				args[2] == "--name-only" &&

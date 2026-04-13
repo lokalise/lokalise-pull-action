@@ -75,12 +75,7 @@ func parseLsRemoteHeadLine(line string) (string, bool) {
 		return "", false
 	}
 
-	rest, ok := strings.CutPrefix(line, linePrefix)
-	if !ok {
-		return "", false
-	}
-
-	ref := strings.TrimSuffix(rest, lineSuffix)
+	ref := strings.TrimSuffix(strings.TrimPrefix(line, linePrefix), lineSuffix)
 	ref = strings.TrimSpace(ref)
 
 	br, ok := strings.CutPrefix(ref, refPrefix)

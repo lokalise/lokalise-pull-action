@@ -87,7 +87,7 @@ func normalizeFileExts(fileExt []string) ([]string, error) {
 	norm := make([]string, 0, len(fileExt))
 
 	for _, ext := range fileExt {
-		e := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
+		e := strings.ToLower(strings.TrimLeft(strings.TrimSpace(ext), "."))
 		if e == "" {
 			continue
 		}

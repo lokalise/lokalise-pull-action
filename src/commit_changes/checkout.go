@@ -113,9 +113,8 @@ func unsetBranchUpstream(runner CommandRunner, branchName string) {
 }
 
 func logMissingFetchedRemoteRef(runner CommandRunner, baseRef string) {
-	refCheckOut, refCheckErr := runner.Capture("git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+baseRef)
+	_, refCheckErr := runner.Capture("git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+baseRef)
 	if refCheckErr != nil {
-		_ = refCheckOut
 		fmt.Fprintf(os.Stderr, "Warning: origin/%s not found locally after fetch (show-ref failed): %v\n", baseRef, refCheckErr)
 	}
 }
