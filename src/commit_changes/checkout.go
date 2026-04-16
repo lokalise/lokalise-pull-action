@@ -173,23 +173,6 @@ func checkoutRemoteWithLocalChanges(branchName, remoteRef string, runner Command
 	return nil
 }
 
-func readWorktreeStatus(runner CommandRunner) (status string, hasUntracked bool, err error) {
-	out, err := runner.Capture("git", "status", "--porcelain")
-	if err != nil {
-		return "", false, fmt.Errorf("failed to check status: %v\nOutput: %s", err, out)
-	}
-
-	status = strings.TrimSpace(out)
-	hasUntracked = strings.Contains(out, "?? ")
-	return status, hasUntracked, nil
-}
-
-func restoreStashBestEffort(runner CommandRunner, didStash bool) {
-	if didStash {
-		_ = runner.Run("git", "stash", "pop")
-	}
-}
-
 func restoreFilesFromLatestStash(remote string, runner CommandRunner) error {
 	stashRef := "stash@{0}"
 
@@ -207,24 +190,6 @@ func restoreFilesFromLatestStash(remote string, runner CommandRunner) error {
 	return nil
 }
 
-func listStashedFiles(runner CommandRunner, stashRef string) ([]string, error) {
-	out, err := runner.Capture("git", "stash", "show", "--name-only", "--include-untracked", stashRef)
-	if err != nil {
-		return nil, fmt.Errorf("%v\nOutput: %s", err, out)
-	}
-	return splitNonEmptyLines(out), nil
-}
-
-func restoreFileFromStash(runner CommandRunner, stashRef, file string) error {
-	if err := runner.Run("git", "checkout", stashRef, "--", file); err == nil {
-		return nil
-	}
-	if err := runner.Run("git", "checkout", stashRef+"^3", "--", file); err != nil {
-		return err
-	}
-	return nil
-}
-
 func hasRemote(runner CommandRunner, ref string) (bool, error) {
 	out, err := runner.Capture("git", "ls-remote", "--exit-code", "--heads", "origin", ref)
 	if err == nil {
@@ -238,43 +203,4 @@ func hasRemote(runner CommandRunner, ref string) (bool, error) {
 	}
 
 	return false, fmt.Errorf("git ls-remote failed for ref %q: %v\nOutput: %s", ref, err, strings.TrimSpace(out))
-}
-
-// worktreeEqualsRef checks if BOTH working tree and index match <ref>.
-// If yes -> safe to force-checkout.
-// It uses `git diff --quiet` exit codes.
-func worktreeEqualsRef(ref string, runner CommandRunner) (bool, error) {
-	_, err1 := runner.Capture("git", "diff", "--quiet", ref)
-	if err1 != nil && !isExitCode(err1, 1) {
-		return false, fmt.Errorf("git diff failed: %v", err1)
-	}
-	if isExitCode(err1, 1) {
-		return false, nil
-	}
-
-	_, err2 := runner.Capture("git", "diff", "--quiet", "--cached", ref)
-	if err2 != nil && !isExitCode(err2, 1) {
-		return false, fmt.Errorf("git diff --cached failed: %v", err2)
-	}
-	if isExitCode(err2, 1) {
-		return false, nil
-	}
-
-	return true, nil
-}
-
-func stashIfDirty(runner CommandRunner, msg string) (bool, error) {
-	out, err := runner.Capture("git", "status", "--porcelain")
-	if err != nil {
-		return false, fmt.Errorf("failed to check git status: %v\nOutput: %s", err, out)
-	}
-	if strings.TrimSpace(out) == "" {
-		return false, nil
-	}
-
-	// -u to include untracked files just in case lokalise writes new files
-	if err := runner.Run("git", "stash", "push", "-u", "-m", msg); err != nil {
-		return false, fmt.Errorf("failed to stash changes: %v", err)
-	}
-	return true, nil
 }

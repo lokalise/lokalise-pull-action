@@ -28,6 +28,6 @@ jobs:
         for dir in src/*; do
           if [ -f "$dir/go.mod" ]; then
             echo "Running tests in $dir"
-            (cd "$dir" && go test ./...)
+            (cd "$dir" && go test ./... -count=1 -shuffle=on -race)
           fi
         done

@@ -242,7 +242,7 @@ func TestPrepareConfig(t *testing.T) {
 				"FLAT_NAMING":       "true",
 				"ALWAYS_PULL_BASE":  "false",
 			},
-			expectedError: "BASE_LANG environment variable is required",
+			expectedError: "BASE_LANG environment variable is not set or empty",
 		},
 		{
 			name: "whitespace-only BASE_LANG",
@@ -253,7 +253,7 @@ func TestPrepareConfig(t *testing.T) {
 				"FLAT_NAMING":       "true",
 				"ALWAYS_PULL_BASE":  "false",
 			},
-			expectedError: "BASE_LANG environment variable is required",
+			expectedError: "BASE_LANG environment variable is not set or empty",
 		},
 		{
 			name: "BASE_LANG with slash is rejected",

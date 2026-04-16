@@ -349,7 +349,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				"FORCE_PUSH":         "false",
 			},
 			expectError:     true,
-			expectedErrText: "BASE_LANG environment variable is required",
+			expectedErrText: "BASE_LANG environment variable is not set or empty",
 		},
 		{
 			name: "BASE_LANG with slash is rejected",

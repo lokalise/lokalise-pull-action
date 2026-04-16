@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/bodrovis/lokalise-actions-common/v2/normalizers"
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 )
 
@@ -28,12 +29,32 @@ type Config struct {
 	TranslationPaths   []string // one or multiple roots like ["locales"]
 }
 
+type translationInputs struct {
+	fileExt  []string
+	paths    []string
+	baseLang string
+}
+
 // envVarsToConfig reads env vars, validates required ones, normalizes arrays and returns a Config.
 // Notes:
 // - FILE_EXT may be a multi-line YAML block; if absent, we fall back to FILE_FORMAT.
 // - We strip "refs/heads/" from BaseRef/HeadRef if present.
 // - Commit message defaults to "Translations update".
 func envVarsToConfig() (*Config, error) {
+	requiredStrings, requiredBools, err := readRequiredEnvVars()
+	if err != nil {
+		return nil, err
+	}
+
+	translationInputs, err := readTranslationInputs(requiredStrings["BASE_LANG"])
+	if err != nil {
+		return nil, err
+	}
+
+	return buildConfig(requiredStrings, requiredBools, translationInputs), nil
+}
+
+func readRequiredEnvVars() (map[string]string, map[string]bool, error) {
 	requiredStrings, err := readRequiredStringEnv(
 		"GITHUB_ACTOR",
 		"GITHUB_SHA",
@@ -42,7 +63,7 @@ func envVarsToConfig() (*Config, error) {
 		"BASE_LANG",
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	requiredBools, err := readRequiredBoolEnv(
@@ -51,9 +72,13 @@ func envVarsToConfig() (*Config, error) {
 		"FORCE_PUSH",
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
+	return requiredStrings, requiredBools, nil
+}
+
+func readTranslationInputs(baseLangEnv string) (*translationInputs, error) {
 	fileExt, err := resolveFileExts()
 	if err != nil {
 		return nil, err
@@ -64,19 +89,31 @@ func envVarsToConfig() (*Config, error) {
 		return nil, err
 	}
 
-	baseLang, err := parseBaseLang(requiredStrings["BASE_LANG"])
+	baseLang, err := parsers.ParseLang("BASE_LANG", baseLangEnv)
 	if err != nil {
 		return nil, err
 	}
 
+	return &translationInputs{
+		fileExt:  fileExt,
+		paths:    paths,
+		baseLang: baseLang,
+	}, nil
+}
+
+func buildConfig(
+	requiredStrings map[string]string,
+	requiredBools map[string]bool,
+	inputs *translationInputs,
+) *Config {
 	baseRef, headRef := parseGitRefs()
 
 	return &Config{
 		GitHubActor:        requiredStrings["GITHUB_ACTOR"],
 		GitHubSHA:          requiredStrings["GITHUB_SHA"],
 		TempBranchPrefix:   requiredStrings["TEMP_BRANCH_PREFIX"],
-		FileExt:            fileExt,
-		BaseLang:           baseLang,
+		FileExt:            inputs.fileExt,
+		BaseLang:           inputs.baseLang,
 		FlatNaming:         requiredBools["FLAT_NAMING"],
 		AlwaysPullBase:     requiredBools["ALWAYS_PULL_BASE"],
 		GitUserName:        os.Getenv("GIT_USER_NAME"),
@@ -87,8 +124,8 @@ func envVarsToConfig() (*Config, error) {
 		ForcePush:          requiredBools["FORCE_PUSH"],
 		BaseRef:            baseRef,
 		HeadRef:            headRef,
-		TranslationPaths:   paths,
-	}, nil
+		TranslationPaths:   inputs.paths,
+	}
 }
 
 func readRequiredStringEnv(keys ...string) (map[string]string, error) {
@@ -139,35 +176,7 @@ func resolveFileExts() ([]string, error) {
 		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_EXT or FILE_FORMAT environment variables are set")
 	}
 
-	return normalizeFileExts(fileExts)
-}
-
-// normalizeFileExts lowercases extensions, removes one leading dot, drops empty
-// values, rejects path-like values, and removes duplicates while preserving order.
-func normalizeFileExts(fileExts []string) ([]string, error) {
-	seen := make(map[string]struct{})
-	norm := make([]string, 0, len(fileExts))
-
-	for _, ext := range fileExts {
-		e := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
-		if e == "" {
-			continue
-		}
-		if strings.ContainsAny(e, `/\`) {
-			return nil, fmt.Errorf("invalid file extension %q", ext)
-		}
-		if _, ok := seen[e]; ok {
-			continue
-		}
-		seen[e] = struct{}{}
-		norm = append(norm, e)
-	}
-
-	if len(norm) == 0 {
-		return nil, fmt.Errorf("no valid file extensions after normalization")
-	}
-
-	return norm, nil
+	return normalizers.NormalizeFileExtensions(fileExts)
 }
 
 func resolveCommitMessage() string {
@@ -185,18 +194,4 @@ func parseOptionalBoolEnvFalse(key string) bool {
 		return false
 	}
 	return value
-}
-
-// parseBaseLang validates the base language identifier used for file or
-// directory matching.
-func parseBaseLang(raw string) (string, error) {
-	baseLang := strings.TrimSpace(raw)
-	if baseLang == "" {
-		return "", fmt.Errorf("BASE_LANG environment variable is required")
-	}
-	if strings.ContainsAny(baseLang, `/\`) {
-		return "", fmt.Errorf("BASE_LANG must not contain path separators")
-	}
-
-	return baseLang, nil
 }
