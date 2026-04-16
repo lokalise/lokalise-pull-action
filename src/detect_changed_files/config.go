@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/bodrovis/lokalise-actions-common/v2/normalizers"
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 )
 
@@ -17,9 +18,26 @@ type Config struct {
 	Paths          []string // one or more translation roots, e.g., ["locales"]
 }
 
+type configInputs struct {
+	flatNaming     bool
+	alwaysPullBase bool
+	paths          []string
+	fileExt        []string
+	baseLang       string
+}
+
 // prepareConfig reads action inputs from environment variables, applies
 // extension inference when needed, and validates the resulting scope.
 func prepareConfig() (*Config, error) {
+	inputs, err := readConfigInputs()
+	if err != nil {
+		return nil, err
+	}
+
+	return buildConfig(inputs), nil
+}
+
+func readConfigInputs() (*configInputs, error) {
 	flatNaming, alwaysPullBase, err := parseBooleanFlags()
 	if err != nil {
 		return nil, err
@@ -35,18 +53,28 @@ func prepareConfig() (*Config, error) {
 		return nil, err
 	}
 
-	baseLang, err := parseBaseLang()
+	baseLang, err := parsers.ParseLangEnv("BASE_LANG")
 	if err != nil {
 		return nil, err
 	}
 
-	return &Config{
-		FileExt:        fileExt,
-		FlatNaming:     flatNaming,
-		AlwaysPullBase: alwaysPullBase,
-		BaseLang:       baseLang,
-		Paths:          paths,
+	return &configInputs{
+		flatNaming:     flatNaming,
+		alwaysPullBase: alwaysPullBase,
+		paths:          paths,
+		fileExt:        fileExt,
+		baseLang:       baseLang,
 	}, nil
+}
+
+func buildConfig(inputs *configInputs) *Config {
+	return &Config{
+		FileExt:        inputs.fileExt,
+		FlatNaming:     inputs.flatNaming,
+		AlwaysPullBase: inputs.alwaysPullBase,
+		BaseLang:       inputs.baseLang,
+		Paths:          inputs.paths,
+	}
 }
 
 func parseBooleanFlags() (flatNaming bool, alwaysPullBase bool, err error) {
@@ -77,47 +105,5 @@ func resolveFileExts() ([]string, error) {
 		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_FORMAT or FILE_EXT environment variables are set")
 	}
 
-	return normalizeFileExts(fileExt)
-}
-
-// normalizeFileExts lowercases extensions, removes one leading dot, drops empty
-// values, rejects path-like values, and removes duplicates while preserving order.
-func normalizeFileExts(fileExt []string) ([]string, error) {
-	seen := make(map[string]struct{})
-	norm := make([]string, 0, len(fileExt))
-
-	for _, ext := range fileExt {
-		e := strings.ToLower(strings.TrimLeft(strings.TrimSpace(ext), "."))
-		if e == "" {
-			continue
-		}
-		if strings.ContainsAny(e, `/\`) {
-			return nil, fmt.Errorf("invalid file extension %q", ext)
-		}
-		if _, ok := seen[e]; ok {
-			continue
-		}
-		seen[e] = struct{}{}
-		norm = append(norm, e)
-	}
-
-	if len(norm) == 0 {
-		return nil, fmt.Errorf("no valid file extensions after normalization")
-	}
-
-	return norm, nil
-}
-
-// parseBaseLang validates the base language identifier used for file or
-// directory matching.
-func parseBaseLang() (string, error) {
-	baseLang := strings.TrimSpace(os.Getenv("BASE_LANG"))
-	if baseLang == "" {
-		return "", fmt.Errorf("BASE_LANG environment variable is required")
-	}
-	if strings.ContainsAny(baseLang, `/\`) {
-		return "", fmt.Errorf("BASE_LANG must not contain path separators")
-	}
-
-	return baseLang, nil
+	return normalizers.NormalizeFileExtensions(fileExt)
 }

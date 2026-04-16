@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -29,6 +30,292 @@ type mockExitError struct{ code int }
 
 func (e *mockExitError) Error() string { return fmt.Sprintf("exit status %d", e.code) }
 func (e *mockExitError) ExitCode() int { return e.code }
+
+func TestRunWith_Success(t *testing.T) {
+	t.Parallel()
+
+	runner := &MockCommandRunner{}
+
+	commitCalled := false
+	writeCalls := 0
+
+	var gotBranchName string
+	outputs := map[string]string{}
+
+	commit := func(gotRunner CommandRunner) (string, error) {
+		commitCalled = true
+
+		if gotRunner != runner {
+			t.Fatalf("commit got unexpected runner")
+		}
+
+		gotBranchName = "lokalise/update-translations"
+		return gotBranchName, nil
+	}
+
+	write := func(key, value string) bool {
+		writeCalls++
+		outputs[key] = value
+		return true
+	}
+
+	err := runWith(commit, write, runner)
+	if err != nil {
+		t.Fatalf("runWith returned unexpected error: %v", err)
+	}
+
+	if !commitCalled {
+		t.Fatal("expected commit to be called")
+	}
+
+	if gotBranchName != "lokalise/update-translations" {
+		t.Fatalf("unexpected branch name: %q", gotBranchName)
+	}
+
+	if writeCalls != 2 {
+		t.Fatalf("expected 2 write calls, got %d", writeCalls)
+	}
+
+	if outputs["branch_name"] != "lokalise/update-translations" {
+		t.Fatalf("unexpected branch_name output: %q", outputs["branch_name"])
+	}
+
+	if outputs["commit_created"] != "true" {
+		t.Fatalf("unexpected commit_created output: %q", outputs["commit_created"])
+	}
+}
+
+func TestRunWith_Success_WhenNoChanges(t *testing.T) {
+	t.Parallel()
+
+	runner := &MockCommandRunner{}
+
+	commitCalled := false
+	writeCalled := false
+
+	commit := func(gotRunner CommandRunner) (string, error) {
+		commitCalled = true
+
+		if gotRunner != runner {
+			t.Fatalf("commit got unexpected runner")
+		}
+
+		return "", ErrNoChanges
+	}
+
+	write := func(key, value string) bool {
+		writeCalled = true
+		return true
+	}
+
+	err := runWith(commit, write, runner)
+	if err != nil {
+		t.Fatalf("runWith returned unexpected error: %v", err)
+	}
+
+	if !commitCalled {
+		t.Fatal("expected commit to be called")
+	}
+
+	if writeCalled {
+		t.Fatal("write should not be called when there are no changes")
+	}
+}
+
+func TestRunWith_ReturnsError_WhenCommitFails(t *testing.T) {
+	t.Parallel()
+
+	runner := &MockCommandRunner{}
+
+	commit := func(gotRunner CommandRunner) (string, error) {
+		if gotRunner != runner {
+			t.Fatalf("commit got unexpected runner")
+		}
+
+		return "", errors.New("push failed")
+	}
+
+	write := func(key, value string) bool {
+		t.Fatal("write should not be called")
+		return true
+	}
+
+	err := runWith(commit, write, runner)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "error committing and pushing changes: push failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunWith_ReturnsError_WhenWriteFails(t *testing.T) {
+	t.Parallel()
+
+	runner := &MockCommandRunner{}
+
+	commit := func(gotRunner CommandRunner) (string, error) {
+		if gotRunner != runner {
+			t.Fatalf("commit got unexpected runner")
+		}
+
+		return "lokalise/update-translations", nil
+	}
+
+	write := func(key, value string) bool {
+		return false
+	}
+
+	err := runWith(commit, write, runner)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "failed to write to GitHub output") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPerformCommit_Success(t *testing.T) {
+	t.Parallel()
+
+	runner := &MockCommandRunner{}
+
+	commit := func(gotRunner CommandRunner) (string, error) {
+		if gotRunner != runner {
+			t.Fatalf("commit got unexpected runner")
+		}
+
+		return "feature/generated-translations", nil
+	}
+
+	branchName, err := performCommit(commit, runner)
+	if err != nil {
+		t.Fatalf("performCommit returned unexpected error: %v", err)
+	}
+
+	if branchName != "feature/generated-translations" {
+		t.Fatalf("unexpected branch name: %q", branchName)
+	}
+}
+
+func TestPerformCommit_NoChanges(t *testing.T) {
+	t.Parallel()
+
+	runner := &MockCommandRunner{}
+
+	commit := func(gotRunner CommandRunner) (string, error) {
+		if gotRunner != runner {
+			t.Fatalf("commit got unexpected runner")
+		}
+
+		return "", ErrNoChanges
+	}
+
+	branchName, err := performCommit(commit, runner)
+	if err != nil {
+		t.Fatalf("performCommit returned unexpected error: %v", err)
+	}
+
+	if branchName != "" {
+		t.Fatalf("expected empty branch name, got %q", branchName)
+	}
+}
+
+func TestPerformCommit_ReturnsWrappedError(t *testing.T) {
+	t.Parallel()
+
+	runner := &MockCommandRunner{}
+
+	commit := func(gotRunner CommandRunner) (string, error) {
+		if gotRunner != runner {
+			t.Fatalf("commit got unexpected runner")
+		}
+
+		return "", errors.New("git status failed")
+	}
+
+	branchName, err := performCommit(commit, runner)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if branchName != "" {
+		t.Fatalf("expected empty branch name, got %q", branchName)
+	}
+
+	if !strings.Contains(err.Error(), "error committing and pushing changes: git status failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWriteOutputs_Success(t *testing.T) {
+	t.Parallel()
+
+	outputs := map[string]string{}
+	writeCalls := 0
+
+	write := func(key, value string) bool {
+		writeCalls++
+		outputs[key] = value
+		return true
+	}
+
+	err := writeOutputs("feature/generated-translations", write)
+	if err != nil {
+		t.Fatalf("writeOutputs returned unexpected error: %v", err)
+	}
+
+	if writeCalls != 2 {
+		t.Fatalf("expected 2 write calls, got %d", writeCalls)
+	}
+
+	if outputs["branch_name"] != "feature/generated-translations" {
+		t.Fatalf("unexpected branch_name output: %q", outputs["branch_name"])
+	}
+
+	if outputs["commit_created"] != "true" {
+		t.Fatalf("unexpected commit_created output: %q", outputs["commit_created"])
+	}
+}
+
+func TestWriteOutputs_Success_WithEmptyBranchName(t *testing.T) {
+	t.Parallel()
+
+	writeCalled := false
+
+	write := func(key, value string) bool {
+		writeCalled = true
+		return true
+	}
+
+	err := writeOutputs("", write)
+	if err != nil {
+		t.Fatalf("writeOutputs returned unexpected error: %v", err)
+	}
+
+	if writeCalled {
+		t.Fatal("write should not be called for empty branch name")
+	}
+}
+
+func TestWriteOutputs_ReturnsError_WhenWriteFails(t *testing.T) {
+	t.Parallel()
+
+	write := func(key, value string) bool {
+		return false
+	}
+
+	err := writeOutputs("feature/generated-translations", write)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "failed to write to GitHub output") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
 
 func TestSanitizeString(t *testing.T) {
 	tests := []struct {

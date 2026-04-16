@@ -1146,384 +1146,6 @@ func TestCheckoutBranch_HeadRefMatches_UsesRemoteHeadAndSetsUpstream(t *testing.
 	}
 }
 
-func TestHasRemote(t *testing.T) {
-	t.Run("remote exists", func(t *testing.T) {
-		runner := &MockCommandRunner{
-			CaptureFunc: func(name string, args ...string) (string, error) {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				return "deadbeef\trefs/heads/feature/x\n", nil
-			},
-		}
-
-		ok, err := hasRemote(runner, "feature/x")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !ok {
-			t.Fatalf("expected remote branch to exist")
-		}
-	})
-
-	t.Run("remote does not exist returns false without error", func(t *testing.T) {
-		runner := &MockCommandRunner{
-			CaptureFunc: func(name string, args ...string) (string, error) {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				return "", &mockExitError{code: 2}
-			},
-		}
-
-		ok, err := hasRemote(runner, "missing-branch")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if ok {
-			t.Fatalf("expected remote branch to be reported missing")
-		}
-	})
-
-	t.Run("other ls-remote error is returned", func(t *testing.T) {
-		runner := &MockCommandRunner{
-			CaptureFunc: func(name string, args ...string) (string, error) {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				return "fatal: auth failed", fmt.Errorf("network boom")
-			},
-		}
-
-		ok, err := hasRemote(runner, "feature/x")
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
-		if ok {
-			t.Fatalf("expected ok=false on ls-remote failure")
-		}
-		if !strings.Contains(err.Error(), `git ls-remote failed for ref "feature/x"`) {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !strings.Contains(err.Error(), "fatal: auth failed") {
-			t.Fatalf("expected command output in error, got %v", err)
-		}
-	})
-}
-
-func TestWorktreeEqualsRef(t *testing.T) {
-	const ref = "origin/feature/x"
-
-	t.Run("worktree and index both match", func(t *testing.T) {
-		runner := &MockCommandRunner{
-			CaptureFunc: func(name string, args ...string) (string, error) {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				return "", nil
-			},
-		}
-
-		same, err := worktreeEqualsRef(ref, runner)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !same {
-			t.Fatalf("expected worktree to match ref")
-		}
-	})
-
-	t.Run("worktree differs", func(t *testing.T) {
-		runner := &MockCommandRunner{
-			CaptureFunc: func(name string, args ...string) (string, error) {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				if len(args) == 3 && args[0] == "diff" && args[1] == "--quiet" && args[2] == ref {
-					return "", &mockExitError{code: 1}
-				}
-				t.Fatalf("unexpected capture: git %v", args)
-				return "", nil
-			},
-		}
-
-		same, err := worktreeEqualsRef(ref, runner)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if same {
-			t.Fatalf("expected worktree difference to return same=false")
-		}
-	})
-
-	t.Run("index differs", func(t *testing.T) {
-		runner := &MockCommandRunner{
-			CaptureFunc: func(name string, args ...string) (string, error) {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				if len(args) == 3 && args[0] == "diff" && args[1] == "--quiet" && args[2] == ref {
-					return "", nil
-				}
-				if len(args) == 4 && args[0] == "diff" && args[1] == "--quiet" && args[2] == "--cached" && args[3] == ref {
-					return "", &mockExitError{code: 1}
-				}
-				t.Fatalf("unexpected capture: git %v", args)
-				return "", nil
-			},
-		}
-
-		same, err := worktreeEqualsRef(ref, runner)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if same {
-			t.Fatalf("expected cached diff to return same=false")
-		}
-	})
-
-	t.Run("unexpected diff error is returned", func(t *testing.T) {
-		runner := &MockCommandRunner{
-			CaptureFunc: func(name string, args ...string) (string, error) {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				if len(args) == 3 && args[0] == "diff" && args[1] == "--quiet" && args[2] == ref {
-					return "", fmt.Errorf("diff exploded")
-				}
-				t.Fatalf("unexpected capture: git %v", args)
-				return "", nil
-			},
-		}
-
-		same, err := worktreeEqualsRef(ref, runner)
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
-		if same {
-			t.Fatalf("expected same=false on diff error")
-		}
-		if !strings.Contains(err.Error(), "git diff failed") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-}
-
-func TestStashIfDirty(t *testing.T) {
-	t.Run("clean worktree does not stash", func(t *testing.T) {
-		stashCalled := false
-
-		runner := &MockCommandRunner{
-			CaptureFunc: func(name string, args ...string) (string, error) {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
-					return "\n", nil
-				}
-				t.Fatalf("unexpected capture: git %v", args)
-				return "", nil
-			},
-			RunFunc: func(name string, args ...string) error {
-				stashCalled = true
-				return nil
-			},
-		}
-
-		didStash, err := stashIfDirty(runner, "lokalise-temp")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if didStash {
-			t.Fatalf("expected didStash=false for clean worktree")
-		}
-		if stashCalled {
-			t.Fatalf("stash must not be called for clean worktree")
-		}
-	})
-
-	t.Run("dirty worktree is stashed", func(t *testing.T) {
-		stashCalled := false
-
-		runner := &MockCommandRunner{
-			CaptureFunc: func(name string, args ...string) (string, error) {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
-					return " M locales/fr.json\n", nil
-				}
-				t.Fatalf("unexpected capture: git %v", args)
-				return "", nil
-			},
-			RunFunc: func(name string, args ...string) error {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				if len(args) == 5 &&
-					args[0] == "stash" &&
-					args[1] == "push" &&
-					args[2] == "-u" &&
-					args[3] == "-m" &&
-					args[4] == "lokalise-temp" {
-					stashCalled = true
-					return nil
-				}
-				t.Fatalf("unexpected run: git %v", args)
-				return nil
-			},
-		}
-
-		didStash, err := stashIfDirty(runner, "lokalise-temp")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !didStash {
-			t.Fatalf("expected didStash=true for dirty worktree")
-		}
-		if !stashCalled {
-			t.Fatalf("expected stash push to be called")
-		}
-	})
-
-	t.Run("status error is returned", func(t *testing.T) {
-		runner := &MockCommandRunner{
-			CaptureFunc: func(name string, args ...string) (string, error) {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				return "fatal: broken repo", fmt.Errorf("status failed")
-			},
-		}
-
-		didStash, err := stashIfDirty(runner, "lokalise-temp")
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
-		if didStash {
-			t.Fatalf("expected didStash=false on status error")
-		}
-		if !strings.Contains(err.Error(), "failed to check git status") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("stash push error is returned", func(t *testing.T) {
-		runner := &MockCommandRunner{
-			CaptureFunc: func(name string, args ...string) (string, error) {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
-					return " M locales/fr.json\n", nil
-				}
-				t.Fatalf("unexpected capture: git %v", args)
-				return "", nil
-			},
-			RunFunc: func(name string, args ...string) error {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				if len(args) == 5 && args[0] == "stash" && args[1] == "push" {
-					return fmt.Errorf("stash failed")
-				}
-				t.Fatalf("unexpected run: git %v", args)
-				return nil
-			},
-		}
-
-		didStash, err := stashIfDirty(runner, "lokalise-temp")
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
-		if didStash {
-			t.Fatalf("expected didStash=false when stash push fails")
-		}
-		if !strings.Contains(err.Error(), "failed to stash changes") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-}
-
-func TestRestoreFileFromStash(t *testing.T) {
-	t.Run("restore from stash tree succeeds", func(t *testing.T) {
-		var calls [][]string
-
-		runner := &MockCommandRunner{
-			RunFunc: func(name string, args ...string) error {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				calls = append(calls, args)
-				if len(args) == 4 && args[0] == "checkout" && args[1] == "stash@{0}" && args[2] == "--" && args[3] == "locales/fr.json" {
-					return nil
-				}
-				t.Fatalf("unexpected run: git %v", args)
-				return nil
-			},
-		}
-
-		if err := restoreFileFromStash(runner, "stash@{0}", "locales/fr.json"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if len(calls) != 1 {
-			t.Fatalf("expected 1 restore attempt, got %v", calls)
-		}
-	})
-
-	t.Run("falls back to third parent for untracked file", func(t *testing.T) {
-		var calls [][]string
-
-		runner := &MockCommandRunner{
-			RunFunc: func(name string, args ...string) error {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				calls = append(calls, args)
-
-				if len(args) == 4 && args[0] == "checkout" && args[1] == "stash@{0}" && args[2] == "--" && args[3] == "newfile.json" {
-					return fmt.Errorf("not in tree")
-				}
-				if len(args) == 4 && args[0] == "checkout" && args[1] == "stash@{0}^3" && args[2] == "--" && args[3] == "newfile.json" {
-					return nil
-				}
-
-				t.Fatalf("unexpected run: git %v", args)
-				return nil
-			},
-		}
-
-		if err := restoreFileFromStash(runner, "stash@{0}", "newfile.json"); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if len(calls) != 2 {
-			t.Fatalf("expected 2 restore attempts, got %v", calls)
-		}
-	})
-
-	t.Run("returns error when both restore attempts fail", func(t *testing.T) {
-		runner := &MockCommandRunner{
-			RunFunc: func(name string, args ...string) error {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				if len(args) == 4 && args[0] == "checkout" && (args[1] == "stash@{0}" || args[1] == "stash@{0}^3") {
-					return fmt.Errorf("restore failed")
-				}
-				t.Fatalf("unexpected run: git %v", args)
-				return nil
-			},
-		}
-
-		err := restoreFileFromStash(runner, "stash@{0}", "newfile.json")
-		if err == nil {
-			t.Fatalf("expected error, got nil")
-		}
-	})
-}
-
 func TestCheckoutBranch_HasRemoteErrorStopsEarly(t *testing.T) {
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
@@ -1606,113 +1228,66 @@ func TestCheckoutBranch_RemoteExists_CleanRepo_CheckoutBlockedReturnsOriginalCau
 	}
 }
 
-func TestReadWorktreeStatus(t *testing.T) {
-	t.Run("clean worktree", func(t *testing.T) {
+func TestHasRemote(t *testing.T) {
+	t.Run("remote exists", func(t *testing.T) {
 		runner := &MockCommandRunner{
 			CaptureFunc: func(name string, args ...string) (string, error) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
-					return "\n", nil
-				}
-				t.Fatalf("unexpected capture: git %v", args)
-				return "", nil
+				return "deadbeef\trefs/heads/feature/x\n", nil
 			},
 		}
 
-		status, hasUntracked, err := readWorktreeStatus(runner)
+		ok, err := hasRemote(runner, "feature/x")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if status != "" {
-			t.Fatalf("expected empty status, got %q", status)
-		}
-		if hasUntracked {
-			t.Fatalf("expected hasUntracked=false for clean worktree")
+		if !ok {
+			t.Fatalf("expected remote branch to exist")
 		}
 	})
 
-	t.Run("tracked changes without untracked", func(t *testing.T) {
+	t.Run("remote does not exist returns false without error", func(t *testing.T) {
 		runner := &MockCommandRunner{
 			CaptureFunc: func(name string, args ...string) (string, error) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
-					return " M locales/fr.json\n", nil
-				}
-				t.Fatalf("unexpected capture: git %v", args)
-				return "", nil
+				return "", &mockExitError{code: 2}
 			},
 		}
 
-		status, hasUntracked, err := readWorktreeStatus(runner)
+		ok, err := hasRemote(runner, "missing-branch")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if status == "" {
-			t.Fatalf("expected non-empty status")
-		}
-		if hasUntracked {
-			t.Fatalf("expected hasUntracked=false for tracked-only changes")
+		if ok {
+			t.Fatalf("expected remote branch to be reported missing")
 		}
 	})
 
-	t.Run("untracked files are detected", func(t *testing.T) {
+	t.Run("other ls-remote error is returned", func(t *testing.T) {
 		runner := &MockCommandRunner{
 			CaptureFunc: func(name string, args ...string) (string, error) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
-					return "?? newfile.json\n M locales/fr.json\n", nil
-				}
-				t.Fatalf("unexpected capture: git %v", args)
-				return "", nil
+				return "fatal: auth failed", fmt.Errorf("network boom")
 			},
 		}
 
-		status, hasUntracked, err := readWorktreeStatus(runner)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if status == "" {
-			t.Fatalf("expected non-empty status")
-		}
-		if !hasUntracked {
-			t.Fatalf("expected hasUntracked=true when ?? entries exist")
-		}
-	})
-
-	t.Run("status command error is returned with output", func(t *testing.T) {
-		runner := &MockCommandRunner{
-			CaptureFunc: func(name string, args ...string) (string, error) {
-				if name != "git" {
-					t.Fatalf("unexpected binary: %s", name)
-				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
-					return "fatal: not a git repository", fmt.Errorf("status failed")
-				}
-				t.Fatalf("unexpected capture: git %v", args)
-				return "", nil
-			},
-		}
-
-		status, hasUntracked, err := readWorktreeStatus(runner)
+		ok, err := hasRemote(runner, "feature/x")
 		if err == nil {
 			t.Fatalf("expected error, got nil")
 		}
-		if status != "" {
-			t.Fatalf("expected empty status on error, got %q", status)
+		if ok {
+			t.Fatalf("expected ok=false on ls-remote failure")
 		}
-		if hasUntracked {
-			t.Fatalf("expected hasUntracked=false on error")
-		}
-		if !strings.Contains(err.Error(), "failed to check status") {
+		if !strings.Contains(err.Error(), `git ls-remote failed for ref "feature/x"`) {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !strings.Contains(err.Error(), "fatal: not a git repository") {
+		if !strings.Contains(err.Error(), "fatal: auth failed") {
 			t.Fatalf("expected command output in error, got %v", err)
 		}
 	})

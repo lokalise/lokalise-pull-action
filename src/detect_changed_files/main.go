@@ -7,7 +7,6 @@ import (
 	"os/exec"
 
 	"github.com/bodrovis/lokalise-actions-common/v2/githuboutput"
-	"github.com/bodrovis/lokalise-actions-common/v2/managedpaths"
 )
 
 // This program inspects git state to decide whether translation files changed.
@@ -32,48 +31,78 @@ func (d DefaultCommandRunner) Capture(name string, args ...string) (string, erro
 }
 
 func main() {
-	config, err := prepareConfig()
+	if err := run(); err != nil {
+		returnWithError(err.Error())
+	}
+}
+
+func run() error {
+	return runWith(
+		prepareConfig,
+		detectChangedFiles,
+		githuboutput.WriteToGitHubOutput,
+		DefaultCommandRunner{},
+	)
+}
+
+type detectFunc func(*Config, CommandRunner) (bool, error)
+
+func runWith(
+	prepare func() (*Config, error),
+	detect detectFunc,
+	write func(string, string) bool,
+	runner CommandRunner,
+) error {
+	cfg, err := prepare()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error preparing configuration:", err)
-		os.Exit(1)
+		return fmt.Errorf("error preparing configuration: %w", err)
 	}
 
-	changed, err := detectChangedFiles(config, DefaultCommandRunner{})
+	changed, err := detectChanges(cfg, detect, runner)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error detecting changes:", err)
-		os.Exit(1)
+		return err
 	}
 
-	var outputValue string
+	if err := writeChangesOutput(changed, write); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func detectChanges(
+	cfg *Config,
+	detect detectFunc,
+	runner CommandRunner,
+) (bool, error) {
+	changed, err := detect(cfg, runner)
+	if err != nil {
+		return false, fmt.Errorf("error detecting changes: %w", err)
+	}
+
+	return changed, nil
+}
+
+func writeChangesOutput(
+	changed bool,
+	write func(string, string) bool,
+) error {
+	outputValue := "false"
 	if changed {
 		outputValue = "true"
 		fmt.Println("Detected changes in translation files.")
 	} else {
-		outputValue = "false"
 		fmt.Println("No changes detected in translation files.")
 	}
 
-	if !githuboutput.WriteToGitHubOutput("has_changes", outputValue) {
-		fmt.Fprintln(os.Stderr, "Failed to write to GitHub output.")
-		os.Exit(1)
+	if !write("has_changes", outputValue) {
+		return fmt.Errorf("failed to write to GitHub output")
 	}
+
+	return nil
 }
 
-// detectChangedFiles keeps the entrypoint thin by delegating all Git path
-// collection and translation-file matching to shared helpers.
-func detectChangedFiles(config *Config, runner CommandRunner) (bool, error) {
-	scope := buildTranslationScope(config)
-	return managedpaths.HasManagedGitPaths(runner, scope)
-}
-
-// buildTranslationScope converts env-derived action config into the shared
-// managed path scope used by change detection helpers.
-func buildTranslationScope(config *Config) managedpaths.TranslationScope {
-	return managedpaths.TranslationScope{
-		Paths:          config.Paths,
-		FileExt:        config.FileExt,
-		FlatNaming:     config.FlatNaming,
-		AlwaysPullBase: config.AlwaysPullBase,
-		BaseLang:       config.BaseLang,
-	}
+func returnWithError(message string) {
+	fmt.Fprintln(os.Stderr, message)
+	os.Exit(1)
 }

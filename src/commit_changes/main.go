@@ -50,25 +50,66 @@ func (d DefaultCommandRunner) Capture(name string, args ...string) (string, erro
 	return out.String(), err
 }
 
+type commitFunc func(CommandRunner) (string, error)
+
 func main() {
-	branchName, err := commitAndPushChanges(DefaultCommandRunner{})
+	if err := run(); err != nil {
+		returnWithError(err.Error())
+	}
+}
+
+func run() error {
+	return runWith(
+		commitAndPushChanges,
+		githuboutput.WriteToGitHubOutput,
+		DefaultCommandRunner{},
+	)
+}
+
+func runWith(
+	commit commitFunc,
+	write func(string, string) bool,
+	runner CommandRunner,
+) error {
+	branchName, err := performCommit(commit, runner)
 	if err != nil {
-		if err == ErrNoChanges {
-			// Not an error for CI: just exit 0 to avoid failing the workflow.
+		return err
+	}
+
+	return writeOutputs(branchName, write)
+}
+
+func performCommit(
+	commit commitFunc,
+	runner CommandRunner,
+) (string, error) {
+	branchName, err := commit(runner)
+	if err != nil {
+		if errors.Is(err, ErrNoChanges) {
 			fmt.Fprintln(os.Stderr, "No changes detected, exiting")
-			os.Exit(0)
+			return "", nil
 		}
 
-		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		os.Exit(1)
+		return "", fmt.Errorf("error committing and pushing changes: %w", err)
 	}
 
-	// Tell the composite action what's the branch and that a commit was produced.
-	if !githuboutput.WriteToGitHubOutput("branch_name", branchName) ||
-		!githuboutput.WriteToGitHubOutput("commit_created", "true") {
-		fmt.Fprintln(os.Stderr, "Failed to write to GitHub output, exiting")
-		os.Exit(1)
+	return branchName, nil
+}
+
+func writeOutputs(
+	branchName string,
+	write func(string, string) bool,
+) error {
+	if branchName == "" {
+		return nil
 	}
+
+	if !write("branch_name", branchName) ||
+		!write("commit_created", "true") {
+		return fmt.Errorf("failed to write to GitHub output")
+	}
+
+	return nil
 }
 
 func splitNonEmptyLines(s string) []string {
@@ -121,4 +162,9 @@ func sanitizeString(input string, maxLength int) string {
 		return result[:maxLength]
 	}
 	return result
+}
+
+func returnWithError(message string) {
+	fmt.Fprintln(os.Stderr, message)
+	os.Exit(1)
 }
