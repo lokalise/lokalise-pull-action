@@ -201,11 +201,15 @@ func TestRestoreFileFromStash(t *testing.T) {
 	})
 
 	t.Run("returns error when both restore attempts fail", func(t *testing.T) {
+		var calls [][]string
+
 		runner := &MockCommandRunner{
 			RunFunc: func(name string, args ...string) error {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
+				calls = append(calls, args)
+
 				if len(args) == 4 && args[0] == "checkout" && (args[1] == "stash@{0}" || args[1] == "stash@{0}^3") {
 					return fmt.Errorf("restore failed")
 				}
@@ -217,6 +221,9 @@ func TestRestoreFileFromStash(t *testing.T) {
 		err := restoreFileFromStash(runner, "stash@{0}", "newfile.json")
 		if err == nil {
 			t.Fatalf("expected error, got nil")
+		}
+		if len(calls) != 2 {
+			t.Fatalf("expected 2 restore attempts, got %v", calls)
 		}
 	})
 }

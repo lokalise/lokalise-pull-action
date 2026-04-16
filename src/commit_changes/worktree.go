@@ -35,6 +35,14 @@ func readWorktreeStatus(runner CommandRunner) (status string, hasUntracked bool,
 	}
 
 	status = strings.TrimSpace(out)
-	hasUntracked = strings.Contains(out, "?? ")
-	return status, hasUntracked, nil
+	return status, hasUntrackedFiles(status), nil
+}
+
+func hasUntrackedFiles(status string) bool {
+	for _, line := range strings.Split(status, "\n") {
+		if strings.HasPrefix(line, "?? ") {
+			return true
+		}
+	}
+	return false
 }

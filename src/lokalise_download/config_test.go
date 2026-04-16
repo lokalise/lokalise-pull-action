@@ -104,7 +104,6 @@ func TestPrepareConfig_TokenAndRefFallbacks(t *testing.T) {
 		t.Fatal("AsyncMode should be false on bad input")
 	}
 
-	// дефолты из констант
 	if cfg.MaxRetries != defaultMaxRetries {
 		t.Fatalf("MaxRetries default expected %d, got %d", defaultMaxRetries, cfg.MaxRetries)
 	}

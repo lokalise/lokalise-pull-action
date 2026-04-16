@@ -214,4 +214,77 @@ func TestReadWorktreeStatus(t *testing.T) {
 			t.Fatalf("expected command output in error, got %v", err)
 		}
 	})
+
+	t.Run("question marks inside tracked filename do not count as untracked", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			CaptureFunc: func(name string, args ...string) (string, error) {
+				if name != "git" {
+					t.Fatalf("unexpected binary: %s", name)
+				}
+				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
+					return " M locales/what?? file.json\n", nil
+				}
+				t.Fatalf("unexpected capture: git %v", args)
+				return "", nil
+			},
+		}
+
+		status, hasUntracked, err := readWorktreeStatus(runner)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if status == "" {
+			t.Fatalf("expected non-empty status")
+		}
+		if hasUntracked {
+			t.Fatalf("expected hasUntracked=false when ?? appears inside tracked filename")
+		}
+	})
+}
+
+func TestHasUntrackedFiles(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		status string
+		want   bool
+	}{
+		{
+			name:   "empty",
+			status: "",
+			want:   false,
+		},
+		{
+			name:   "tracked only",
+			status: " M locales/fr.json\nA  locales/de.json",
+			want:   false,
+		},
+		{
+			name:   "untracked entry",
+			status: "?? newfile.json\n M locales/fr.json",
+			want:   true,
+		},
+		{
+			name:   "question marks inside filename",
+			status: " M locales/what?? file.json",
+			want:   false,
+		},
+		{
+			name:   "multiple lines with untracked later",
+			status: " M locales/fr.json\n?? locales/new.json",
+			want:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := hasUntrackedFiles(tt.status)
+			if got != tt.want {
+				t.Fatalf("hasUntrackedFiles(%q) = %v, want %v", tt.status, got, tt.want)
+			}
+		})
+	}
 }

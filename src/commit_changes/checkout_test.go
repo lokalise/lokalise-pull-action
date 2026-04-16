@@ -1230,16 +1230,29 @@ func TestCheckoutBranch_RemoteExists_CleanRepo_CheckoutBlockedReturnsOriginalCau
 
 func TestHasRemote(t *testing.T) {
 	t.Run("remote exists", func(t *testing.T) {
+		wantRef := "feature/x"
+
 		runner := &MockCommandRunner{
 			CaptureFunc: func(name string, args ...string) (string, error) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
+
+				wantArgs := []string{"ls-remote", "--exit-code", "--heads", "origin", wantRef}
+				if len(args) != len(wantArgs) {
+					t.Fatalf("unexpected args count: got %v want %v", args, wantArgs)
+				}
+				for i := range wantArgs {
+					if args[i] != wantArgs[i] {
+						t.Fatalf("unexpected args: got %v want %v", args, wantArgs)
+					}
+				}
+
 				return "deadbeef\trefs/heads/feature/x\n", nil
 			},
 		}
 
-		ok, err := hasRemote(runner, "feature/x")
+		ok, err := hasRemote(runner, wantRef)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1249,16 +1262,29 @@ func TestHasRemote(t *testing.T) {
 	})
 
 	t.Run("remote does not exist returns false without error", func(t *testing.T) {
+		wantRef := "missing-branch"
+
 		runner := &MockCommandRunner{
 			CaptureFunc: func(name string, args ...string) (string, error) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
+
+				wantArgs := []string{"ls-remote", "--exit-code", "--heads", "origin", wantRef}
+				if len(args) != len(wantArgs) {
+					t.Fatalf("unexpected args count: got %v want %v", args, wantArgs)
+				}
+				for i := range wantArgs {
+					if args[i] != wantArgs[i] {
+						t.Fatalf("unexpected args: got %v want %v", args, wantArgs)
+					}
+				}
+
 				return "", &mockExitError{code: 2}
 			},
 		}
 
-		ok, err := hasRemote(runner, "missing-branch")
+		ok, err := hasRemote(runner, wantRef)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1268,16 +1294,29 @@ func TestHasRemote(t *testing.T) {
 	})
 
 	t.Run("other ls-remote error is returned", func(t *testing.T) {
+		wantRef := "feature/x"
+
 		runner := &MockCommandRunner{
 			CaptureFunc: func(name string, args ...string) (string, error) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
+
+				wantArgs := []string{"ls-remote", "--exit-code", "--heads", "origin", wantRef}
+				if len(args) != len(wantArgs) {
+					t.Fatalf("unexpected args count: got %v want %v", args, wantArgs)
+				}
+				for i := range wantArgs {
+					if args[i] != wantArgs[i] {
+						t.Fatalf("unexpected args: got %v want %v", args, wantArgs)
+					}
+				}
+
 				return "fatal: auth failed", fmt.Errorf("network boom")
 			},
 		}
 
-		ok, err := hasRemote(runner, "feature/x")
+		ok, err := hasRemote(runner, wantRef)
 		if err == nil {
 			t.Fatalf("expected error, got nil")
 		}
