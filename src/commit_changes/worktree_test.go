@@ -10,11 +10,28 @@ func TestWorktreeEqualsRef(t *testing.T) {
 	const ref = "origin/feature/x"
 
 	t.Run("worktree and index both match", func(t *testing.T) {
+		call := 0
+
 		runner := &MockCommandRunner{
 			CaptureFunc: func(name string, args ...string) (string, error) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
+
+				switch call {
+				case 0:
+					if len(args) != 3 || args[0] != "diff" || args[1] != "--quiet" || args[2] != ref {
+						t.Fatalf("unexpected first capture: git %v", args)
+					}
+				case 1:
+					if len(args) != 4 || args[0] != "diff" || args[1] != "--quiet" || args[2] != "--cached" || args[3] != ref {
+						t.Fatalf("unexpected second capture: git %v", args)
+					}
+				default:
+					t.Fatalf("unexpected extra capture: git %v", args)
+				}
+				call++
+
 				return "", nil
 			},
 		}
@@ -25,6 +42,10 @@ func TestWorktreeEqualsRef(t *testing.T) {
 		}
 		if !same {
 			t.Fatalf("expected worktree to match ref")
+		}
+
+		if call != 2 {
+			t.Fatalf("expected exactly 2 capture calls, got %d", call)
 		}
 	})
 
