@@ -1,9 +1,7 @@
-github.com/bodrovis/lokalise-actions-common/v2 v2.12.1 h1:3C9xe2DM6jE7pxcD+dBMPZRhTYQGR+N2CVzgivCYRPQ=
-github.com/bodrovis/lokalise-actions-common/v2 v2.12.1/go.mod h1:cbR3m7xOm6Idv7F0xeyPame5vDpbDCD2VwUAXHf6DGk=
 github.com/bodrovis/lokalise-actions-common/v2 v2.13.0 h1:d6swykucMsVvnoqkZiXodTqQXA74t31DUIgJYc3XIIQ=
 github.com/bodrovis/lokalise-actions-common/v2 v2.13.0/go.mod h1:cbR3m7xOm6Idv7F0xeyPame5vDpbDCD2VwUAXHf6DGk=
-github.com/bodrovis/lokex/v2 v2.2.0 h1:Gv9Wfst3+wzInwtdOH81NDPOFbCPb11SZs0JcaFz2yA=
-github.com/bodrovis/lokex/v2 v2.2.0/go.mod h1:cj+UkLkaG6Q9bhdah62G2EDGMpS/Awi3/ANkVn2LR6g=
+github.com/bodrovis/lokex/v2 v2.3.0 h1:hgdkKEySVthY8PP6QuNnyrxY5sSBKMl7jNt0sN+/6r0=
+github.com/bodrovis/lokex/v2 v2.3.0/go.mod h1:cj+UkLkaG6Q9bhdah62G2EDGMpS/Awi3/ANkVn2LR6g=
 github.com/jarcoal/httpmock v1.4.1 h1:0Ju+VCFuARfFlhVXFc2HxlcQkfB+Xq12/EotHko+x2A=
 github.com/jarcoal/httpmock v1.4.1/go.mod h1:ftW1xULwo+j0R0JJkJIIi7UKigZUXCLLanykgjwBXL0=
 github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
