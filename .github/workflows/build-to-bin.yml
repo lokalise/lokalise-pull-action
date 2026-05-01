@@ -7,6 +7,10 @@ permissions:
   contents: write
   id-token: write
 
+concurrency:
+  group: build-to-bin-${{ github.ref }}
+  cancel-in-progress: false
+  
 jobs:
   build:
     name: build ${{ matrix.module }} (${{ matrix.target }})
@@ -206,8 +210,6 @@ jobs:
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v4.1.1
-        with:
-          cosign-release: 'v3.0.2'
 
       - name: Compute expected identity
         id: ident
@@ -279,13 +281,15 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add bin/sbom.spdx.json
-          git commit -m "ci: add SBOM for bin [skip ci]" || true
-          git push || true
+          if git diff --cached --quiet; then
+            echo "No SBOM changes."
+          else
+            git commit -m "ci: add SBOM for bin [skip ci]"
+            git push origin HEAD:"${GITHUB_REF_NAME}"
+          fi
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v4.1.1
-        with:
-          cosign-release: 'v3.0.2'
 
       - name: Get OIDC token
         id: token
@@ -340,5 +344,9 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add bin/checksums.txt.attestation
-          git commit -m "ci: add attestation for checksums.txt [skip ci]" || true
-          git push || true
+          if git diff --cached --quiet; then
+            echo "No attestation changes."
+          else
+            git commit -m "ci: add attestation for checksums.txt [skip ci]"
+            git push origin HEAD:"${GITHUB_REF_NAME}"
+          fi
