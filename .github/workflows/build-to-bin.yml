@@ -289,7 +289,7 @@ jobs:
 
       - name: Get OIDC token
         id: token
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const token = await core.getIDToken('sigstore');
