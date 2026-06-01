@@ -209,7 +209,7 @@ jobs:
           ls -lah bin || true
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.1
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Compute expected identity
         id: ident
@@ -289,7 +289,7 @@ jobs:
           fi
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.1
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Get OIDC token
         id: token
