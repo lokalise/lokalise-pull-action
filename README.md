@@ -122,7 +122,7 @@ file_ext: |
 - `async_mode` (*default: `false`*) — Download translations in asynchronous mode. Not recommended for small projects but *required* for larger ones (>= 10 000 key-language pairs; sync downloads for such projects will fail).
 - `flat_naming` (*default: `false`*) — Use flat naming convention. Set to `true` if your translation files follow a flat naming pattern like `locales/en.json` instead of `locales/en/file.json`.
 - `skip_include_tags` (*default: `false`*) — Skip setting the `"include_tags"` param during download. This will download all translation keys for the specified format, regardless of tags.
-- `skip_original_filenames` (*default: `false`*) — Skip setting the `"original_filenames": true` and `"directory_prefix": "/"` params during download. You can disable original filenames by setting `"original_filenames": false` explicitly via `additional_params`.
+- `skip_original_filenames` (*default: `false`*) — Skip setting the `"directory_prefix": "/"` and set `"original_filenames": false` explicitly.
 - `additional_params` (*default: empty*) — Extra parameters to pass when sending [File download API request](https://developers.lokalise.com/reference/download-files). Must be valid JSON or YAML. For example, you can use `"indentation": "2sp"` to manage indentation. Multiple params can be specified:
 
 ```yaml
