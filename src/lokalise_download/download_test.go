@@ -48,6 +48,31 @@ func TestBuildDownloadParams_JSON_MergesAndOverrides(t *testing.T) {
 	}
 }
 
+func TestBuildDownloadParams_SkipOriginalFilenames_Enabled(t *testing.T) {
+	cfg := DownloadConfig{
+		FileFormat:            "json",
+		SkipIncludeTags:       false,
+		SkipOriginalFilenames: true,
+		AdditionalParams: `
+{
+  "include_tags": ["custom-1","custom-2"]
+}
+`,
+	}
+
+	params := buildDownloadParams(cfg)
+
+	want := download.DownloadParams{
+		"format":             "json",
+		"original_filenames": false,
+		"include_tags":       []any{"custom-1", "custom-2"},
+	}
+
+	if !reflect.DeepEqual(params, want) {
+		t.Fatalf("params mismatch.\n got: %#v\nwant: %#v", params, want)
+	}
+}
+
 func TestBuildDownloadParams_YAML_MergesAndOverrides(t *testing.T) {
 	cfg := DownloadConfig{
 		FileFormat:            "json",

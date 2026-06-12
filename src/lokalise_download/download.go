@@ -88,7 +88,9 @@ func buildDownloadParams(config DownloadConfig) download.DownloadParams {
 		"format": config.FileFormat,
 	}
 
-	if !config.SkipOriginalFilenames {
+	if config.SkipOriginalFilenames {
+		params["original_filenames"] = false
+	} else {
 		// Preserve original bundle structure.
 		params["original_filenames"] = true
 		// "/" makes Lokalise export into repo root relative structure.
