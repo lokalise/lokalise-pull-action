@@ -57,21 +57,11 @@ func prepareConfig() DownloadConfig {
 		asyncMode = false
 	}
 
-	// Determine the branch/tag name used for include_tags.
-	// On push/tag events: GITHUB_REF_NAME is present.
-	// On PR events: GITHUB_HEAD_REF may be set -> use as a fallback.
-	refName := strings.TrimSpace(os.Getenv("GITHUB_REF_NAME"))
-	if refName == "" {
-		if v := strings.TrimSpace(os.Getenv("GITHUB_HEAD_REF")); v != "" {
-			refName = v
-		}
-	}
-
 	return DownloadConfig{
 		ProjectID:             strings.TrimSpace(os.Getenv("LOKALISE_PROJECT_ID")),
 		Token:                 strings.TrimSpace(os.Getenv("LOKALISE_API_KEY")),
 		FileFormat:            strings.TrimSpace(os.Getenv("FILE_FORMAT")),
-		GitHubRefName:         refName,
+		GitHubRefName:         resolveGitHubRefName(),
 		AdditionalParams:      strings.TrimSpace(os.Getenv("ADDITIONAL_PARAMS")),
 		SkipIncludeTags:       skipIncludeTags,
 		SkipOriginalFilenames: skipOriginalFilenames,
@@ -84,4 +74,15 @@ func prepareConfig() DownloadConfig {
 		AsyncPollInitialWait:  time.Duration(parsers.ParseUintEnv("ASYNC_POLL_INITIAL_WAIT", defaultPollInitialWait)) * time.Second,
 		AsyncPollMaxWait:      time.Duration(parsers.ParseUintEnv("ASYNC_POLL_MAX_WAIT", defaultPollMaxWait)) * time.Second,
 	}
+}
+
+// Determine the branch/tag name used for include_tags.
+// On PR events, prefer GITHUB_HEAD_REF because GITHUB_REF_NAME may be "<pr_number>/merge".
+// On push/tag events, fall back to GITHUB_REF_NAME.
+func resolveGitHubRefName() string {
+	if v := strings.TrimSpace(os.Getenv("GITHUB_HEAD_REF")); v != "" {
+		return v
+	}
+
+	return strings.TrimSpace(os.Getenv("GITHUB_REF_NAME"))
 }

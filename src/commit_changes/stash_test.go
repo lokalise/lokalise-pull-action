@@ -15,7 +15,7 @@ func TestStashIfDirty(t *testing.T) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
+				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain=v1" {
 					return "\n", nil
 				}
 				t.Fatalf("unexpected capture: git %v", args)
@@ -27,9 +27,12 @@ func TestStashIfDirty(t *testing.T) {
 			},
 		}
 
-		didStash, err := stashIfDirty(runner, "lokalise-temp")
+		stashRef, didStash, err := stashIfDirty(runner, "lokalise-temp")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+		if stashRef != "" {
+			t.Fatalf("expected empty stashRef for clean worktree, got %q", stashRef)
 		}
 		if didStash {
 			t.Fatalf("expected didStash=false for clean worktree")
@@ -47,9 +50,18 @@ func TestStashIfDirty(t *testing.T) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
+
+				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain=v1" {
 					return " M locales/fr.json\n", nil
 				}
+
+				if len(args) == 3 &&
+					args[0] == "rev-parse" &&
+					args[1] == "--verify" &&
+					args[2] == "stash@{0}" {
+					return "abc123stash\n", nil
+				}
+
 				t.Fatalf("unexpected capture: git %v", args)
 				return "", nil
 			},
@@ -71,9 +83,12 @@ func TestStashIfDirty(t *testing.T) {
 			},
 		}
 
-		didStash, err := stashIfDirty(runner, "lokalise-temp")
+		stashRef, didStash, err := stashIfDirty(runner, "lokalise-temp")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+		if stashRef != "abc123stash" {
+			t.Fatalf("expected stash ref, got %q", stashRef)
 		}
 		if !didStash {
 			t.Fatalf("expected didStash=true for dirty worktree")
@@ -93,9 +108,12 @@ func TestStashIfDirty(t *testing.T) {
 			},
 		}
 
-		didStash, err := stashIfDirty(runner, "lokalise-temp")
+		stashRef, didStash, err := stashIfDirty(runner, "lokalise-temp")
 		if err == nil {
 			t.Fatalf("expected error, got nil")
+		}
+		if stashRef != "" {
+			t.Fatalf("expected empty stashRef on status error, got %q", stashRef)
 		}
 		if didStash {
 			t.Fatalf("expected didStash=false on status error")
@@ -111,7 +129,7 @@ func TestStashIfDirty(t *testing.T) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
+				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain=v1" {
 					return " M locales/fr.json\n", nil
 				}
 				t.Fatalf("unexpected capture: git %v", args)
@@ -129,14 +147,67 @@ func TestStashIfDirty(t *testing.T) {
 			},
 		}
 
-		didStash, err := stashIfDirty(runner, "lokalise-temp")
+		stashRef, didStash, err := stashIfDirty(runner, "lokalise-temp")
 		if err == nil {
 			t.Fatalf("expected error, got nil")
+		}
+		if stashRef != "" {
+			t.Fatalf("expected empty stashRef when stash push fails, got %q", stashRef)
 		}
 		if didStash {
 			t.Fatalf("expected didStash=false when stash push fails")
 		}
 		if !strings.Contains(err.Error(), "failed to stash changes") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rev-parse error is returned", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			CaptureFunc: func(name string, args ...string) (string, error) {
+				if name != "git" {
+					t.Fatalf("unexpected binary: %s", name)
+				}
+
+				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain=v1" {
+					return " M locales/fr.json\n", nil
+				}
+
+				if len(args) == 3 &&
+					args[0] == "rev-parse" &&
+					args[1] == "--verify" &&
+					args[2] == "stash@{0}" {
+					return "fatal: bad revision", fmt.Errorf("rev-parse failed")
+				}
+
+				t.Fatalf("unexpected capture: git %v", args)
+				return "", nil
+			},
+			RunFunc: func(name string, args ...string) error {
+				if name != "git" {
+					t.Fatalf("unexpected binary: %s", name)
+				}
+
+				if len(args) == 5 && args[0] == "stash" && args[1] == "push" {
+					return nil
+				}
+
+				t.Fatalf("unexpected run: git %v", args)
+				return nil
+			},
+		}
+
+		stashRef, didStash, err := stashIfDirty(runner, "lokalise-temp")
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if stashRef != "" {
+			t.Fatalf("expected empty stashRef on rev-parse error, got %q", stashRef)
+		}
+		if didStash {
+			t.Fatalf("expected didStash=false on rev-parse error")
+		}
+		if !strings.Contains(err.Error(), "failed to resolve created stash ref") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -224,6 +295,320 @@ func TestRestoreFileFromStash(t *testing.T) {
 		}
 		if len(calls) != 2 {
 			t.Fatalf("expected 2 restore attempts, got %v", calls)
+		}
+	})
+}
+
+func TestFindStashSelectorByHash(t *testing.T) {
+	t.Run("finds selector by exact hash", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			CaptureFunc: func(name string, args ...string) (string, error) {
+				if name != "git" {
+					return "", fmt.Errorf("unexpected binary: %s", name)
+				}
+
+				if len(args) == 3 &&
+					args[0] == "stash" &&
+					args[1] == "list" &&
+					args[2] == "--format=%H%x09%gd" {
+					return "aaa111\tstash@{0}\nabc123stash\tstash@{1}\n", nil
+				}
+
+				return "", fmt.Errorf("unexpected capture: git %v", args)
+			},
+		}
+
+		got, err := findStashSelectorByHash(runner, "abc123stash")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if got != "stash@{1}" {
+			t.Fatalf("expected stash@{1}, got %q", got)
+		}
+	})
+
+	t.Run("trims input hash", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			CaptureFunc: func(name string, args ...string) (string, error) {
+				if name != "git" {
+					return "", fmt.Errorf("unexpected binary: %s", name)
+				}
+
+				if len(args) == 3 &&
+					args[0] == "stash" &&
+					args[1] == "list" &&
+					args[2] == "--format=%H%x09%gd" {
+					return "abc123stash\tstash@{0}\n", nil
+				}
+
+				return "", fmt.Errorf("unexpected capture: git %v", args)
+			},
+		}
+
+		got, err := findStashSelectorByHash(runner, "  abc123stash  ")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if got != "stash@{0}" {
+			t.Fatalf("expected stash@{0}, got %q", got)
+		}
+	})
+
+	t.Run("empty hash returns error", func(t *testing.T) {
+		runner := &MockCommandRunner{}
+
+		got, err := findStashSelectorByHash(runner, "   ")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+
+		if got != "" {
+			t.Fatalf("expected empty selector, got %q", got)
+		}
+
+		if !strings.Contains(err.Error(), "stash hash is empty") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("stash list error is returned", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			CaptureFunc: func(name string, args ...string) (string, error) {
+				if name != "git" {
+					return "", fmt.Errorf("unexpected binary: %s", name)
+				}
+
+				if len(args) == 3 &&
+					args[0] == "stash" &&
+					args[1] == "list" &&
+					args[2] == "--format=%H%x09%gd" {
+					return "fatal: broken stash", fmt.Errorf("stash list failed")
+				}
+
+				return "", fmt.Errorf("unexpected capture: git %v", args)
+			},
+		}
+
+		got, err := findStashSelectorByHash(runner, "abc123stash")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+
+		if got != "" {
+			t.Fatalf("expected empty selector, got %q", got)
+		}
+
+		if !strings.Contains(err.Error(), "failed to list stashes") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("ignores malformed lines", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			CaptureFunc: func(name string, args ...string) (string, error) {
+				if name != "git" {
+					return "", fmt.Errorf("unexpected binary: %s", name)
+				}
+
+				if len(args) == 3 &&
+					args[0] == "stash" &&
+					args[1] == "list" &&
+					args[2] == "--format=%H%x09%gd" {
+					return "malformed-line-without-tab\nabc123stash\tstash@{2}\n", nil
+				}
+
+				return "", fmt.Errorf("unexpected capture: git %v", args)
+			},
+		}
+
+		got, err := findStashSelectorByHash(runner, "abc123stash")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if got != "stash@{2}" {
+			t.Fatalf("expected stash@{2}, got %q", got)
+		}
+	})
+
+	t.Run("matched hash with empty selector returns error", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			CaptureFunc: func(name string, args ...string) (string, error) {
+				if name != "git" {
+					return "", fmt.Errorf("unexpected binary: %s", name)
+				}
+
+				if len(args) == 3 &&
+					args[0] == "stash" &&
+					args[1] == "list" &&
+					args[2] == "--format=%H%x09%gd" {
+					return "abc123stash\t   \n", nil
+				}
+
+				return "", fmt.Errorf("unexpected capture: git %v", args)
+			},
+		}
+
+		got, err := findStashSelectorByHash(runner, "abc123stash")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+
+		if got != "" {
+			t.Fatalf("expected empty selector, got %q", got)
+		}
+
+		if !strings.Contains(err.Error(), "selector is empty") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("hash not found returns error", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			CaptureFunc: func(name string, args ...string) (string, error) {
+				if name != "git" {
+					return "", fmt.Errorf("unexpected binary: %s", name)
+				}
+
+				if len(args) == 3 &&
+					args[0] == "stash" &&
+					args[1] == "list" &&
+					args[2] == "--format=%H%x09%gd" {
+					return "aaa111\tstash@{0}\nbbb222\tstash@{1}\n", nil
+				}
+
+				return "", fmt.Errorf("unexpected capture: git %v", args)
+			},
+		}
+
+		got, err := findStashSelectorByHash(runner, "abc123stash")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+
+		if got != "" {
+			t.Fatalf("expected empty selector, got %q", got)
+		}
+
+		if !strings.Contains(err.Error(), "was not found in stash list") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestDropStashByHash(t *testing.T) {
+	t.Run("drops resolved stash selector", func(t *testing.T) {
+		var droppedSelector string
+
+		runner := &MockCommandRunner{
+			CaptureFunc: func(name string, args ...string) (string, error) {
+				if name != "git" {
+					return "", fmt.Errorf("unexpected binary: %s", name)
+				}
+
+				if len(args) == 3 &&
+					args[0] == "stash" &&
+					args[1] == "list" &&
+					args[2] == "--format=%H%x09%gd" {
+					return "abc123stash\tstash@{3}\n", nil
+				}
+
+				return "", fmt.Errorf("unexpected capture: git %v", args)
+			},
+			RunFunc: func(name string, args ...string) error {
+				if name != "git" {
+					return fmt.Errorf("unexpected binary: %s", name)
+				}
+
+				if len(args) == 3 &&
+					args[0] == "stash" &&
+					args[1] == "drop" {
+					droppedSelector = args[2]
+					return nil
+				}
+
+				return fmt.Errorf("unexpected run: git %v", args)
+			},
+		}
+
+		if err := dropStashByHash(runner, "abc123stash"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if droppedSelector != "stash@{3}" {
+			t.Fatalf("expected stash@{3} to be dropped, got %q", droppedSelector)
+		}
+	})
+
+	t.Run("returns resolver error", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			CaptureFunc: func(name string, args ...string) (string, error) {
+				if name != "git" {
+					return "", fmt.Errorf("unexpected binary: %s", name)
+				}
+
+				if len(args) == 3 &&
+					args[0] == "stash" &&
+					args[1] == "list" &&
+					args[2] == "--format=%H%x09%gd" {
+					return "aaa111\tstash@{0}\n", nil
+				}
+
+				return "", fmt.Errorf("unexpected capture: git %v", args)
+			},
+		}
+
+		err := dropStashByHash(runner, "abc123stash")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+
+		if !strings.Contains(err.Error(), "was not found in stash list") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("returns drop error", func(t *testing.T) {
+		runner := &MockCommandRunner{
+			CaptureFunc: func(name string, args ...string) (string, error) {
+				if name != "git" {
+					return "", fmt.Errorf("unexpected binary: %s", name)
+				}
+
+				if len(args) == 3 &&
+					args[0] == "stash" &&
+					args[1] == "list" &&
+					args[2] == "--format=%H%x09%gd" {
+					return "abc123stash\tstash@{0}\n", nil
+				}
+
+				return "", fmt.Errorf("unexpected capture: git %v", args)
+			},
+			RunFunc: func(name string, args ...string) error {
+				if name != "git" {
+					return fmt.Errorf("unexpected binary: %s", name)
+				}
+
+				if len(args) == 3 &&
+					args[0] == "stash" &&
+					args[1] == "drop" &&
+					args[2] == "stash@{0}" {
+					return fmt.Errorf("drop failed")
+				}
+
+				return fmt.Errorf("unexpected run: git %v", args)
+			},
+		}
+
+		err := dropStashByHash(runner, "abc123stash")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+
+		if !strings.Contains(err.Error(), "failed to drop stash@{0}") {
+			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 }

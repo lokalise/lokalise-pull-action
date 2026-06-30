@@ -10,16 +10,16 @@ inputs:
     required: true
   base_lang:
     description: 'Base language (e.g., en, fr_FR)'
-    required: true
+    required: false
     default: 'en'
   translations_path:
     description: 'Paths to translation files'
-    required: true
+    required: false
     default: |
       locales
   file_format:
     description: 'Format of the translation files (e.g., json). Find all supported file formats at https://developers.lokalise.com/reference/api-file-formats'
-    required: true
+    required: false
     default: 'json'
   file_ext:
     description: 'Custom file extension(s) to use when searching for translation files. You can pass either a single string (e.g. json) or multiple extensions as newline-separated values (YAML block). By default, the extension is inferred from the file_format value. However, for certain formats (e.g., json_structured) or bundles (e.g., iOS with .strings and .stringsdict), this parameter allows specifying one or more extensions manually to ensure proper file matching.'
@@ -157,35 +157,35 @@ branding:
 outputs:
   created_branch:
     description: "Branch used for the PR (new temp branch on manual runs, PR head on PR runs)"
-    value: ${{ steps.create-commit.outputs.branch_name }}
+    value: ${{ steps.normalize-outputs.outputs.created_branch }}
 
   pr_exists:
     description: "True if a PR exists after this run (created or updated)"
-    value: ${{ steps.create-update-pr.outputs.pr_exists }}
+    value: ${{ steps.normalize-outputs.outputs.pr_exists }}
 
   pr_created:
     description: "True if a brand-new PR was created by this run"
-    value: ${{ steps.create-update-pr.outputs.pr_created }}
+    value: ${{ steps.normalize-outputs.outputs.pr_created }}
 
   pr_updated:
     description: "True if an existing PR was updated by this run"
-    value: ${{ steps.create-update-pr.outputs.pr_updated }}
+    value: ${{ steps.normalize-outputs.outputs.pr_updated }}
 
   pr_action:
     description: "Either 'created', 'updated', or 'none'"
-    value: ${{ steps.create-update-pr.outputs.pr_action }}
+    value: ${{ steps.normalize-outputs.outputs.pr_action }}
 
   pr_number:
     description: "Pull request number (created or existing)"
-    value: ${{ steps.create-update-pr.outputs.pr_number }}
+    value: ${{ steps.normalize-outputs.outputs.pr_number }}
 
   pr_id:
     description: "Pull request ID (created or existing)"
-    value: ${{ steps.create-update-pr.outputs.pr_id }}
+    value: ${{ steps.normalize-outputs.outputs.pr_id }}
 
   pr_url:
     description: "Pull request URL (created or existing)"
-    value: ${{ steps.create-update-pr.outputs.pr_url }}
+    value: ${{ steps.normalize-outputs.outputs.pr_url }}
 
 runs:
   using: "composite"
@@ -306,13 +306,18 @@ runs:
         POST_CMD: "${{ inputs.post_process_command }}"
       shell: bash
       run: |
-        echo "Running post-process command:"
-        printf '%s\n' "$POST_CMD"
+        set -u
+
+        echo "Running post-process command..."
 
         set +e
         bash -eo pipefail -lc "$POST_CMD"
         EXIT_CODE=$?
         set -e
+
+        STRICT="$(printf '%s' "${STRICT:-false}" \
+          | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+          | tr '[:upper:]' '[:lower:]')"
 
         if [[ "$STRICT" == "true" && "$EXIT_CODE" -ne 0 ]]; then
           echo "Post-processing failed with exit code $EXIT_CODE and strict mode is enabled. Exiting."
@@ -377,7 +382,7 @@ runs:
         PR_DRAFT: "${{ inputs.pr_draft }}"
         PR_ASSIGNEES: "${{ inputs.pr_assignees }}"
       id: create-update-pr
-      # actions/github-script@v8.0.0
+      # actions/github-script@v9.0.0
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
       with:
         github-token: ${{ inputs.custom_github_token || github.token }}
@@ -434,3 +439,50 @@ runs:
           echo "Commit created but no PR exists (unexpected)."
           exit 1
         fi
+
+    - name: Normalize outputs
+      id: normalize-outputs
+      if: always()
+      shell: bash
+      env:
+        CREATED_BRANCH_RAW: "${{ steps.create-commit.outputs.branch_name }}"
+        PR_EXISTS_RAW: "${{ steps.create-update-pr.outputs.pr_exists }}"
+        PR_CREATED_RAW: "${{ steps.create-update-pr.outputs.pr_created }}"
+        PR_UPDATED_RAW: "${{ steps.create-update-pr.outputs.pr_updated }}"
+        PR_ACTION_RAW: "${{ steps.create-update-pr.outputs.pr_action }}"
+        PR_NUMBER_RAW: "${{ steps.create-update-pr.outputs.pr_number }}"
+        PR_ID_RAW: "${{ steps.create-update-pr.outputs.pr_id }}"
+        PR_URL_RAW: "${{ steps.create-update-pr.outputs.pr_url }}"
+      run: |
+        set -euo pipefail
+
+        normalize_bool() {
+          value="$(printf '%s' "${1:-}" \
+            | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+            | tr '[:upper:]' '[:lower:]')"
+
+          case "$value" in
+            true) printf 'true' ;;
+            *) printf 'false' ;;
+          esac
+        }
+
+        pr_action="$(printf '%s' "${PR_ACTION_RAW:-}" \
+          | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+          | tr '[:upper:]' '[:lower:]')"
+
+        case "$pr_action" in
+          created|updated|none) ;;
+          *) pr_action="none" ;;
+        esac
+
+        {
+          echo "created_branch=${CREATED_BRANCH_RAW:-}"
+          echo "pr_exists=$(normalize_bool "${PR_EXISTS_RAW:-}")"
+          echo "pr_created=$(normalize_bool "${PR_CREATED_RAW:-}")"
+          echo "pr_updated=$(normalize_bool "${PR_UPDATED_RAW:-}")"
+          echo "pr_action=$pr_action"
+          echo "pr_number=${PR_NUMBER_RAW:-}"
+          echo "pr_id=${PR_ID_RAW:-}"
+          echo "pr_url=${PR_URL_RAW:-}"
+        } >> "$GITHUB_OUTPUT"

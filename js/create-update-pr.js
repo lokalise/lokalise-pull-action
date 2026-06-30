@@ -1,93 +1,225 @@
 // Purpose:
 //   Create a PR if it doesn't exist yet for the given head branch,
-//   or update metadata (draft / labels / reviewers / assignees) if it does.
+//   or update metadata (title / body / draft / labels / reviewers / assignees) if it does.
+//
 // Design notes:
-//   - Fork-aware: uses "owner:branch" head filter when listing PRs.
+//   - Fork-aware when listing/creating PRs, assuming the commit step has already pushed the head branch.
 //   - Synthetic BASE_REF (PR merge/head refs) are replaced with repo default branch.
-//   - Gracefully tolerates missing permissions for reviewers/assignees (warns, doesn't fail).
-//   - Returns a compact result usable by the composite action outputs.
+//   - Gracefully tolerates missing permissions for reviewers/assignees/labels (warns, doesn't fail).
+//   - Hard failures in PR lookup/creation are re-thrown so the GitHub Actions step fails clearly.
+
+function parseBool(value) {
+  return String(value || "false").trim().toLowerCase() === "true";
+}
+
+function parseCommaList(value) {
+  return String(value || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function isSyntheticRef(ref) {
+  const value = String(ref || "").trim().toLowerCase();
+
+  return (
+    !value ||
+    value === "merge" ||
+    value === "head" ||
+    /^(\d+)\/(merge|head)$/.test(value) ||
+    value.startsWith("refs/pull/") ||
+    value.startsWith("pull/") ||
+    value.endsWith("/merge") ||
+    value.endsWith("/head")
+  );
+}
+
+async function resolveBaseRef({ github, repo, rawBaseRef }) {
+  let baseRef = String(rawBaseRef || "")
+    .trim()
+    .replace(/^refs\/heads\//, "");
+
+  if (!isSyntheticRef(baseRef)) {
+    return baseRef;
+  }
+
+  const { data: repoInfo } = await github.rest.repos.get({
+    owner: repo.owner,
+    repo: repo.repo,
+  });
+
+  baseRef = repoInfo.default_branch;
+  console.log(`BASE_REF was invalid/synthetic, using default branch: ${baseRef}`);
+
+  return baseRef;
+}
+
+function resolveHeadRefs({ context, repo, branchName }) {
+  const payload = context.payload || {};
+
+  const headRepoFullName =
+    payload.pull_request?.head?.repo?.full_name || `${repo.owner}/${repo.repo}`;
+
+  const headOwner = headRepoFullName.split("/")[0];
+  const sameRepo = headRepoFullName === `${repo.owner}/${repo.repo}`;
+
+  return {
+    headForList: `${headOwner}:${branchName}`,
+    headForCreate: sameRepo ? branchName : `${headOwner}:${branchName}`,
+    sameRepo,
+  };
+}
+
+async function convertPullRequestToDraft(github, prNodeId) {
+  await github.graphql(
+    `
+      mutation($pullRequestId: ID!) {
+        convertPullRequestToDraft(input: { pullRequestId: $pullRequestId }) {
+          pullRequest {
+            id
+            isDraft
+          }
+        }
+      }
+    `,
+    {
+      pullRequestId: prNodeId,
+    },
+  );
+}
+
+async function updateExistingPullRequest({
+  github,
+  repo,
+  prNumber,
+  prTitle,
+  prBody,
+}) {
+  try {
+    await github.rest.pulls.update({
+      owner: repo.owner,
+      repo: repo.repo,
+      pull_number: prNumber,
+      title: prTitle,
+      body: prBody,
+    });
+
+    console.log("Updated existing PR title/body.");
+  } catch (err) {
+    console.warn(`Cannot update PR title/body: ${err.message}`);
+  }
+}
+
+async function applyLabels({ github, repo, prNumber, labels }) {
+  if (!labels.length) {
+    return;
+  }
+
+  try {
+    await github.rest.issues.addLabels({
+      owner: repo.owner,
+      repo: repo.repo,
+      issue_number: prNumber,
+      labels,
+    });
+
+    console.log("Labels added.");
+  } catch (err) {
+    console.warn(`Cannot add labels: ${err.message}`);
+  }
+}
+
+async function requestReviewers({ github, repo, prNumber, reviewers, teams }) {
+  if (!reviewers.length && !teams.length) {
+    return;
+  }
+
+  try {
+    await github.rest.pulls.requestReviewers({
+      owner: repo.owner,
+      repo: repo.repo,
+      pull_number: prNumber,
+      reviewers,
+      team_reviewers: teams,
+    });
+
+    console.log("Reviewers requested.");
+  } catch (err) {
+    console.warn(`Cannot add reviewers: ${err.message}`);
+  }
+}
+
+async function addAssignees({ github, repo, prNumber, assignees }) {
+  if (!assignees.length) {
+    return;
+  }
+
+  try {
+    await github.rest.issues.addAssignees({
+      owner: repo.owner,
+      repo: repo.repo,
+      issue_number: prNumber,
+      assignees,
+    });
+
+    console.log("Assignees added.");
+  } catch (err) {
+    console.warn(`Cannot add assignees: ${err.message}`);
+  }
+}
+
+async function applyPullRequestMetadata({
+  github,
+  repo,
+  prNumber,
+  labels,
+  reviewers,
+  teams,
+  assignees,
+}) {
+  await applyLabels({ github, repo, prNumber, labels });
+  await requestReviewers({ github, repo, prNumber, reviewers, teams });
+  await addAssignees({ github, repo, prNumber, assignees });
+}
 
 module.exports = async ({ github, context }) => {
   console.log("Creating or updating PR...");
 
-  const { repo } = context; // { owner, repo }
+  const { repo } = context;
 
   try {
-    // ─────────── Read and normalize inputs ───────────
-    let baseRef = (process.env.BASE_REF || "").trim();
-    const branchName = (process.env.BRANCH_NAME || "").trim();
+    const rawBaseRef = process.env.BASE_REF || "";
+    const branchName = String(process.env.BRANCH_NAME || "").trim();
+
     const prTitle = process.env.PR_TITLE || "Lokalise: sync translations";
     const prBody = process.env.PR_BODY || "";
-    const prDraft =
-      String(process.env.PR_DRAFT || "false").toLowerCase() === "true";
+    const prDraft = parseBool(process.env.PR_DRAFT);
 
-    // Comma-separated env vars → arrays with trimming; empty pieces dropped.
-    const prLabels = (process.env.PR_LABELS || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const prReviewers = (process.env.PR_REVIEWERS || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const prTeams = (process.env.PR_TEAMS_REVIEWERS || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const prAssignees = (process.env.PR_ASSIGNEES || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const prLabels = parseCommaList(process.env.PR_LABELS);
+    const prReviewers = parseCommaList(process.env.PR_REVIEWERS);
+    const prTeams = parseCommaList(process.env.PR_TEAMS_REVIEWERS);
+    const prAssignees = parseCommaList(process.env.PR_ASSIGNEES);
 
     if (!branchName) {
-      // Hard requirement: the commit step must pass branch_name as BRANCH_NAME.
       throw new Error("BRANCH_NAME is missing");
     }
 
-    // Normalize refs: strip "refs/heads/" in case the caller passed full ref.
-    baseRef = baseRef.replace(/^refs\/heads\//, "");
+    const baseRef = await resolveBaseRef({
+      github,
+      repo,
+      rawBaseRef,
+    });
 
-    // CI often feeds synthetic refs for PR events (e.g. "123/merge").
-    const looksLikeSynthetic =
-      /^(\d+)\/(merge|head)$/.test(baseRef) ||
-      baseRef === "merge" ||
-      baseRef === "head";
-
-    if (!baseRef || looksLikeSynthetic) {
-      // Fall back to repository default branch (e.g., "main"). Robust for non-standard setups.
-      const { data: repoInfo } = await github.rest.repos.get({
-        owner: repo.owner,
-        repo: repo.repo,
-      });
-      baseRef = repoInfo.default_branch;
-      console.log(
-        `BASE_REF was invalid/synthetic, using default branch: ${baseRef}`,
-      );
-    }
-
-    // ─────────── Detect head owner (fork-safe) ───────────
-    // If the workflow runs on a PR from a fork, the PR head repo can be different from the base repo.
-    // For listing PRs we MUST use "owner:branch" in the 'head' filter (GitHub API constraint).
-    const payload = context.payload || {};
-    const headRepoFullName =
-      payload.pull_request?.head?.repo?.full_name ||
-      `${repo.owner}/${repo.repo}`; // same-repo default
-
-    const headOwner = headRepoFullName.split("/")[0];
-
-    // For listing PRs, always "owner:branch".
-    const headForList = `${headOwner}:${branchName}`;
-    // For creating PRs, same-repo can pass just "branch", fork requires "owner:branch".
-    const sameRepo = headRepoFullName === `${repo.owner}/${repo.repo}`;
-    const headForCreate = sameRepo ? branchName : headForList;
+    const { headForList, headForCreate } = resolveHeadRefs({
+      context,
+      repo,
+      branchName,
+    });
 
     console.log(`Resolved base: ${baseRef}`);
     console.log(`Resolved head (list): ${headForList}`);
     console.log(`Resolved head (create): ${headForCreate}`);
 
-    /* ─────────── CHECK FOR EXISTING PR ───────────
-       We look for an open PR with the exact head (owner:branch) into the base.
-       per_page=1 is enough; there should be at most one such PR by convention. */
     const { data: pullRequests } = await github.rest.pulls.list({
       owner: repo.owner,
       repo: repo.repo,
@@ -98,78 +230,49 @@ module.exports = async ({ github, context }) => {
     });
 
     if (pullRequests.length > 0) {
-      // ─────────── UPDATE EXISTING PR ───────────
       const existing = pullRequests[0];
       const prNumber = existing.number;
 
       console.log(`PR already exists: ${existing.html_url}`);
 
-      // Convert to draft (no-op if already draft). Failure tolerated (permissions / repo settings).
+      await updateExistingPullRequest({
+        github,
+        repo,
+        prNumber,
+        prTitle,
+        prBody,
+      });
+
       if (prDraft && !existing.draft) {
         try {
-          await github.rest.pulls.update({
-            owner: repo.owner,
-            repo: repo.repo,
-            pull_number: prNumber,
-            draft: true,
-          });
+          await convertPullRequestToDraft(github, existing.node_id);
           console.log("Converted existing PR to draft.");
         } catch (err) {
           console.warn(`Cannot convert to draft: ${err.message}`);
         }
       }
 
-      // Apply labels if provided (idempotent; GH dedupes).
-      if (prLabels.length) {
-        try {
-          await github.rest.issues.addLabels({
-            owner: repo.owner,
-            repo: repo.repo,
-            issue_number: prNumber,
-            labels: prLabels,
-          });
-        } catch (err) {
-          console.warn(`Cannot add labels: ${err.message}`);
-        }
-      }
-
-      // Request reviewers (users/teams). Some combos can fail (e.g., missing org perms).
-      if (prReviewers.length || prTeams.length) {
-        try {
-          await github.rest.pulls.requestReviewers({
-            owner: repo.owner,
-            repo: repo.repo,
-            pull_number: prNumber,
-            reviewers: prReviewers,
-            team_reviewers: prTeams,
-          });
-        } catch (err) {
-          console.warn(`Cannot add reviewers: ${err.message}`);
-        }
-      }
-
-      // Assignees (fails harmlessly if users lack access).
-      if (prAssignees.length) {
-        try {
-          await github.rest.issues.addAssignees({
-            owner: repo.owner,
-            repo: repo.repo,
-            issue_number: prNumber,
-            assignees: prAssignees,
-          });
-          console.log("Assignees added.");
-        } catch (err) {
-          console.warn(`Cannot add assignees: ${err.message}`);
-        }
-      }
+      await applyPullRequestMetadata({
+        github,
+        repo,
+        prNumber,
+        labels: prLabels,
+        reviewers: prReviewers,
+        teams: prTeams,
+        assignees: prAssignees,
+      });
 
       return {
         created: false,
-        pr: { number: prNumber, id: existing.id, html_url: existing.html_url },
+        updated: true,
+        pr: {
+          number: prNumber,
+          id: existing.id,
+          html_url: existing.html_url,
+        },
       };
     }
 
-    /* ─────────── CREATE PR ─────────── */
     const { data: newPr } = await github.rest.pulls.create({
       owner: repo.owner,
       repo: repo.repo,
@@ -178,61 +281,32 @@ module.exports = async ({ github, context }) => {
       base: baseRef,
       body: prBody,
       draft: prDraft,
-      maintainer_can_modify: true, // helpful on forks so maintainers can adjust branch
+      maintainer_can_modify: true,
     });
 
-    // Labels after creation (API limitation: labels on issues endpoint).
-    if (prLabels.length) {
-      try {
-        await github.rest.issues.addLabels({
-          owner: repo.owner,
-          repo: repo.repo,
-          issue_number: newPr.number,
-          labels: prLabels,
-        });
-      } catch (err) {
-        console.warn(`Cannot add labels: ${err.message}`);
-      }
-    }
-
-    // Request reviewers (tolerate failures).
-    if (prReviewers.length || prTeams.length) {
-      try {
-        await github.rest.pulls.requestReviewers({
-          owner: repo.owner,
-          repo: repo.repo,
-          pull_number: newPr.number,
-          reviewers: prReviewers,
-          team_reviewers: prTeams,
-        });
-      } catch (err) {
-        console.warn(`Cannot add reviewers: ${err.message}`);
-      }
-    }
-
-    // Assignees (tolerate failures).
-    if (prAssignees.length) {
-      try {
-        await github.rest.issues.addAssignees({
-          owner: repo.owner,
-          repo: repo.repo,
-          issue_number: newPr.number,
-          assignees: prAssignees,
-        });
-        console.log("Assignees added.");
-      } catch (err) {
-        console.warn(`Cannot add assignees: ${err.message}`);
-      }
-    }
+    await applyPullRequestMetadata({
+      github,
+      repo,
+      prNumber: newPr.number,
+      labels: prLabels,
+      reviewers: prReviewers,
+      teams: prTeams,
+      assignees: prAssignees,
+    });
 
     console.log(`Created new PR: ${newPr.html_url}`);
+
     return {
       created: true,
-      pr: { number: newPr.number, id: newPr.id, html_url: newPr.html_url },
+      updated: false,
+      pr: {
+        number: newPr.number,
+        id: newPr.id,
+        html_url: newPr.html_url,
+      },
     };
   } catch (error) {
-    // We deliberately do not throw here as the composite action expects a structured return.
     console.error(`Failed to create or update pull request: ${error.message}`);
-    return { created: false, pr: null };
+    throw error;
   }
 };

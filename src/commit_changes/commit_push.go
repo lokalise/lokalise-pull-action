@@ -52,7 +52,7 @@ func stageManagedFiles(config *Config, runner CommandRunner) error {
 	}
 
 	if err := runner.Run("git", append([]string{"add", "-A", "--"}, filesToStage...)...); err != nil {
-		return fmt.Errorf("failed to stage files: %v", err)
+		return fmt.Errorf("failed to stage files: %w", err)
 	}
 
 	return nil
@@ -61,7 +61,7 @@ func stageManagedFiles(config *Config, runner CommandRunner) error {
 func buildTranslationScope(config *Config) managedpaths.TranslationScope {
 	return managedpaths.TranslationScope{
 		Paths:          config.TranslationPaths,
-		FileExt:        config.FileExt,
+		FileExts:       config.FileExts,
 		FlatNaming:     config.FlatNaming,
 		AlwaysPullBase: config.AlwaysPullBase,
 		BaseLang:       config.BaseLang,
@@ -81,7 +81,7 @@ func commitAndPush(branchName string, runner CommandRunner, config *Config) erro
 
 	output, err := runner.Capture("git", buildCommitArgs(config)...)
 	if err != nil {
-		return fmt.Errorf("failed to commit changes: %v\nOutput: %s", err, output)
+		return fmt.Errorf("failed to commit changes: %w\nOutput: %s", err, output)
 	}
 
 	return pushBranch(branchName, runner, config)
@@ -90,7 +90,7 @@ func commitAndPush(branchName string, runner CommandRunner, config *Config) erro
 func hasCachedDiff(runner CommandRunner) (bool, error) {
 	out, err := runner.Capture("git", "diff", "--name-only", "--cached")
 	if err != nil {
-		return false, fmt.Errorf("failed to inspect staged changes: %v\nOutput: %s", err, out)
+		return false, fmt.Errorf("failed to inspect staged changes: %w\nOutput: %s", err, out)
 	}
 	return strings.TrimSpace(out) != "", nil
 }
@@ -106,7 +106,15 @@ func buildCommitArgs(config *Config) []string {
 
 func pushBranch(branchName string, runner CommandRunner, config *Config) error {
 	if config.ForcePush {
-		return runner.Run("git", "push", "--force-with-lease", "origin", branchName)
+		if err := runner.Run("git", "push", "--force-with-lease", "origin", branchName); err != nil {
+			return fmt.Errorf("failed to force-push branch %q: %w", branchName, err)
+		}
+		return nil
 	}
-	return runner.Run("git", "push", "origin", branchName)
+
+	if err := runner.Run("git", "push", "origin", branchName); err != nil {
+		return fmt.Errorf("failed to push branch %q: %w", branchName, err)
+	}
+
+	return nil
 }

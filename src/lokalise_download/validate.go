@@ -8,11 +8,11 @@ import (
 // Intentionally fails fast with actionable messages for CI logs.
 func validateDownloadConfig(config DownloadConfig) error {
 	if config.ProjectID == "" {
-		return fmt.Errorf("project ID is required and cannot be empty")
+		return fmt.Errorf("LOKALISE_PROJECT_ID is required and cannot be empty")
 	}
 
 	if config.Token == "" {
-		return fmt.Errorf("API token is required and cannot be empty")
+		return fmt.Errorf("LOKALISE_API_KEY is required and cannot be empty")
 	}
 
 	if config.FileFormat == "" {

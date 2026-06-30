@@ -21,7 +21,7 @@ func TestValidateDownloadConfig_ReturnsError_OnMissingRequiredFields(t *testing.
 				FileFormat:    "json",
 				GitHubRefName: "ref",
 			},
-			wantErr: "project ID is required and cannot be empty",
+			wantErr: "LOKALISE_PROJECT_ID is required and cannot be empty",
 		},
 		{
 			name: "missing token",
@@ -31,7 +31,7 @@ func TestValidateDownloadConfig_ReturnsError_OnMissingRequiredFields(t *testing.
 				FileFormat:    "json",
 				GitHubRefName: "ref",
 			},
-			wantErr: "API token is required and cannot be empty",
+			wantErr: "LOKALISE_API_KEY is required and cannot be empty",
 		},
 		{
 			name: "missing file format",

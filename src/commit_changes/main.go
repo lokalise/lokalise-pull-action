@@ -22,7 +22,9 @@ import (
 // - Be idempotent over repeated runs with the same override branch.
 
 // ErrNoChanges is returned when there is nothing staged to commit.
-var ErrNoChanges = fmt.Errorf("no changes to commit")
+var ErrNoChanges = errors.New("no changes to commit")
+
+var exitFunc = os.Exit
 
 // CommandRunner abstracts git invocations for testability.
 type CommandRunner interface {
@@ -165,6 +167,6 @@ func sanitizeString(input string, maxLength int) string {
 }
 
 func returnWithError(message string) {
-	fmt.Fprintln(os.Stderr, message)
-	os.Exit(1)
+	fmt.Fprintf(os.Stderr, "Error: %s\n", message)
+	exitFunc(1)
 }

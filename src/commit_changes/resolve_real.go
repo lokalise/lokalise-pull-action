@@ -8,7 +8,7 @@ import (
 
 // resolveRealBase determines a usable base branch.
 // If cfg.BaseRef is empty/synthetic, we ask the remote what HEAD points to,
-// using a locale-agnostic, network-first approach.
+// Uses locale-agnostic methods first and falls back to parsing `git remote show origin` best-effort.
 //
 // Order:
 //  1. git ls-remote --symref origin HEAD  -> "ref: refs/heads/<branch> HEAD"
@@ -25,6 +25,8 @@ func resolveRealBase(runner CommandRunner, cfg *Config) (string, error) {
 		fmt.Printf("BASE_REF synthetic/empty, using %s: %s\n", source, br)
 		return br, nil
 	}
+
+	fmt.Println("Could not resolve default branch from origin; falling back to main")
 
 	return "main", nil
 }
@@ -133,7 +135,7 @@ func parseRemoteShowHeadBranchLine(line string) (string, bool) {
 	}
 
 	def = strings.TrimSpace(def)
-	if def == "" {
+	if def == "" || def == "(unknown)" {
 		return "", false
 	}
 
@@ -143,13 +145,15 @@ func parseRemoteShowHeadBranchLine(line string) (string, bool) {
 // isSyntheticRef flags CI-provided pseudo-refs we should not base from directly.
 func isSyntheticRef(ref string) bool {
 	ref = strings.TrimSpace(ref)
-	if ref == "" || ref == "merge" || ref == "head" {
+	lower := strings.ToLower(ref)
+
+	if lower == "" || lower == "merge" || lower == "head" {
 		return true
 	}
-	if strings.HasPrefix(ref, "refs/pull/") || strings.HasPrefix(ref, "pull/") {
+	if strings.HasPrefix(lower, "refs/pull/") || strings.HasPrefix(lower, "pull/") {
 		return true
 	}
-	if strings.HasSuffix(ref, "/merge") || strings.HasSuffix(ref, "/head") {
+	if strings.HasSuffix(lower, "/merge") || strings.HasSuffix(lower, "/head") {
 		return true
 	}
 	return false

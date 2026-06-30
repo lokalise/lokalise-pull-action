@@ -2,20 +2,18 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"strings"
 
-	"github.com/bodrovis/lokalise-actions-common/v2/normalizers"
+	"github.com/bodrovis/lokalise-actions-common/v2/fileexts"
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 )
 
 // Config aggregates inputs parsed from env.
 type Config struct {
-	FileExt        []string // normalized lowercased extensions without dots (e.g., "json", "strings")
+	FileExts       []string // normalized lowercased extensions without dots (e.g., "json", "strings")
 	FlatNaming     bool     // true: locales/en.json; false: locales/en/*.json, locales/fr/*.json
 	AlwaysPullBase bool     // if false, base language files/dirs are excluded from change detection
 	BaseLang       string   // e.g., "en", "fr_FR"
-	Paths          []string // one or more translation roots, e.g., ["locales"]
+	Paths          []string // repo-relative translation roots, e.g. ["locales", "packages/app/locales"]
 }
 
 type configInputs struct {
@@ -69,7 +67,7 @@ func readConfigInputs() (*configInputs, error) {
 
 func buildConfig(inputs *configInputs) *Config {
 	return &Config{
-		FileExt:        inputs.fileExt,
+		FileExts:       inputs.fileExt,
 		FlatNaming:     inputs.flatNaming,
 		AlwaysPullBase: inputs.alwaysPullBase,
 		BaseLang:       inputs.baseLang,
@@ -80,12 +78,12 @@ func buildConfig(inputs *configInputs) *Config {
 func parseBooleanFlags() (flatNaming bool, alwaysPullBase bool, err error) {
 	flatNaming, err = parsers.ParseBoolEnv("FLAT_NAMING")
 	if err != nil {
-		return false, false, fmt.Errorf("invalid FLAT_NAMING value: %v", err)
+		return false, false, fmt.Errorf("invalid FLAT_NAMING value: %w", err)
 	}
 
 	alwaysPullBase, err = parsers.ParseBoolEnv("ALWAYS_PULL_BASE")
 	if err != nil {
-		return false, false, fmt.Errorf("invalid ALWAYS_PULL_BASE value: %v", err)
+		return false, false, fmt.Errorf("invalid ALWAYS_PULL_BASE value: %w", err)
 	}
 
 	return flatNaming, alwaysPullBase, nil
@@ -94,16 +92,5 @@ func parseBooleanFlags() (flatNaming bool, alwaysPullBase bool, err error) {
 // resolveFileExts returns normalized file extensions from FILE_EXT or, if it is
 // not provided, falls back to FILE_FORMAT.
 func resolveFileExts() ([]string, error) {
-	fileExt := parsers.ParseStringArrayEnv("FILE_EXT")
-	if len(fileExt) == 0 {
-		if inferred := strings.TrimSpace(os.Getenv("FILE_FORMAT")); inferred != "" {
-			fileExt = []string{inferred}
-		}
-	}
-
-	if len(fileExt) == 0 {
-		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_FORMAT or FILE_EXT environment variables are set")
-	}
-
-	return normalizers.NormalizeFileExtensions(fileExt)
+	return fileexts.ResolveFromEnv("FILE_EXT", "FILE_FORMAT")
 }

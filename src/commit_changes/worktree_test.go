@@ -132,7 +132,7 @@ func TestReadWorktreeStatus(t *testing.T) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
+				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain=v1" {
 					return "\n", nil
 				}
 				t.Fatalf("unexpected capture: git %v", args)
@@ -158,7 +158,7 @@ func TestReadWorktreeStatus(t *testing.T) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
+				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain=v1" {
 					return " M locales/fr.json\n", nil
 				}
 				t.Fatalf("unexpected capture: git %v", args)
@@ -184,7 +184,7 @@ func TestReadWorktreeStatus(t *testing.T) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
+				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain=v1" {
 					return "?? newfile.json\n M locales/fr.json\n", nil
 				}
 				t.Fatalf("unexpected capture: git %v", args)
@@ -210,7 +210,7 @@ func TestReadWorktreeStatus(t *testing.T) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
+				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain=v1" {
 					return "fatal: not a git repository", fmt.Errorf("status failed")
 				}
 				t.Fatalf("unexpected capture: git %v", args)
@@ -242,7 +242,7 @@ func TestReadWorktreeStatus(t *testing.T) {
 				if name != "git" {
 					t.Fatalf("unexpected binary: %s", name)
 				}
-				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
+				if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain=v1" {
 					return " M locales/what?? file.json\n", nil
 				}
 				t.Fatalf("unexpected capture: git %v", args)

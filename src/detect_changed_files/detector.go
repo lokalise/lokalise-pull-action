@@ -16,7 +16,7 @@ func detectChangedFiles(config *Config, runner CommandRunner) (bool, error) {
 func buildTranslationScope(config *Config) managedpaths.TranslationScope {
 	return managedpaths.TranslationScope{
 		Paths:          config.Paths,
-		FileExt:        config.FileExt,
+		FileExts:       config.FileExts,
 		FlatNaming:     config.FlatNaming,
 		AlwaysPullBase: config.AlwaysPullBase,
 		BaseLang:       config.BaseLang,

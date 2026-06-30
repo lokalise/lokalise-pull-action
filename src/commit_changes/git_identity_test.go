@@ -89,7 +89,7 @@ func TestResolveGitIdentity(t *testing.T) {
 				GitUserName: "custom_user",
 			},
 			wantUserName:  "custom_user",
-			wantUserEmail: "custom_user@users.noreply.github.com",
+			wantUserEmail: "ignored_actor@users.noreply.github.com",
 		},
 	}
 

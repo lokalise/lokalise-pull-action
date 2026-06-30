@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/bodrovis/lokalise-actions-common/v2/normalizers"
+	"github.com/bodrovis/lokalise-actions-common/v2/fileexts"
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 )
 
@@ -14,7 +14,7 @@ type Config struct {
 	GitHubActor        string   // used for default git user.name and noreply email
 	GitHubSHA          string   // used to shorten into branch uniqueness token
 	TempBranchPrefix   string   // prefix for generated tmp branches (e.g., "lok")
-	FileExt            []string // normalized extensions without dots (e.g., "json", "stringsdict")
+	FileExts           []string // normalized extensions without dots (e.g., "json", "stringsdict")
 	BaseLang           string   // e.g., "en", "fr_FR"
 	FlatNaming         bool     // true: locales/en.json ; false: locales/en/app.json
 	AlwaysPullBase     bool     // if false, base language files/dir are excluded from the commit
@@ -30,7 +30,7 @@ type Config struct {
 }
 
 type translationInputs struct {
-	fileExt  []string
+	fileExts []string
 	paths    []string
 	baseLang string
 }
@@ -79,7 +79,7 @@ func readRequiredEnvVars() (map[string]string, map[string]bool, error) {
 }
 
 func readTranslationInputs(baseLangEnv string) (*translationInputs, error) {
-	fileExt, err := resolveFileExts()
+	fileExts, err := resolveFileExts()
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func readTranslationInputs(baseLangEnv string) (*translationInputs, error) {
 	}
 
 	return &translationInputs{
-		fileExt:  fileExt,
+		fileExts: fileExts,
 		paths:    paths,
 		baseLang: baseLang,
 	}, nil
@@ -112,15 +112,15 @@ func buildConfig(
 		GitHubActor:        requiredStrings["GITHUB_ACTOR"],
 		GitHubSHA:          requiredStrings["GITHUB_SHA"],
 		TempBranchPrefix:   requiredStrings["TEMP_BRANCH_PREFIX"],
-		FileExt:            inputs.fileExt,
+		FileExts:           inputs.fileExts,
 		BaseLang:           inputs.baseLang,
 		FlatNaming:         requiredBools["FLAT_NAMING"],
 		AlwaysPullBase:     requiredBools["ALWAYS_PULL_BASE"],
-		GitUserName:        os.Getenv("GIT_USER_NAME"),
-		GitUserEmail:       os.Getenv("GIT_USER_EMAIL"),
+		GitUserName:        strings.TrimSpace(os.Getenv("GIT_USER_NAME")),
+		GitUserEmail:       strings.TrimSpace(os.Getenv("GIT_USER_EMAIL")),
 		GitCommitMessage:   resolveCommitMessage(),
 		GitSignCommits:     parseOptionalBoolEnvFalse("GIT_SIGN_COMMITS"),
-		OverrideBranchName: os.Getenv("OVERRIDE_BRANCH_NAME"),
+		OverrideBranchName: strings.TrimSpace(os.Getenv("OVERRIDE_BRANCH_NAME")),
 		ForcePush:          requiredBools["FORCE_PUSH"],
 		BaseRef:            baseRef,
 		HeadRef:            headRef,
@@ -132,7 +132,7 @@ func readRequiredStringEnv(keys ...string) (map[string]string, error) {
 	values := make(map[string]string, len(keys))
 
 	for _, key := range keys {
-		value := os.Getenv(key)
+		value := strings.TrimSpace(os.Getenv(key))
 		if value == "" {
 			return nil, fmt.Errorf("environment variable %s is required", key)
 		}
@@ -165,18 +165,7 @@ func parseGitRefs() (baseRef, headRef string) {
 // resolveFileExts returns normalized file extensions from FILE_EXT or, if it is
 // not provided, falls back to FILE_FORMAT.
 func resolveFileExts() ([]string, error) {
-	fileExts := parsers.ParseStringArrayEnv("FILE_EXT")
-	if len(fileExts) == 0 {
-		if inferred := strings.TrimSpace(os.Getenv("FILE_FORMAT")); inferred != "" {
-			fileExts = []string{inferred}
-		}
-	}
-
-	if len(fileExts) == 0 {
-		return nil, fmt.Errorf("cannot infer file extension. Make sure FILE_EXT or FILE_FORMAT environment variables are set")
-	}
-
-	return normalizers.NormalizeFileExtensions(fileExts)
+	return fileexts.ResolveFromEnv("FILE_EXT", "FILE_FORMAT")
 }
 
 func resolveCommitMessage() string {

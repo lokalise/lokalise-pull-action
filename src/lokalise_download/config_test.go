@@ -149,3 +149,55 @@ func TestPrepareConfig_WhitespaceTrim(t *testing.T) {
 		t.Fatalf("AdditionalParams not trimmed: %q", cfg.AdditionalParams)
 	}
 }
+
+func TestResolveGitHubRefName(t *testing.T) {
+	tests := []struct {
+		name     string
+		refName  string
+		headRef  string
+		expected string
+	}{
+		{
+			name:     "uses ref name on push events",
+			refName:  "release/2025-10-09",
+			headRef:  "",
+			expected: "release/2025-10-09",
+		},
+		{
+			name:     "prefers head ref on pull request events",
+			refName:  "123/merge",
+			headRef:  "feature/sweet-stuff",
+			expected: "feature/sweet-stuff",
+		},
+		{
+			name:     "trims head ref",
+			refName:  "123/merge",
+			headRef:  "  feature/trim-me  ",
+			expected: "feature/trim-me",
+		},
+		{
+			name:     "falls back to ref name when head ref is empty",
+			refName:  "main",
+			headRef:  "   ",
+			expected: "main",
+		},
+		{
+			name:     "returns empty when both refs are empty",
+			refName:  "",
+			headRef:  "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GITHUB_REF_NAME", tt.refName)
+			t.Setenv("GITHUB_HEAD_REF", tt.headRef)
+
+			got := resolveGitHubRefName()
+			if got != tt.expected {
+				t.Fatalf("expected %q, got %q", tt.expected, got)
+			}
+		})
+	}
+}

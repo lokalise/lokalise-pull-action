@@ -64,7 +64,7 @@ func checkoutFromBaseBranch(branchName, baseRef string, runner CommandRunner) er
 		return err
 	}
 
-	if err := runner.Run("git", "checkout", "-B", branchName, "origin/"+baseRef); err == nil {
+	if err := checkoutRemoteTrackingBranch(branchName, baseRef, runner); err == nil {
 		unsetBranchUpstream(runner, branchName)
 		return nil
 	}
@@ -82,7 +82,7 @@ func fetchRemoteBranch(runner CommandRunner, ref string) error {
 	spec := fmt.Sprintf("+refs/heads/%[1]s:refs/remotes/origin/%[1]s", ref)
 	out, err := runner.Capture("git", "fetch", "--no-tags", "--prune", "origin", spec)
 	if err != nil {
-		return fmt.Errorf("git fetch failed for %q (spec=%q): %v\nOutput: %s", ref, spec, err, strings.TrimSpace(out))
+		return fmt.Errorf("git fetch failed for %q (spec=%q): %w\nOutput: %s", ref, spec, err, strings.TrimSpace(out))
 	}
 	return nil
 }
@@ -144,13 +144,13 @@ func checkoutRemoteWithLocalChanges(branchName, remoteRef string, runner Command
 		return nil
 	}
 
-	didStash, err := stashIfDirty(runner, "lokalise-temp")
+	stashHash, didStash, err := stashIfDirty(runner, "lokalise-temp")
 	if err != nil {
 		return err
 	}
 
 	if err := runner.Run("git", "checkout", "-B", branchName, remote); err != nil {
-		restoreStashBestEffort(runner, didStash)
+		restoreStashBestEffort(runner, stashHash)
 		return fmt.Errorf("failed to checkout %s after stashing: %v", remote, err)
 	}
 
@@ -158,7 +158,7 @@ func checkoutRemoteWithLocalChanges(branchName, remoteRef string, runner Command
 		return nil
 	}
 
-	if err := restoreFilesFromLatestStash(remote, runner); err != nil {
+	if err := restoreFilesFromStash(remote, stashHash, runner); err != nil {
 		return err
 	}
 
@@ -166,25 +166,8 @@ func checkoutRemoteWithLocalChanges(branchName, remoteRef string, runner Command
 		return fmt.Errorf("checked out %s but failed to reset index: %v", remote, err)
 	}
 
-	if err := runner.Run("git", "stash", "drop", "stash@{0}"); err != nil {
-		return fmt.Errorf("checked out %s but failed to drop %s: %v", remote, "stash@{0}", err)
-	}
-
-	return nil
-}
-
-func restoreFilesFromLatestStash(remote string, runner CommandRunner) error {
-	stashRef := "stash@{0}"
-
-	files, err := listStashedFiles(runner, stashRef)
-	if err != nil {
-		return fmt.Errorf("checked out %s but failed to list stashed files: %v", remote, err)
-	}
-
-	for _, f := range files {
-		if err := restoreFileFromStash(runner, stashRef, f); err != nil {
-			return fmt.Errorf("checked out %s but failed to restore %s from %s or %s^3: %v", remote, f, stashRef, stashRef, err)
-		}
+	if err := dropStashByHash(runner, stashHash); err != nil {
+		return fmt.Errorf("checked out %s but failed to drop stash %s: %w", remote, stashHash, err)
 	}
 
 	return nil

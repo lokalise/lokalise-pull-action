@@ -26,7 +26,7 @@ func TestPrepareConfig(t *testing.T) {
 				"ALWAYS_PULL_BASE":  "false",
 			},
 			expectedConfig: &Config{
-				FileExt:        []string{"json"},
+				FileExts:       []string{"json"},
 				FlatNaming:     true,
 				AlwaysPullBase: false,
 				BaseLang:       "en",
@@ -44,7 +44,7 @@ func TestPrepareConfig(t *testing.T) {
 				"ALWAYS_PULL_BASE":  "false",
 			},
 			expectedConfig: &Config{
-				FileExt:        []string{"json"},
+				FileExts:       []string{"json"},
 				FlatNaming:     true,
 				AlwaysPullBase: false,
 				BaseLang:       "en",
@@ -61,7 +61,7 @@ func TestPrepareConfig(t *testing.T) {
 				"ALWAYS_PULL_BASE":  "true",
 			},
 			expectedConfig: &Config{
-				FileExt:        []string{"strings", "stringsdict"},
+				FileExts:       []string{"strings", "stringsdict"},
 				FlatNaming:     false,
 				AlwaysPullBase: true,
 				BaseLang:       "en",
@@ -78,7 +78,7 @@ func TestPrepareConfig(t *testing.T) {
 				"ALWAYS_PULL_BASE":  "false",
 			},
 			expectedConfig: &Config{
-				FileExt:        []string{"json"},
+				FileExts:       []string{"json"},
 				FlatNaming:     true,
 				AlwaysPullBase: false,
 				BaseLang:       "en",
@@ -96,7 +96,7 @@ func TestPrepareConfig(t *testing.T) {
 				"ALWAYS_PULL_BASE":  "false",
 			},
 			expectedConfig: &Config{
-				FileExt:        []string{"json"},
+				FileExts:       []string{"json"},
 				FlatNaming:     true,
 				AlwaysPullBase: false,
 				BaseLang:       "en",
@@ -188,7 +188,7 @@ func TestPrepareConfig(t *testing.T) {
 				"ALWAYS_PULL_BASE":  "true",
 			},
 			expectedConfig: &Config{
-				FileExt:        []string{"json"},
+				FileExts:       []string{"json"},
 				FlatNaming:     false,
 				AlwaysPullBase: true,
 				BaseLang:       "en",
@@ -227,7 +227,7 @@ func TestPrepareConfig(t *testing.T) {
 				"ALWAYS_PULL_BASE":  "false",
 			},
 			expectedConfig: &Config{
-				FileExt:        []string{"json"},
+				FileExts:       []string{"json"},
 				FlatNaming:     false,
 				AlwaysPullBase: false,
 				BaseLang:       "en",

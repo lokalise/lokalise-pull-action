@@ -30,6 +30,8 @@ func (d DefaultCommandRunner) Capture(name string, args ...string) (string, erro
 	return out.String(), err
 }
 
+var exitFunc = os.Exit
+
 func main() {
 	if err := run(); err != nil {
 		returnWithError(err.Error())
@@ -103,6 +105,6 @@ func writeChangesOutput(
 }
 
 func returnWithError(message string) {
-	fmt.Fprintln(os.Stderr, message)
-	os.Exit(1)
+	fmt.Fprintf(os.Stderr, "Error: %s\n", message)
+	exitFunc(1)
 }

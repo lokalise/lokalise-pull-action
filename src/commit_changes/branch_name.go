@@ -77,9 +77,12 @@ func buildGeneratedBranchName(config *Config) (string, error) {
 }
 
 func shortGitHubSHA(sha string) (string, error) {
+	sha = strings.TrimSpace(sha)
+
 	if len(sha) < 6 {
 		return "", fmt.Errorf("GITHUB_SHA is too short")
 	}
+
 	return sha[:6], nil
 }
 
@@ -89,9 +92,9 @@ func validateBranchName(name string, runner CommandRunner) error {
 		// `check-ref-format` usually prints why it failed; keep it for debugging.
 		out = strings.TrimSpace(out)
 		if out != "" {
-			return fmt.Errorf("invalid branch name %q: %v (git output: %s)", name, err, out)
+			return fmt.Errorf("invalid branch name %q: %w (git output: %s)", name, err, out)
 		}
-		return fmt.Errorf("invalid branch name %q: %v", name, err)
+		return fmt.Errorf("invalid branch name %q: %w", name, err)
 	}
 	return nil
 }

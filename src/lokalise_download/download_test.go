@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -30,7 +29,10 @@ func TestBuildDownloadParams_JSON_MergesAndOverrides(t *testing.T) {
 `,
 	}
 
-	params := buildDownloadParams(cfg)
+	params, err := buildDownloadParams(cfg)
+	if err != nil {
+		t.Fatalf("buildDownloadParams returned error: %v", err)
+	}
 
 	want := download.DownloadParams{
 		"format":             "json",
@@ -60,7 +62,10 @@ func TestBuildDownloadParams_SkipOriginalFilenames_Enabled(t *testing.T) {
 `,
 	}
 
-	params := buildDownloadParams(cfg)
+	params, err := buildDownloadParams(cfg)
+	if err != nil {
+		t.Fatalf("buildDownloadParams returned error: %v", err)
+	}
 
 	want := download.DownloadParams{
 		"format":             "json",
@@ -91,7 +96,10 @@ include_tags:
 `,
 	}
 
-	params := buildDownloadParams(cfg)
+	params, err := buildDownloadParams(cfg)
+	if err != nil {
+		t.Fatalf("buildDownloadParams returned error: %v", err)
+	}
 
 	want := download.DownloadParams{
 		"format":             "json",
@@ -119,7 +127,10 @@ func TestBuildDownloadParams_JSON_EmptyAdditional_UsesDefaults(t *testing.T) {
 		AdditionalParams:      "",
 	}
 
-	p := buildDownloadParams(cfg)
+	p, err := buildDownloadParams(cfg)
+	if err != nil {
+		t.Fatalf("buildDownloadParams returned error: %v", err)
+	}
 
 	if p["format"] != "yaml" {
 		t.Fatalf("format: got %v want yaml", p["format"])
@@ -145,16 +156,25 @@ func TestBuildDownloadParams_JSON_EmptyAdditional_UsesDefaults(t *testing.T) {
 	}
 }
 
-func TestBuildDownloadParams_JSON_Invalid_Aborts(t *testing.T) {
+func TestBuildDownloadParams_JSON_Invalid_ReturnsError(t *testing.T) {
 	cfg := DownloadConfig{
 		FileFormat:       "json",
 		GitHubRefName:    "ref",
 		AdditionalParams: `{"indentation": "2sp",`,
 	}
 
-	requirePanicExit(t, func() {
-		_ = buildDownloadParams(cfg)
-	})
+	params, err := buildDownloadParams(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if params != nil {
+		t.Fatalf("expected nil params on error, got %#v", params)
+	}
+
+	if !strings.Contains(err.Error(), "invalid additional_params") {
+		t.Fatalf("expected additional_params error, got %q", err.Error())
+	}
 }
 
 func TestBuildDownloadParams_YAML_Invalid_Aborts(t *testing.T) {
@@ -165,9 +185,18 @@ func TestBuildDownloadParams_YAML_Invalid_Aborts(t *testing.T) {
 		AdditionalParams: "~~~?? invalid !!",
 	}
 
-	requirePanicExit(t, func() {
-		_ = buildDownloadParams(cfg)
-	})
+	params, err := buildDownloadParams(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if params != nil {
+		t.Fatalf("expected nil params on error, got %#v", params)
+	}
+
+	if !strings.Contains(err.Error(), "invalid additional_params") {
+		t.Fatalf("expected additional_params error, got %q", err.Error())
+	}
 }
 
 func TestBuildDownloadParams_LegacyFlags_Aborts(t *testing.T) {
@@ -177,9 +206,18 @@ func TestBuildDownloadParams_LegacyFlags_Aborts(t *testing.T) {
 		AdditionalParams: `--indentation=2sp`,
 	}
 
-	requirePanicExit(t, func() {
-		_ = buildDownloadParams(cfg)
-	})
+	params, err := buildDownloadParams(cfg)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if params != nil {
+		t.Fatalf("expected nil params on error, got %#v", params)
+	}
+
+	if !strings.Contains(err.Error(), "invalid additional_params") {
+		t.Fatalf("expected additional_params error, got %q", err.Error())
+	}
 }
 
 // ---------- downloadFiles tests ----------
@@ -420,20 +458,4 @@ func (f *fakeFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) {
 		return &fakeDownloader{}, nil
 	}
 	return f.downloader, nil
-}
-
-// requirePanicExit runs fn and asserts our TestMain exit panic is thrown.
-func requirePanicExit(t *testing.T, fn func()) {
-	t.Helper()
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatalf("expected panic from exitFunc, got none")
-		}
-		msg := fmt.Sprint(r)
-		if !strings.Contains(msg, "Exit called with code") {
-			t.Fatalf("expected exit panic, got: %v", r)
-		}
-	}()
-	fn()
 }

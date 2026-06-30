@@ -28,7 +28,7 @@ func TestDetectChangedFiles(t *testing.T) {
 
 	config := &Config{
 		Paths:          paths,
-		FileExt:        fileExts,
+		FileExts:       fileExts,
 		FlatNaming:     flat,
 		AlwaysPullBase: false,
 		BaseLang:       "en",
@@ -59,7 +59,7 @@ func TestDetectChangedFiles_NoChanges(t *testing.T) {
 
 	config := &Config{
 		Paths:          paths,
-		FileExt:        fileExts,
+		FileExts:       fileExts,
 		FlatNaming:     flat,
 		AlwaysPullBase: true,
 		BaseLang:       "en",
@@ -93,7 +93,7 @@ func TestDetectChangedFiles_AllChangesExcluded_Flat_PerExt(t *testing.T) {
 
 	config := &Config{
 		Paths:          paths,
-		FileExt:        fileExts,
+		FileExts:       fileExts,
 		FlatNaming:     flat,
 		AlwaysPullBase: false,
 		BaseLang:       "en",
@@ -130,7 +130,7 @@ func TestDetectChangedFiles_Nested_BaseDirExcluded(t *testing.T) {
 
 	config := &Config{
 		Paths:          paths,
-		FileExt:        fileExts,
+		FileExts:       fileExts,
 		FlatNaming:     flat,
 		AlwaysPullBase: false,
 		BaseLang:       "en",
@@ -162,7 +162,7 @@ func TestDetectChangedFiles_GitDiffError(t *testing.T) {
 
 	config := &Config{
 		Paths:          paths,
-		FileExt:        fileExts,
+		FileExts:       fileExts,
 		FlatNaming:     flat,
 		AlwaysPullBase: true,
 		BaseLang:       "en",
@@ -192,7 +192,7 @@ func TestDetectChangedFiles_GitLsFilesError(t *testing.T) {
 
 	config := &Config{
 		Paths:          paths,
-		FileExt:        fileExts,
+		FileExts:       fileExts,
 		FlatNaming:     flat,
 		AlwaysPullBase: true,
 		BaseLang:       "en",
@@ -218,7 +218,7 @@ func TestDetectChangedFiles_DeletedManagedFileStillCounts(t *testing.T) {
 
 	config := &Config{
 		Paths:          []string{"path/to/translations"},
-		FileExt:        []string{"json"},
+		FileExts:       []string{"json"},
 		FlatNaming:     false,
 		AlwaysPullBase: false,
 		BaseLang:       "en",
@@ -252,7 +252,7 @@ func TestDetectChangedFiles_NoHeadFallback(t *testing.T) {
 
 	config := &Config{
 		Paths:          []string{"path/to/translations"},
-		FileExt:        []string{"json"},
+		FileExts:       []string{"json"},
 		FlatNaming:     true,
 		AlwaysPullBase: false,
 		BaseLang:       "en",
@@ -281,7 +281,7 @@ func TestDetectChangedFiles_AlwaysPullBaseIncludesBaseFile_Flat(t *testing.T) {
 
 	config := &Config{
 		Paths:          []string{"locales"},
-		FileExt:        []string{"json"},
+		FileExts:       []string{"json"},
 		FlatNaming:     true,
 		AlwaysPullBase: true,
 		BaseLang:       "en",
@@ -313,7 +313,7 @@ func TestDetectChangedFiles_Nested_BaseOnlyChangesExcluded(t *testing.T) {
 
 	config := &Config{
 		Paths:          []string{"ios/App"},
-		FileExt:        []string{"strings", "stringsdict"},
+		FileExts:       []string{"strings", "stringsdict"},
 		FlatNaming:     false,
 		AlwaysPullBase: false,
 		BaseLang:       "en",
@@ -346,7 +346,7 @@ func TestDetectChangedFiles_OnlyNonManagedChanges(t *testing.T) {
 
 	config := &Config{
 		Paths:          []string{"path/to/translations"},
-		FileExt:        []string{"json"},
+		FileExts:       []string{"json"},
 		FlatNaming:     true,
 		AlwaysPullBase: true,
 		BaseLang:       "en",
@@ -375,7 +375,7 @@ func TestDetectChangedFiles_UntrackedManagedOnly(t *testing.T) {
 
 	config := &Config{
 		Paths:          []string{"path/to/translations"},
-		FileExt:        []string{"json"},
+		FileExts:       []string{"json"},
 		FlatNaming:     true,
 		AlwaysPullBase: false,
 		BaseLang:       "en",
@@ -404,7 +404,7 @@ func TestDetectChangedFiles_NoHeadCachedError(t *testing.T) {
 
 	config := &Config{
 		Paths:          []string{"path/to/translations"},
-		FileExt:        []string{"json"},
+		FileExts:       []string{"json"},
 		FlatNaming:     true,
 		AlwaysPullBase: false,
 		BaseLang:       "en",
@@ -433,7 +433,7 @@ func TestDetectChangedFiles_MultipleRoots_SecondRootMatches(t *testing.T) {
 			"packages/pkg/locales",
 			"packages/app/locales",
 		},
-		FileExt:        []string{"json"},
+		FileExts:       []string{"json"},
 		FlatNaming:     true,
 		AlwaysPullBase: false,
 		BaseLang:       "en",
@@ -463,7 +463,7 @@ func TestDetectChangedFiles_NoHeadWorktreeError(t *testing.T) {
 
 	config := &Config{
 		Paths:          []string{"path/to/translations"},
-		FileExt:        []string{"json"},
+		FileExts:       []string{"json"},
 		FlatNaming:     true,
 		AlwaysPullBase: false,
 		BaseLang:       "en",

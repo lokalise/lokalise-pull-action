@@ -28,6 +28,8 @@ type ClientFactory interface {
 // LokaliseFactory builds a real lokex client with configured backoff/timeouts.
 type LokaliseFactory struct{}
 
+const downloadDest = "./"
+
 // NewDownloader wires lokex client with timeouts, retries, UA and polling knobs.
 // All resilience (retry/backoff) is delegated to the lokex library.
 func (f *LokaliseFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) {
@@ -57,11 +59,14 @@ func downloadFiles(ctx context.Context, cfg DownloadConfig, factory ClientFactor
 		return fmt.Errorf("cannot create Lokalise API client: %w", err)
 	}
 
-	params := buildDownloadParams(cfg)
+	params, err := buildDownloadParams(cfg)
+	if err != nil {
+		return err
+	}
 
 	if cfg.AsyncMode {
 		if ad, ok := dl.(AsyncDownloader); ok {
-			if _, err := ad.DownloadAsync(ctx, "./", params); err != nil {
+			if _, err := ad.DownloadAsync(ctx, downloadDest, params); err != nil {
 				return fmt.Errorf("download failed: %w", err)
 			}
 			return nil
@@ -71,7 +76,7 @@ func downloadFiles(ctx context.Context, cfg DownloadConfig, factory ClientFactor
 	}
 
 	// Sync path (default). Client handles retries/backoff/unzip internally.
-	if _, err := dl.Download(ctx, "./", params); err != nil {
+	if _, err := dl.Download(ctx, downloadDest, params); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
 
@@ -83,7 +88,7 @@ func downloadFiles(ctx context.Context, cfg DownloadConfig, factory ClientFactor
 // - When original_filenames=true, Lokalise exports per-original path and directory_prefix is respected.
 // - include_tags narrows the export to keys tagged with the current branch/tag (git-driven workflows).
 // - AdditionalParams allows advanced overrides (JSON object or YAML mapping).
-func buildDownloadParams(config DownloadConfig) download.DownloadParams {
+func buildDownloadParams(config DownloadConfig) (download.DownloadParams, error) {
 	params := download.DownloadParams{
 		"format": config.FileFormat,
 	}
@@ -97,14 +102,14 @@ func buildDownloadParams(config DownloadConfig) download.DownloadParams {
 		params["directory_prefix"] = "/"
 	}
 
-	if !config.SkipIncludeTags {
+	if !config.SkipIncludeTags && config.GitHubRefName != "" {
 		// Only pull keys tagged with the current ref.
 		params["include_tags"] = []string{config.GitHubRefName}
 	}
 
 	if err := parsers.ParseAdditionalParamsAndMerge(params, config.AdditionalParams); err != nil {
-		returnWithError("Invalid additional_params (must be JSON object or YAML mapping): " + err.Error())
+		return nil, fmt.Errorf("invalid additional_params (must be JSON object or YAML mapping): %w", err)
 	}
 
-	return params
+	return params, nil
 }
