@@ -1,25 +1,36 @@
-name: build-to-bin
+name: Build and attest binaries
 
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-  id-token: write
+permissions: {}
 
 concurrency:
-  group: build-to-bin-${{ github.ref }}
+  group: build-to-bin-main
   cancel-in-progress: false
-  
+
 jobs:
   build:
-    name: build ${{ matrix.module }} (${{ matrix.target }})
-    runs-on: ubuntu-22.04
+    name: Build ${{ matrix.module }} (${{ matrix.target }})
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
     strategy:
       fail-fast: false
       matrix:
-        module: [ commit_changes, detect_changed_files, lokalise_download ]
-        target: [ linux_amd64, linux_arm64, mac_amd64, mac_arm64 ]
+        module:
+          - commit_changes
+          - detect_changed_files
+          - lokalise_download
+
+        target:
+          - linux_amd64
+          - linux_arm64
+          - mac_amd64
+          - mac_arm64
 
     env:
       GOWORK: "off"
@@ -27,326 +38,440 @@ jobs:
       SOURCE_DATE_EPOCH: "1704067200"
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      # v7.0.0
+      - name: Checkout source commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
+      # v6.5.0
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
         with:
           go-version: "1.26.4"
           check-latest: false
           cache: true
+          cache-dependency-path: src/${{ matrix.module }}/go.sum
 
-      - name: Resolve target env
-        id: tgt
+      - name: Resolve target environment
+        id: target
         shell: bash
-        run: |
-          case "${{ matrix.target }}" in
-            linux_amd64)  echo "GOOS=linux"  >> $GITHUB_OUTPUT; echo "GOARCH=amd64" >> $GITHUB_OUTPUT; echo "SUFFIX=_linux_amd64"  >> $GITHUB_OUTPUT ;;
-            linux_arm64)  echo "GOOS=linux"  >> $GITHUB_OUTPUT; echo "GOARCH=arm64" >> $GITHUB_OUTPUT; echo "SUFFIX=_linux_arm64"  >> $GITHUB_OUTPUT ;;
-            mac_amd64)    echo "GOOS=darwin" >> $GITHUB_OUTPUT; echo "GOARCH=amd64" >> $GITHUB_OUTPUT; echo "SUFFIX=_mac_amd64"   >> $GITHUB_OUTPUT ;;
-            mac_arm64)    echo "GOOS=darwin" >> $GITHUB_OUTPUT; echo "GOARCH=arm64" >> $GITHUB_OUTPUT; echo "SUFFIX=_mac_arm64"   >> $GITHUB_OUTPUT ;;
-            *) echo "unknown target"; exit 1 ;;
-          esac
-
-      - name: Build → dist/${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}
-        shell: bash
-        env:
-          GOOS: ${{ steps.tgt.outputs.GOOS }}
-          GOARCH: ${{ steps.tgt.outputs.GOARCH }}
         run: |
           set -euo pipefail
+
+          case "${{ matrix.target }}" in
+            linux_amd64)
+              echo "GOOS=linux" >> "$GITHUB_OUTPUT"
+              echo "GOARCH=amd64" >> "$GITHUB_OUTPUT"
+              echo "SUFFIX=_linux_amd64" >> "$GITHUB_OUTPUT"
+              ;;
+
+            linux_arm64)
+              echo "GOOS=linux" >> "$GITHUB_OUTPUT"
+              echo "GOARCH=arm64" >> "$GITHUB_OUTPUT"
+              echo "SUFFIX=_linux_arm64" >> "$GITHUB_OUTPUT"
+              ;;
+
+            mac_amd64)
+              echo "GOOS=darwin" >> "$GITHUB_OUTPUT"
+              echo "GOARCH=amd64" >> "$GITHUB_OUTPUT"
+              echo "SUFFIX=_mac_amd64" >> "$GITHUB_OUTPUT"
+              ;;
+
+            mac_arm64)
+              echo "GOOS=darwin" >> "$GITHUB_OUTPUT"
+              echo "GOARCH=arm64" >> "$GITHUB_OUTPUT"
+              echo "SUFFIX=_mac_arm64" >> "$GITHUB_OUTPUT"
+              ;;
+
+            *)
+              echo "Unknown target: ${{ matrix.target }}" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Verify Go modules
+        working-directory: src/${{ matrix.module }}
+        run: go mod verify
+
+      - name: Build binary
+        shell: bash
+        env:
+          GOOS: ${{ steps.target.outputs.GOOS }}
+          GOARCH: ${{ steps.target.outputs.GOARCH }}
+        run: |
+          set -euo pipefail
+
           mkdir -p dist
           cd "src/${{ matrix.module }}"
-          go mod verify
+
           go build \
             -trimpath \
             -buildvcs=false \
             -ldflags "-buildid=" \
-            -o "../../dist/${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}" \
+            -o "../../dist/${{ matrix.module }}${{ steps.target.outputs.SUFFIX }}" \
             .
 
-      # --- UPX install & in-place pack (linux only) ---
-      - name: Install UPX
-        if: startsWith(matrix.target, 'linux_')
+      - name: Inspect binary before packing
+        shell: bash
         run: |
           set -euo pipefail
-          ver="5.0.2"
-          curl -sSL -o upx.tar.xz "https://github.com/upx/upx/releases/download/v${ver}/upx-${ver}-amd64_linux.tar.xz"
-          tar -xJf upx.tar.xz
-          sudo install -m 0755 "upx-${ver}-amd64_linux/upx" /usr/local/bin/upx
+
+          BIN="dist/${{ matrix.module }}${{ steps.target.outputs.SUFFIX }}"
+
+          test -s "$BIN"
+
+          echo "== File type =="
+          file "$BIN"
+
+          echo "== Size before packing =="
+          wc -c "$BIN"
+
+          echo "== Go build metadata =="
+          go version -m "$BIN"
+
+      - name: Install verified UPX
+        if: startsWith(matrix.target, 'linux_')
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          UPX_VERSION="5.2.0"
+          UPX_ARCHIVE="upx-${UPX_VERSION}-amd64_linux.tar.xz"
+          UPX_SHA256="3db5d3294707439db97866feab8d75d800f028f48481a40547411824da4288a1"
+
+          curl \
+            --fail \
+            --location \
+            --silent \
+            --show-error \
+            --output "$UPX_ARCHIVE" \
+            "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/${UPX_ARCHIVE}"
+
+          echo "${UPX_SHA256}  ${UPX_ARCHIVE}" |
+            sha256sum --check -
+
+          tar -xJf "$UPX_ARCHIVE"
+
+          sudo install \
+            -m 0755 \
+            "upx-${UPX_VERSION}-amd64_linux/upx" \
+            /usr/local/bin/upx
+
           upx --version
 
-      - name: UPX pack in-place (linux only)
+      - name: Pack Linux binary with UPX
         if: startsWith(matrix.target, 'linux_')
+        shell: bash
         run: |
           set -euo pipefail
-          cd dist
-          upx --best --lzma --no-progress "${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}"
 
-          upx -t "${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}"
+          BIN="dist/${{ matrix.module }}${{ steps.target.outputs.SUFFIX }}"
 
-      # --- Sanity checks (no execution) ---
-      - name: Binary sanity checks (metadata)
+          upx \
+            --best \
+            --lzma \
+            --no-progress \
+            "$BIN"
+
+          upx -t "$BIN"
+
+      - name: Inspect final binary
+        shell: bash
         run: |
           set -euo pipefail
-          cd dist
-          BIN="${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}"
-          echo "== file =="
-          file "$BIN" || true
-          echo "== size (bytes) =="
+
+          BIN="dist/${{ matrix.module }}${{ steps.target.outputs.SUFFIX }}"
+
+          test -s "$BIN"
+
+          echo "== Final file type =="
+          file "$BIN"
+
+          echo "== Final size =="
           wc -c "$BIN"
-          if [[ "${{ matrix.target }}" == linux_* ]]; then
-            echo "== ldd (expect 'not a dynamic executable') =="
-            ldd "$BIN" || true
-          fi
-          echo "== go version -m =="
-          go version -m "$BIN" || true
 
-      # --- SHA256 after finalization (post-UPX for linux) ---
-      - name: SHA256 (final)
-        run: |
-          set -euo pipefail
-          cd dist
-          sha256sum "${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}" > "${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}.sha256"
-          cat "${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}.sha256"
-
-      - name: Upload artifact (final binaries)
-        uses: actions/upload-artifact@v7
+      # v7.0.1
+      - name: Upload final binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: ${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}
-          path: |
-            dist/${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}
-            dist/${{ matrix.module }}${{ steps.tgt.outputs.SUFFIX }}.sha256
+          name: ${{ matrix.module }}${{ steps.target.outputs.SUFFIX }}
+          path: dist/${{ matrix.module }}${{ steps.target.outputs.SUFFIX }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
 
-  commit-bin:
-    name: commit bin/
-    runs-on: ubuntu-22.04
-    needs: [ build ]
+  finalize:
+    name: Generate SBOM, sign, attest, and commit
+    runs-on: ubuntu-latest
+
+    needs:
+      - build
+
+    permissions:
+      contents: write
+      id-token: write
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      # v7.0.0
+      - name: Checkout source commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
+          persist-credentials: true
 
-      - name: Download all build artifacts
-        uses: actions/download-artifact@v8
+      # v8.0.1
+      - name: Download all binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           path: _dist
           merge-multiple: true
 
       - name: Prepare bin directory
-        run: |
-          set -euo pipefail
-          rm -rf bin
-          mkdir -p bin
-
-          shopt -s nullglob
-          cp -v _dist/* bin/
-
-          rm -f bin/*.orig bin/*.upx bin/*.upx2
-
-      - name: Generate combined checksums.txt
-        run: |
-          set -euo pipefail
-          cd bin
-          rm -f checksums.txt
-          find . -maxdepth 1 -type f ! -name "checksums.txt" -exec sha256sum {} \; \
-            | sed 's@\s\+\./@  @' \
-            | sort -k2 \
-            > checksums.txt
-          echo "---- checksums.txt ----"
-          cat checksums.txt
-
-      - name: Verify checksums.txt locally
-        run: |
-          set -euo pipefail
-          cd bin
-          sha256sum -c checksums.txt
-
-      - name: Commit bin/ to repo
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A bin
-          if git diff --cached --quiet; then
-            echo "No changes in bin/, skipping commit."
-            exit 0
-          fi
-          git commit -m "ci: update bin artifacts [skip ci]"
-          git push
-
-  sign-bin:
-    name: sign checksums.txt
-    runs-on: ubuntu-22.04
-    needs: [ commit-bin ]
-    permissions:
-      id-token: write
-      contents: write
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Sync to latest branch HEAD
         shell: bash
         run: |
           set -euo pipefail
-          BRANCH="${GITHUB_REF#refs/heads/}"
-          if [ -n "$BRANCH" ] && [ "$GITHUB_REF" != "$BRANCH" ]; then
-            git fetch --no-tags origin "$BRANCH"
-            git checkout -B "$BRANCH" "origin/$BRANCH"
-          fi
-          echo "Now at $(git rev-parse --short HEAD)"
-          ls -lah bin || true
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.2
+          rm -rf bin
+          mkdir -p bin
 
-      - name: Compute expected identity
-        id: ident
-        run: |
-          echo "IDENTITY=https://github.com/${{ github.workflow_ref }}" >> $GITHUB_ENV
-          echo "ISSUER=https://token.actions.githubusercontent.com" >> $GITHUB_ENV
-          echo "expect IDENTITY=$IDENTITY"
-          echo "expect ISSUER=$ISSUER"
+          cp -v _dist/* bin/
 
-      - name: Sign bin/checksums.txt (keyless, bundle)
+          chmod 0755 bin/*
+
+      - name: Verify expected binaries
+        shell: bash
         run: |
           set -euo pipefail
-          test -f bin/checksums.txt || { echo "bin/checksums.txt not found"; exit 1; }
-          cosign sign-blob --yes \
+
+          modules=(
+            commit_changes
+            detect_changed_files
+            lokalise_download
+          )
+
+          suffixes=(
+            linux_amd64
+            linux_arm64
+            mac_amd64
+            mac_arm64
+          )
+
+          expected_count=0
+
+          for module in "${modules[@]}"; do
+            for suffix in "${suffixes[@]}"; do
+              file="bin/${module}_${suffix}"
+
+              test -s "$file" || {
+                echo "Missing or empty binary: $file" >&2
+                exit 1
+              }
+
+              test -x "$file" || {
+                echo "Binary is not executable: $file" >&2
+                exit 1
+              }
+
+              expected_count=$((expected_count + 1))
+            done
+          done
+
+          actual_count="$(
+            find bin \
+              -maxdepth 1 \
+              -type f \
+              -printf '.' |
+            wc -c
+          )"
+
+          if [ "$actual_count" -ne "$expected_count" ]; then
+            echo "Expected ${expected_count} binaries, found ${actual_count}." >&2
+            find bin -maxdepth 1 -type f -printf '%f\n' | sort
+            exit 1
+          fi
+
+          echo "Verified ${actual_count} binaries."
+
+      # v0.24.0
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610
+
+      - name: Generate SPDX SBOM
+        shell: bash
+        env:
+          SOURCE_NAME: ${{ github.event.repository.name }}
+          SOURCE_VERSION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          syft scan dir:src \
+            --source-name "$SOURCE_NAME" \
+            --source-version "$SOURCE_VERSION" \
+            --output spdx-json=bin/sbom.spdx.json
+
+          test -s bin/sbom.spdx.json
+
+      - name: Generate checksums.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd bin
+
+          find . \
+            -maxdepth 1 \
+            -type f \
+            ! -name "checksums.txt" \
+            ! -name "*.sigstore" \
+            ! -name "*.attestation" \
+            -print0 |
+          sort -z |
+          xargs -0 -r sha256sum \
+            > checksums.txt
+
+          echo "== checksums.txt =="
+          cat checksums.txt
+
+      - name: Verify checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd bin
+          sha256sum --check checksums.txt
+
+      # v4.1.2
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+
+      - name: Configure expected Sigstore identity
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IDENTITY="https://github.com/${{ github.workflow_ref }}"
+          ISSUER="https://token.actions.githubusercontent.com"
+
+          echo "IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "ISSUER=$ISSUER" >> "$GITHUB_ENV"
+
+          echo "Expected identity: $IDENTITY"
+          echo "Expected issuer:   $ISSUER"
+
+      - name: Sign checksums.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cosign sign-blob \
+            --yes \
             --bundle bin/checksums.txt.sigstore \
             bin/checksums.txt
 
-      - name: Verify signature (keyless with identity+issuer)
+      - name: Verify checksums signature
+        shell: bash
         run: |
           set -euo pipefail
+
           cosign verify-blob \
             --bundle bin/checksums.txt.sigstore \
             --certificate-identity "$IDENTITY" \
             --certificate-oidc-issuer "$ISSUER" \
             bin/checksums.txt
 
-      - name: Commit signature bundle
+      - name: Create attestation predicate
+        shell: bash
         run: |
           set -euo pipefail
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bin/checksums.txt.sigstore
-          if git diff --cached --quiet; then
-            echo "No new signature, skipping."
-            exit 0
-          fi
-          git commit -m "ci: sign checksums.txt (sigstore bundle) [skip ci]"
-          git push
 
-  sbom-and-attest:
-    name: SBOM + attest
-    runs-on: ubuntu-22.04
-    needs: [ sign-bin ]
-    permissions:
-      id-token: write
-      contents: write
+          mkdir -p _attestation
 
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Sync to latest commit (after commit-bin)
-        run: |
-          set -euo pipefail
-          git fetch origin "${GITHUB_REF#refs/heads/}"
-          git reset --hard "origin/${GITHUB_REF#refs/heads/}"
-          echo "Now at commit: $(git rev-parse --short HEAD)"
-          ls -lah bin || (echo "bin not found!" && exit 1)
-
-      - name: Install syft
-        uses: anchore/sbom-action/download-syft@v0.24.0
-
-      - name: Generate SBOM (SPDX JSON)
-        run: |
-          set -euo pipefail
-          syft packages dir:bin -o spdx-json=bin/sbom.spdx.json || syft scan dir:bin -o spdx-json=bin/sbom.spdx.json
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bin/sbom.spdx.json
-          if git diff --cached --quiet; then
-            echo "No SBOM changes."
-          else
-            git commit -m "ci: add SBOM for bin [skip ci]"
-            git push origin HEAD:"${GITHUB_REF_NAME}"
-          fi
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.2
-
-      - name: Get OIDC token
-        id: token
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const token = await core.getIDToken('sigstore');
-            core.setOutput('token', token);
-
-      - name: Compute expected identity
-        run: |
-          echo "IDENTITY=https://github.com/${{ github.workflow_ref }}" >> $GITHUB_ENV
-          echo "ISSUER=https://token.actions.githubusercontent.com" >> $GITHUB_ENV
-          echo "expect IDENTITY=$IDENTITY"
-          echo "expect ISSUER=$ISSUER"
-
-      - name: Build attestation predicate
-        run: |
-          cat > bin/checksums.predicate.json <<'JSON'
+          cat > _attestation/checksums.predicate.json <<JSON
           {
             "buildType": "github-actions",
+            "builder": {
+              "id": "https://github.com/${{ github.workflow_ref }}"
+            },
+            "invocation": {
+              "runId": "${{ github.run_id }}",
+              "runAttempt": "${{ github.run_attempt }}",
+              "runUrl": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            },
             "materials": [
-              { "uri": "${{ github.server_url }}/${{ github.repository }}", "digest": { "git": "${{ github.sha }}" } }
+              {
+                "uri": "${{ github.server_url }}/${{ github.repository }}",
+                "digest": {
+                  "gitCommit": "${{ github.sha }}"
+                }
+              }
             ]
           }
           JSON
-          ls -l bin/checksums.predicate.json
 
-      - name: Attest checksums.txt (blob, keyless)
+          cat _attestation/checksums.predicate.json
+
+      - name: Attest checksums.txt
+        shell: bash
         run: |
           set -euo pipefail
-          test -f bin/checksums.txt || { echo "checksums.txt missing!"; ls -lah bin; exit 1; }
+
           cosign attest-blob \
             --yes \
-            --verbose \
-            --identity-token "${{ steps.token.outputs.token }}" \
             --type custom \
-            --predicate bin/checksums.predicate.json \
+            --predicate _attestation/checksums.predicate.json \
             --bundle bin/checksums.txt.attestation \
             bin/checksums.txt
 
-      - name: Verify blob attestation
+      - name: Verify checksums attestation
+        shell: bash
         run: |
           set -euo pipefail
+
           cosign verify-blob-attestation \
             --bundle bin/checksums.txt.attestation \
             --certificate-identity "$IDENTITY" \
             --certificate-oidc-issuer "$ISSUER" \
             --type custom \
             bin/checksums.txt
-          echo "Attestation verified OK."
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bin/checksums.txt.attestation
+
+      - name: Show finalized bin directory
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ls -lah bin
+
+          echo
+          echo "== Files committed to bin/ =="
+
+          find bin \
+            -maxdepth 1 \
+            -type f \
+            -printf '%f\n' |
+          sort
+
+      - name: Commit finalized artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A bin
+
           if git diff --cached --quiet; then
-            echo "No attestation changes."
-          else
-            git commit -m "ci: add attestation for checksums.txt [skip ci]"
-            git push origin HEAD:"${GITHUB_REF_NAME}"
+            echo "No changes in bin/, skipping commit."
+            exit 0
           fi
+
+          git commit \
+            -m "ci: update attested bin artifacts [skip ci]"
+
+          git push \
+            origin \
+            HEAD:"${GITHUB_REF_NAME}"

@@ -333,13 +333,46 @@ By default, the following headers and parameters are set when downloading files 
 
 ## Checksums and attestation
 
-You'll find checksums for the compiled binaries in the `bin/` directory. The checksums are also signed and attested. To verify, install [Cosign](https://github.com/sigstore/cosign), clone the repo, and run the following commands in the project root:
+The `bin/` directory contains the compiled binaries, an SPDX SBOM, and a `checksums.txt` file with their SHA-256 checksums.
 
-```
-cosign verify-blob-attestation --bundle bin/checksums.txt.attestation --certificate-identity "https://github.com/lokalise/lokalise-pull-action/.github/workflows/build-to-bin.yml@refs/heads/main" --certificate-oidc-issuer "https://token.actions.githubusercontent.com" --type custom bin/checksums.txt
+The checksum manifest is signed and attested using keyless Sigstore signing in GitHub Actions.
 
-cosign verify-blob --bundle bin/checksums.txt.sigstore --certificate-identity-regexp "^https://github.com/lokalise/lokalise-pull-action/\.github/workflows/build-to-bin\.yml@.*$" --certificate-oidc-issuer "https://token.actions.githubusercontent.com" bin/checksums.txt
+To verify the files, install [Cosign](https://github.com/sigstore/cosign), clone the repository, and run the following commands from the project root.
+
+First, verify that the binaries and SBOM match `checksums.txt`:
+
+```bash
+cd bin
+sha256sum --check checksums.txt
+cd ..
 ```
+
+Then verify the signature of `checksums.txt`:
+
+```bash
+cosign verify-blob \
+  --bundle bin/checksums.txt.sigstore \
+  --certificate-identity "https://github.com/lokalise/lokalise-pull-action/.github/workflows/build-to-bin.yml@refs/heads/main" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  bin/checksums.txt
+```
+
+Finally, verify the attestation for `checksums.txt`:
+
+```bash
+cosign verify-blob-attestation \
+  --bundle bin/checksums.txt.attestation \
+  --certificate-identity "https://github.com/lokalise/lokalise-pull-action/.github/workflows/build-to-bin.yml@refs/heads/main" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  --type custom \
+  bin/checksums.txt
+```
+
+All three commands must complete successfully:
+
+1. `sha256sum` confirms that the binaries and SBOM have not been modified.
+2. `cosign verify-blob` confirms that `checksums.txt` was signed by the expected GitHub Actions workflow.
+3. `cosign verify-blob-attestation` confirms the associated build attestation.
 
 ## Special notes and known issues
 
