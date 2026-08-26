@@ -1,27 +1,25 @@
 package main
 
-import (
-	"fmt"
-)
+import "errors"
 
 // validateDownloadConfig enforces required inputs and guards common pitfalls.
 // Intentionally fails fast with actionable messages for CI logs.
 func validateDownloadConfig(config DownloadConfig) error {
 	if config.ProjectID == "" {
-		return fmt.Errorf("LOKALISE_PROJECT_ID is required and cannot be empty")
+		return errors.New("LOKALISE_PROJECT_ID is required and cannot be empty")
 	}
 
 	if config.Token == "" {
-		return fmt.Errorf("LOKALISE_API_KEY is required and cannot be empty")
+		return errors.New("LOKALISE_API_KEY is required and cannot be empty")
 	}
 
 	if config.FileFormat == "" {
-		return fmt.Errorf("FILE_FORMAT environment variable is required")
+		return errors.New("FILE_FORMAT environment variable is required")
 	}
 
-	// include_tags requires a non-empty ref. Users can opt-out via SKIP_INCLUDE_TAGS=true.
+	// include_tags requires a non-empty ref. Users can opt out via SKIP_INCLUDE_TAGS=true.
 	if !config.SkipIncludeTags && config.GitHubRefName == "" {
-		return fmt.Errorf(
+		return errors.New(
 			"GITHUB_REF_NAME or GITHUB_HEAD_REF is required when include_tags are enabled. " +
 				"Set SKIP_INCLUDE_TAGS=true to disable tag filtering",
 		)

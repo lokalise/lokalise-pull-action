@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
@@ -32,7 +33,7 @@ const downloadDest = "./"
 
 // NewDownloader wires lokex client with timeouts, retries, UA and polling knobs.
 // All resilience (retry/backoff) is delegated to the lokex library.
-func (f *LokaliseFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) {
+func (LokaliseFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) {
 	lokaliseClient, err := client.NewClient(
 		cfg.Token,
 		cfg.ProjectID,
@@ -54,14 +55,14 @@ func (f *LokaliseFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) 
 func downloadFiles(ctx context.Context, cfg DownloadConfig, factory ClientFactory) error {
 	fmt.Println("Starting download from Lokalise")
 
-	dl, err := factory.NewDownloader(cfg)
-	if err != nil {
-		return fmt.Errorf("cannot create Lokalise API client: %w", err)
-	}
-
 	params, err := buildDownloadParams(cfg)
 	if err != nil {
 		return err
+	}
+
+	dl, err := factory.NewDownloader(cfg)
+	if err != nil {
+		return fmt.Errorf("cannot create Lokalise API client: %w", err)
 	}
 
 	if cfg.AsyncMode {
@@ -72,7 +73,9 @@ func downloadFiles(ctx context.Context, cfg DownloadConfig, factory ClientFactor
 			return nil
 		}
 		// Defensive: ensures miswired factories don't silently change behavior.
-		return fmt.Errorf("async mode requested, but downloader doesn't support DownloadAsync")
+		return errors.New(
+			"async mode requested, but downloader doesn't support DownloadAsync",
+		)
 	}
 
 	// Sync path (default). Client handles retries/backoff/unzip internally.

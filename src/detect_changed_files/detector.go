@@ -1,19 +1,17 @@
 package main
 
-import (
-	"github.com/bodrovis/lokalise-actions-common/v2/managedpaths"
-)
+import "github.com/bodrovis/lokalise-actions-common/v2/managedpaths"
 
-// detectChangedFiles keeps the entrypoint thin by delegating all Git path
-// collection and translation-file matching to shared helpers.
-func detectChangedFiles(config *Config, runner CommandRunner) (bool, error) {
-	scope := buildTranslationScope(config)
-	return managedpaths.HasManagedGitPaths(runner, scope)
+// detectChangedFiles delegates Git path collection and translation-file
+// matching to the shared managed-path helpers.
+func detectChangedFiles(config Config, runner CommandRunner) (bool, error) {
+	return managedpaths.HasManagedGitPaths(
+		runner,
+		buildTranslationScope(config),
+	)
 }
 
-// buildTranslationScope converts env-derived action config into the shared
-// managed path scope used by change detection helpers.
-func buildTranslationScope(config *Config) managedpaths.TranslationScope {
+func buildTranslationScope(config Config) managedpaths.TranslationScope {
 	return managedpaths.TranslationScope{
 		Paths:          config.Paths,
 		FileExts:       config.FileExts,

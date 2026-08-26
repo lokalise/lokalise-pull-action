@@ -10,40 +10,47 @@ import (
 // If yes -> safe to force-checkout.
 // It uses `git diff --quiet` exit codes.
 func worktreeEqualsRef(ref string, runner CommandRunner) (bool, error) {
-	_, err1 := runner.Capture("git", "diff", "--quiet", ref)
-	if err1 != nil && !isExitCode(err1, 1) {
-		return false, fmt.Errorf("git diff failed: %w", err1)
-	}
-	if isExitCode(err1, 1) {
-		return false, nil
+	_, err := runner.Capture("git", "diff", "--quiet", ref)
+	if err != nil {
+		if isExitCode(err, 1) {
+			return false, nil
+		}
+
+		return false, fmt.Errorf("git diff failed: %w", err)
 	}
 
-	_, err2 := runner.Capture("git", "diff", "--quiet", "--cached", ref)
-	if err2 != nil && !isExitCode(err2, 1) {
-		return false, fmt.Errorf("git diff --cached failed: %w", err2)
-	}
-	if isExitCode(err2, 1) {
-		return false, nil
+	_, err = runner.Capture("git", "diff", "--quiet", "--cached", ref)
+	if err != nil {
+		if isExitCode(err, 1) {
+			return false, nil
+		}
+
+		return false, fmt.Errorf("git diff --cached failed: %w", err)
 	}
 
 	return true, nil
 }
 
-func readWorktreeStatus(runner CommandRunner) (status string, hasUntracked bool, err error) {
+func readWorktreeStatus(runner CommandRunner) (string, bool, error) {
 	out, err := runner.Capture("git", "status", "--porcelain=v1")
 	if err != nil {
-		return "", false, fmt.Errorf("failed to check status: %w\nOutput: %s", err, out)
+		return "", false, fmt.Errorf(
+			"failed to check status: %w\nOutput: %s",
+			err,
+			strings.TrimSpace(out),
+		)
 	}
 
-	status = strings.TrimSpace(out)
+	status := strings.TrimRight(out, "\r\n")
 	return status, hasUntrackedFiles(status), nil
 }
 
 func hasUntrackedFiles(status string) bool {
-	for _, line := range strings.Split(status, "\n") {
+	for line := range strings.SplitSeq(status, "\n") {
 		if strings.HasPrefix(line, "?? ") {
 			return true
 		}
 	}
+
 	return false
 }

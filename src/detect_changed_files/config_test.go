@@ -2,19 +2,22 @@ package main
 
 import (
 	"path/filepath"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
 
 func TestPrepareConfig(t *testing.T) {
-	absUnixLike, _ := filepath.Abs("some/abs/path")
+	absPath, err := filepath.Abs("some/abs/path")
+	if err != nil {
+		t.Fatalf("filepath.Abs() error = %v", err)
+	}
 
 	tests := []struct {
 		name           string
 		envVars        map[string]string
 		expectedError  string
-		expectedConfig *Config
+		expectedConfig Config
 	}{
 		{
 			name: "valid config via FILE_FORMAT fallback",
@@ -25,7 +28,7 @@ func TestPrepareConfig(t *testing.T) {
 				"FLAT_NAMING":       "true",
 				"ALWAYS_PULL_BASE":  "false",
 			},
-			expectedConfig: &Config{
+			expectedConfig: Config{
 				FileExts:       []string{"json"},
 				FlatNaming:     true,
 				AlwaysPullBase: false,
@@ -43,7 +46,7 @@ func TestPrepareConfig(t *testing.T) {
 				"FLAT_NAMING":       "true",
 				"ALWAYS_PULL_BASE":  "false",
 			},
-			expectedConfig: &Config{
+			expectedConfig: Config{
 				FileExts:       []string{"json"},
 				FlatNaming:     true,
 				AlwaysPullBase: false,
@@ -60,7 +63,7 @@ func TestPrepareConfig(t *testing.T) {
 				"FLAT_NAMING":       "false",
 				"ALWAYS_PULL_BASE":  "true",
 			},
-			expectedConfig: &Config{
+			expectedConfig: Config{
 				FileExts:       []string{"strings", "stringsdict"},
 				FlatNaming:     false,
 				AlwaysPullBase: true,
@@ -77,7 +80,7 @@ func TestPrepareConfig(t *testing.T) {
 				"FLAT_NAMING":       "true",
 				"ALWAYS_PULL_BASE":  "false",
 			},
-			expectedConfig: &Config{
+			expectedConfig: Config{
 				FileExts:       []string{"json"},
 				FlatNaming:     true,
 				AlwaysPullBase: false,
@@ -95,7 +98,7 @@ func TestPrepareConfig(t *testing.T) {
 				"FLAT_NAMING":       "true",
 				"ALWAYS_PULL_BASE":  "false",
 			},
-			expectedConfig: &Config{
+			expectedConfig: Config{
 				FileExts:       []string{"json"},
 				FlatNaming:     true,
 				AlwaysPullBase: false,
@@ -187,7 +190,7 @@ func TestPrepareConfig(t *testing.T) {
 				"FLAT_NAMING":       "false",
 				"ALWAYS_PULL_BASE":  "true",
 			},
-			expectedConfig: &Config{
+			expectedConfig: Config{
 				FileExts:       []string{"json"},
 				FlatNaming:     false,
 				AlwaysPullBase: true,
@@ -209,7 +212,7 @@ func TestPrepareConfig(t *testing.T) {
 		{
 			name: "rejects absolute path (platform-agnostic)",
 			envVars: map[string]string{
-				"TRANSLATIONS_PATH": absUnixLike,
+				"TRANSLATIONS_PATH": absPath,
 				"FILE_FORMAT":       "json",
 				"BASE_LANG":         "en",
 				"FLAT_NAMING":       "true",
@@ -226,7 +229,7 @@ func TestPrepareConfig(t *testing.T) {
 				"FLAT_NAMING":       "false",
 				"ALWAYS_PULL_BASE":  "false",
 			},
-			expectedConfig: &Config{
+			expectedConfig: Config{
 				FileExts:       []string{"json"},
 				FlatNaming:     false,
 				AlwaysPullBase: false,
@@ -290,7 +293,7 @@ func TestPrepareConfig(t *testing.T) {
 			cfg, err := prepareConfig()
 
 			if tt.expectedError != "" {
-				if err == nil || !containsSubstring(err.Error(), tt.expectedError) {
+				if err == nil || !strings.Contains(err.Error(), tt.expectedError) {
 					t.Fatalf("expected error containing %q, got %v", tt.expectedError, err)
 				}
 				return
@@ -300,9 +303,7 @@ func TestPrepareConfig(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if !reflect.DeepEqual(cfg, tt.expectedConfig) {
-				t.Fatalf("expected config %+v, got %+v", tt.expectedConfig, cfg)
-			}
+			assertConfigEqual(t, cfg, tt.expectedConfig)
 		})
 	}
 }
@@ -322,7 +323,30 @@ func clearPrepareConfigEnv(t *testing.T) {
 	}
 }
 
-// containsSubstring checks if a string contains a substring.
-func containsSubstring(str, substr string) bool {
-	return strings.Contains(str, substr)
+func assertConfigEqual(t *testing.T, got, want Config) {
+	t.Helper()
+
+	if !slices.Equal(got.FileExts, want.FileExts) {
+		t.Fatalf("FileExts mismatch: want=%v got=%v", want.FileExts, got.FileExts)
+	}
+
+	if got.FlatNaming != want.FlatNaming {
+		t.Fatalf("FlatNaming mismatch: want=%v got=%v", want.FlatNaming, got.FlatNaming)
+	}
+
+	if got.AlwaysPullBase != want.AlwaysPullBase {
+		t.Fatalf(
+			"AlwaysPullBase mismatch: want=%v got=%v",
+			want.AlwaysPullBase,
+			got.AlwaysPullBase,
+		)
+	}
+
+	if got.BaseLang != want.BaseLang {
+		t.Fatalf("BaseLang mismatch: want=%q got=%q", want.BaseLang, got.BaseLang)
+	}
+
+	if !slices.Equal(got.Paths, want.Paths) {
+		t.Fatalf("Paths mismatch: want=%v got=%v", want.Paths, got.Paths)
+	}
 }

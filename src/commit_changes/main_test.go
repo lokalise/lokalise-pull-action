@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,7 @@ func (m *MockCommandRunner) Run(name string, args ...string) error {
 	if m.RunFunc != nil {
 		return m.RunFunc(name, args...)
 	}
+
 	return nil
 }
 
@@ -23,13 +25,21 @@ func (m *MockCommandRunner) Capture(name string, args ...string) (string, error)
 	if m.CaptureFunc != nil {
 		return m.CaptureFunc(name, args...)
 	}
+
 	return "", nil
 }
 
-type mockExitError struct{ code int }
+type mockExitError struct {
+	code int
+}
 
-func (e *mockExitError) Error() string { return fmt.Sprintf("exit status %d", e.code) }
-func (e *mockExitError) ExitCode() int { return e.code }
+func (e *mockExitError) Error() string {
+	return fmt.Sprintf("exit status %d", e.code)
+}
+
+func (e *mockExitError) ExitCode() int {
+	return e.code
+}
 
 func TestRunWith_Success(t *testing.T) {
 	t.Parallel()
@@ -38,15 +48,14 @@ func TestRunWith_Success(t *testing.T) {
 
 	commitCalled := false
 	writeCalls := 0
-
-	var gotBranchName string
+	gotBranchName := ""
 	outputs := map[string]string{}
 
 	commit := func(gotRunner CommandRunner) (string, error) {
 		commitCalled = true
 
 		if gotRunner != runner {
-			t.Fatalf("commit got unexpected runner")
+			t.Fatal("commit got unexpected runner")
 		}
 
 		gotBranchName = "lokalise/update-translations"
@@ -77,11 +86,17 @@ func TestRunWith_Success(t *testing.T) {
 	}
 
 	if outputs["branch_name"] != "lokalise/update-translations" {
-		t.Fatalf("unexpected branch_name output: %q", outputs["branch_name"])
+		t.Fatalf(
+			"unexpected branch_name output: %q",
+			outputs["branch_name"],
+		)
 	}
 
 	if outputs["commit_created"] != "true" {
-		t.Fatalf("unexpected commit_created output: %q", outputs["commit_created"])
+		t.Fatalf(
+			"unexpected commit_created output: %q",
+			outputs["commit_created"],
+		)
 	}
 }
 
@@ -184,7 +199,7 @@ func TestPerformCommit_Success(t *testing.T) {
 
 	commit := func(gotRunner CommandRunner) (string, error) {
 		if gotRunner != runner {
-			t.Fatalf("commit got unexpected runner")
+			t.Fatal("commit got unexpected runner")
 		}
 
 		return "feature/generated-translations", nil
@@ -207,7 +222,7 @@ func TestPerformCommit_NoChanges(t *testing.T) {
 
 	commit := func(gotRunner CommandRunner) (string, error) {
 		if gotRunner != runner {
-			t.Fatalf("commit got unexpected runner")
+			t.Fatal("commit got unexpected runner")
 		}
 
 		return "", ErrNoChanges
@@ -227,13 +242,14 @@ func TestPerformCommit_ReturnsWrappedError(t *testing.T) {
 	t.Parallel()
 
 	runner := &MockCommandRunner{}
+	commitErr := errors.New("git status failed")
 
 	commit := func(gotRunner CommandRunner) (string, error) {
 		if gotRunner != runner {
-			t.Fatalf("commit got unexpected runner")
+			t.Fatal("commit got unexpected runner")
 		}
 
-		return "", errors.New("git status failed")
+		return "", commitErr
 	}
 
 	branchName, err := performCommit(commit, runner)
@@ -245,7 +261,11 @@ func TestPerformCommit_ReturnsWrappedError(t *testing.T) {
 		t.Fatalf("expected empty branch name, got %q", branchName)
 	}
 
-	if !strings.Contains(err.Error(), "error committing and pushing changes: git status failed") {
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("expected error wrapping %v, got %v", commitErr, err)
+	}
+
+	if !strings.Contains(err.Error(), "error committing and pushing changes") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -272,11 +292,17 @@ func TestWriteOutputs_Success(t *testing.T) {
 	}
 
 	if outputs["branch_name"] != "feature/generated-translations" {
-		t.Fatalf("unexpected branch_name output: %q", outputs["branch_name"])
+		t.Fatalf(
+			"unexpected branch_name output: %q",
+			outputs["branch_name"],
+		)
 	}
 
 	if outputs["commit_created"] != "true" {
-		t.Fatalf("unexpected commit_created output: %q", outputs["commit_created"])
+		t.Fatalf(
+			"unexpected commit_created output: %q",
+			outputs["commit_created"],
+		)
 	}
 }
 
@@ -285,7 +311,7 @@ func TestWriteOutputs_Success_WithEmptyBranchName(t *testing.T) {
 
 	writeCalled := false
 
-	write := func(key, value string) bool {
+	write := func(_, _ string) bool {
 		writeCalled = true
 		return true
 	}
@@ -303,7 +329,7 @@ func TestWriteOutputs_Success_WithEmptyBranchName(t *testing.T) {
 func TestWriteOutputs_ReturnsError_WhenWriteFails(t *testing.T) {
 	t.Parallel()
 
-	write := func(key, value string) bool {
+	write := func(_, _ string) bool {
 		return false
 	}
 
@@ -312,7 +338,7 @@ func TestWriteOutputs_ReturnsError_WhenWriteFails(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "failed to write to GitHub output") {
+	if err.Error() != "failed to write to GitHub output" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -414,9 +440,15 @@ func TestSanitizeString(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			result := sanitizeString(tt.input, tt.maxLength)
-			if result != tt.expected {
-				t.Errorf("sanitizeString(%q, %d) = %q; want %q", tt.input, tt.maxLength, result, tt.expected)
+			got := sanitizeString(tt.input, tt.maxLength)
+			if got != tt.expected {
+				t.Fatalf(
+					"sanitizeString(%q, %d) = %q; want %q",
+					tt.input,
+					tt.maxLength,
+					got,
+					tt.expected,
+				)
 			}
 		})
 	}
@@ -463,13 +495,14 @@ func TestSplitNonEmptyLines(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := splitNonEmptyLines(tt.input)
-			if len(got) != len(tt.expected) {
-				t.Fatalf("splitNonEmptyLines(%q) len = %d, want %d (%v)", tt.input, len(got), len(tt.expected), got)
-			}
-			for i := range got {
-				if got[i] != tt.expected[i] {
-					t.Fatalf("splitNonEmptyLines(%q)[%d] = %q, want %q", tt.input, i, got[i], tt.expected[i])
-				}
+
+			if !slices.Equal(got, tt.expected) {
+				t.Fatalf(
+					"splitNonEmptyLines(%q) = %v, want %v",
+					tt.input,
+					got,
+					tt.expected,
+				)
 			}
 		})
 	}
@@ -490,7 +523,7 @@ func TestIsExitCode(t *testing.T) {
 		},
 		{
 			name: "plain error without exit code",
-			err:  fmt.Errorf("boom"),
+			err:  errors.New("boom"),
 			code: 1,
 			want: false,
 		},
@@ -524,13 +557,14 @@ func TestIsExitCode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := isExitCode(tt.err, tt.code)
 			if got != tt.want {
-				t.Fatalf("isExitCode(%v, %d) = %v, want %v", tt.err, tt.code, got, tt.want)
+				t.Fatalf(
+					"isExitCode(%v, %d) = %v, want %v",
+					tt.err,
+					tt.code,
+					got,
+					tt.want,
+				)
 			}
 		})
 	}
-}
-
-// containsSubstring checks if a string contains a substring
-func containsSubstring(s, substr string) bool {
-	return strings.Contains(s, substr)
 }

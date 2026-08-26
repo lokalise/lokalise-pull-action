@@ -8,19 +8,17 @@ import (
 	"github.com/bodrovis/lokalise-actions-common/v2/parsers"
 )
 
-// Defaults for retry/backoff and timeouts. These are sane, production-leaning values.
-// Note: actual HTTP/backoff implementation is delegated to lokex client.
 const (
-	defaultMaxRetries      = 3   // Default number of retries for rate-limited requests
-	defaultSleepTime       = 1   // Default initial sleep time (seconds) before retrying
-	maxSleepTime           = 60  // Backoff cap (seconds). Prevents unbounded sleeps.
-	defaultDownloadTimeout = 600 // Overall operation deadline (seconds) incl. async polling
-	defaultHTTPTimeout     = 120 // Per-request HTTP timeout (seconds)
-	defaultPollInitialWait = 1   // Initial async poll delay (seconds)
-	defaultPollMaxWait     = 120 // Async polling deadline (seconds)
+	defaultMaxRetries      = 3
+	defaultSleepTime       = 1
+	maxSleepTime           = 60 * time.Second
+	defaultDownloadTimeout = 600
+	defaultHTTPTimeout     = 120
+	defaultPollInitialWait = 1
+	defaultPollMaxWait     = 120
 )
 
-// DownloadConfig encapsulates all runtime knobs pulled from env.
+// DownloadConfig encapsulates all runtime configuration for a download.
 type DownloadConfig struct {
 	ProjectID             string
 	Token                 string
@@ -39,50 +37,52 @@ type DownloadConfig struct {
 	AsyncPollMaxWait      time.Duration
 }
 
-// prepareConfig reads env, applies defaults, and normalizes whitespace.
-// Tolerate bad booleans by falling back to false instead of failing early.
+// prepareConfig reads environment variables, applies defaults, and normalizes whitespace.
+// Invalid boolean values fall back to false.
 func prepareConfig() DownloadConfig {
-	skipIncludeTags, err := parsers.ParseBoolEnv("SKIP_INCLUDE_TAGS")
-	if err != nil {
-		skipIncludeTags = false
-	}
-
-	skipOriginalFilenames, err := parsers.ParseBoolEnv("SKIP_ORIGINAL_FILENAMES")
-	if err != nil {
-		skipOriginalFilenames = false
-	}
-
-	asyncMode, err := parsers.ParseBoolEnv("ASYNC_MODE")
-	if err != nil {
-		asyncMode = false
-	}
-
 	return DownloadConfig{
-		ProjectID:             strings.TrimSpace(os.Getenv("LOKALISE_PROJECT_ID")),
-		Token:                 strings.TrimSpace(os.Getenv("LOKALISE_API_KEY")),
-		FileFormat:            strings.TrimSpace(os.Getenv("FILE_FORMAT")),
+		ProjectID:             trimmedEnv("LOKALISE_PROJECT_ID"),
+		Token:                 trimmedEnv("LOKALISE_API_KEY"),
+		FileFormat:            trimmedEnv("FILE_FORMAT"),
 		GitHubRefName:         resolveGitHubRefName(),
-		AdditionalParams:      strings.TrimSpace(os.Getenv("ADDITIONAL_PARAMS")),
-		SkipIncludeTags:       skipIncludeTags,
-		SkipOriginalFilenames: skipOriginalFilenames,
-		AsyncMode:             asyncMode,
+		AdditionalParams:      trimmedEnv("ADDITIONAL_PARAMS"),
+		SkipIncludeTags:       parseBoolEnvOrFalse("SKIP_INCLUDE_TAGS"),
+		SkipOriginalFilenames: parseBoolEnvOrFalse("SKIP_ORIGINAL_FILENAMES"),
+		AsyncMode:             parseBoolEnvOrFalse("ASYNC_MODE"),
 		MaxRetries:            parsers.ParseUintEnv("MAX_RETRIES", defaultMaxRetries),
-		InitialSleepTime:      time.Duration(parsers.ParseUintEnv("SLEEP_TIME", defaultSleepTime)) * time.Second,
-		MaxSleepTime:          time.Duration(maxSleepTime) * time.Second,
-		HTTPTimeout:           time.Duration(parsers.ParseUintEnv("HTTP_TIMEOUT", defaultHTTPTimeout)) * time.Second,
-		DownloadTimeout:       time.Duration(parsers.ParseUintEnv("DOWNLOAD_TIMEOUT", defaultDownloadTimeout)) * time.Second,
-		AsyncPollInitialWait:  time.Duration(parsers.ParseUintEnv("ASYNC_POLL_INITIAL_WAIT", defaultPollInitialWait)) * time.Second,
-		AsyncPollMaxWait:      time.Duration(parsers.ParseUintEnv("ASYNC_POLL_MAX_WAIT", defaultPollMaxWait)) * time.Second,
+		InitialSleepTime:      parseSecondsEnv("SLEEP_TIME", defaultSleepTime),
+		MaxSleepTime:          maxSleepTime,
+		HTTPTimeout:           parseSecondsEnv("HTTP_TIMEOUT", defaultHTTPTimeout),
+		DownloadTimeout:       parseSecondsEnv("DOWNLOAD_TIMEOUT", defaultDownloadTimeout),
+		AsyncPollInitialWait:  parseSecondsEnv("ASYNC_POLL_INITIAL_WAIT", defaultPollInitialWait),
+		AsyncPollMaxWait:      parseSecondsEnv("ASYNC_POLL_MAX_WAIT", defaultPollMaxWait),
 	}
 }
 
-// Determine the branch/tag name used for include_tags.
-// On PR events, prefer GITHUB_HEAD_REF because GITHUB_REF_NAME may be "<pr_number>/merge".
-// On push/tag events, fall back to GITHUB_REF_NAME.
-func resolveGitHubRefName() string {
-	if v := strings.TrimSpace(os.Getenv("GITHUB_HEAD_REF")); v != "" {
-		return v
+func parseSecondsEnv(key string, defaultValue int) time.Duration {
+	return time.Duration(parsers.ParseUintEnv(key, defaultValue)) * time.Second
+}
+
+func parseBoolEnvOrFalse(key string) bool {
+	value, err := parsers.ParseBoolEnv(key)
+	if err != nil {
+		return false
 	}
 
-	return strings.TrimSpace(os.Getenv("GITHUB_REF_NAME"))
+	return value
+}
+
+func trimmedEnv(key string) string {
+	return strings.TrimSpace(os.Getenv(key))
+}
+
+// resolveGitHubRefName determines the branch or tag used for include_tags.
+// On pull requests, GITHUB_HEAD_REF takes precedence because
+// GITHUB_REF_NAME may contain "<pr_number>/merge".
+func resolveGitHubRefName() string {
+	if ref := trimmedEnv("GITHUB_HEAD_REF"); ref != "" {
+		return ref
+	}
+
+	return trimmedEnv("GITHUB_REF_NAME")
 }

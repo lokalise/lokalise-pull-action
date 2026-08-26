@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -233,7 +234,7 @@ func TestDownloadFiles_AsyncSuccess(t *testing.T) {
 		AsyncMode:             true,
 		MaxRetries:            7,
 		InitialSleepTime:      2 * time.Second,
-		MaxSleepTime:          time.Duration(maxSleepTime) * time.Second,
+		MaxSleepTime:          maxSleepTime,
 		HTTPTimeout:           30 * time.Second,
 	}
 
@@ -260,8 +261,8 @@ func TestDownloadFiles_AsyncSuccess(t *testing.T) {
 	if ff.gotInitialBackoff != 2*time.Second {
 		t.Fatalf("expected initial backoff=2s, got %v", ff.gotInitialBackoff)
 	}
-	if ff.gotMaxBackoff != time.Duration(maxSleepTime)*time.Second {
-		t.Fatalf("expected max backoff=%ds, got %v", maxSleepTime, ff.gotMaxBackoff)
+	if ff.gotMaxBackoff != maxSleepTime {
+		t.Fatalf("expected max backoff=%v, got %v", maxSleepTime, ff.gotMaxBackoff)
 	}
 
 	if !fd.called {
@@ -306,7 +307,7 @@ func TestDownloadFiles_SyncSuccess(t *testing.T) {
 		AsyncMode:             false,
 		MaxRetries:            7,
 		InitialSleepTime:      2 * time.Second,
-		MaxSleepTime:          time.Duration(maxSleepTime) * time.Second,
+		MaxSleepTime:          maxSleepTime,
 		HTTPTimeout:           30 * time.Second,
 	}
 
@@ -332,7 +333,7 @@ func TestDownloadFiles_SyncSuccess(t *testing.T) {
 	if ff.gotInitialBackoff != 2*time.Second {
 		t.Fatalf("expected initial backoff=2s, got %v", ff.gotInitialBackoff)
 	}
-	if ff.gotMaxBackoff != time.Duration(maxSleepTime)*time.Second {
+	if ff.gotMaxBackoff != maxSleepTime {
 		t.Fatalf("expected max backoff=%ds, got %v", maxSleepTime, ff.gotMaxBackoff)
 	}
 
@@ -352,7 +353,7 @@ func TestDownloadFiles_SyncSuccess(t *testing.T) {
 	}
 
 	want := []string{"v1.2.3"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("expected include_tags=%v, got %v", want, got)
 	}
 	if fd.gotParams["original_filenames"] != true {
@@ -364,40 +365,76 @@ func TestDownloadFiles_SyncSuccess(t *testing.T) {
 }
 
 func TestDownloadFiles_FactoryError(t *testing.T) {
+	t.Parallel()
+
 	cfg := DownloadConfig{
 		ProjectID:        "proj_123",
 		Token:            "tok_abc",
 		FileFormat:       "json",
 		GitHubRefName:    "main",
 		MaxRetries:       3,
-		InitialSleepTime: time.Duration(1) * time.Second,
-		HTTPTimeout:      time.Duration(10) * time.Second,
+		InitialSleepTime: time.Second,
+		HTTPTimeout:      10 * time.Second,
 	}
 
-	ff := &fakeFactory{wantErr: errors.New("boom")}
+	factoryErr := errors.New("boom")
+	ff := &fakeFactory{wantErr: factoryErr}
+
 	err := downloadFiles(context.Background(), cfg, ff)
-	if err == nil || !strings.Contains(err.Error(), "cannot create Lokalise API client") {
-		t.Fatalf("expected factory error to propagate, got: %v", err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !errors.Is(err, factoryErr) {
+		t.Fatalf("expected error wrapping %v, got %v", factoryErr, err)
+	}
+
+	if !strings.Contains(err.Error(), "cannot create Lokalise API client") {
+		t.Fatalf(
+			"expected error containing %q, got %q",
+			"cannot create Lokalise API client",
+			err.Error(),
+		)
 	}
 }
 
 func TestDownloadFiles_DownloadError(t *testing.T) {
+	t.Parallel()
+
 	cfg := DownloadConfig{
 		ProjectID:        "proj_123",
 		Token:            "tok_abc",
 		FileFormat:       "json",
 		GitHubRefName:    "main",
 		MaxRetries:       3,
-		InitialSleepTime: time.Duration(1) * time.Second,
-		HTTPTimeout:      time.Duration(10) * time.Second,
+		InitialSleepTime: time.Second,
+		HTTPTimeout:      10 * time.Second,
 	}
 
-	fd := &fakeDownloader{returnErr: errors.New("network down")}
-	ff := &fakeFactory{downloader: fd}
+	downloadErr := errors.New("network down")
+
+	fd := &fakeDownloader{
+		returnErr: downloadErr,
+	}
+	ff := &fakeFactory{
+		downloader: fd,
+	}
 
 	err := downloadFiles(context.Background(), cfg, ff)
-	if err == nil || !strings.Contains(err.Error(), "download failed") {
-		t.Fatalf("expected download error to propagate, got: %v", err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !errors.Is(err, downloadErr) {
+		t.Fatalf("expected error wrapping %v, got %v", downloadErr, err)
+	}
+
+	if !strings.Contains(err.Error(), "download failed") {
+		t.Fatalf(
+			"expected error containing %q, got %q",
+			"download failed",
+			err.Error(),
+		)
 	}
 }
 
@@ -430,6 +467,7 @@ func (f *fakeAsyncDownloader) DownloadAsync(ctx context.Context, dest string, pa
 }
 
 type fakeFactory struct {
+	called  bool
 	wantErr error
 
 	// capture args to assert
@@ -444,6 +482,7 @@ type fakeFactory struct {
 }
 
 func (f *fakeFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) {
+	f.called = true
 	f.gotToken = cfg.Token
 	f.gotProjectID = cfg.ProjectID
 	f.gotRetries = cfg.MaxRetries
@@ -458,4 +497,68 @@ func (f *fakeFactory) NewDownloader(cfg DownloadConfig) (Downloader, error) {
 		return &fakeDownloader{}, nil
 	}
 	return f.downloader, nil
+}
+
+func TestDownloadFiles_InvalidAdditionalParamsStopsBeforeFactory(t *testing.T) {
+	t.Parallel()
+
+	cfg := DownloadConfig{
+		ProjectID:        "proj_123",
+		Token:            "tok_abc",
+		FileFormat:       "json",
+		GitHubRefName:    "main",
+		AdditionalParams: `{"broken":`,
+	}
+
+	ff := &fakeFactory{}
+
+	err := downloadFiles(context.Background(), cfg, ff)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "invalid additional_params") {
+		t.Fatalf(
+			"expected error containing %q, got %q",
+			"invalid additional_params",
+			err.Error(),
+		)
+	}
+
+	if ff.called {
+		t.Fatal("factory should not be called when additional params are invalid")
+	}
+}
+
+func TestDownloadFiles_AsyncModeRequiresAsyncDownloader(t *testing.T) {
+	t.Parallel()
+
+	cfg := DownloadConfig{
+		ProjectID:     "proj_123",
+		Token:         "tok_abc",
+		FileFormat:    "json",
+		GitHubRefName: "main",
+		AsyncMode:     true,
+	}
+
+	fd := &fakeDownloader{}
+	ff := &fakeFactory{
+		downloader: fd,
+	}
+
+	err := downloadFiles(context.Background(), cfg, ff)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(
+		err.Error(),
+		"async mode requested, but downloader doesn't support DownloadAsync",
+	) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if fd.called {
+		t.Fatal("Download should not be called when async mode is requested")
+	}
 }

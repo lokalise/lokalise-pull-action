@@ -19,9 +19,11 @@ func (m MockCommandRunner) Capture(name string, args ...string) (string, error) 
 	if err, ok := m.Err[key]; ok {
 		return m.Output[key], err
 	}
+
 	if output, ok := m.Output[key]; ok {
 		return output, nil
 	}
+
 	return "", fmt.Errorf("command %q not mocked", key)
 }
 
@@ -33,7 +35,10 @@ func joinLines(lines ...string) string {
 	return strings.Join(lines, "\n")
 }
 
-func newMockCommandRunner(output map[string]string, err map[string]error) MockCommandRunner {
+func newMockCommandRunner(
+	output map[string]string,
+	err map[string]error,
+) MockCommandRunner {
 	return MockCommandRunner{
 		Output: output,
 		Err:    err,
@@ -43,7 +48,7 @@ func newMockCommandRunner(output map[string]string, err map[string]error) MockCo
 func TestRunWith_Success_WhenChangesDetected(t *testing.T) {
 	t.Parallel()
 
-	cfg := &Config{}
+	cfg := Config{BaseLang: "en"}
 
 	prepareCalled := false
 	detectCalled := false
@@ -52,20 +57,19 @@ func TestRunWith_Success_WhenChangesDetected(t *testing.T) {
 	var gotKey string
 	var gotValue string
 
-	prepare := func() (*Config, error) {
+	prepare := func() (Config, error) {
 		prepareCalled = true
 		return cfg, nil
 	}
 
-	detect := func(gotCfg *Config, runner CommandRunner) (bool, error) {
+	detect := func(gotCfg Config, runner CommandRunner) (bool, error) {
 		detectCalled = true
 
-		if gotCfg != cfg {
-			t.Fatalf("detect got unexpected config pointer")
+		if gotCfg.BaseLang != cfg.BaseLang {
+			t.Fatalf("detect got unexpected config: %+v", gotCfg)
 		}
 
-		_, ok := runner.(MockCommandRunner)
-		if !ok {
+		if _, ok := runner.(MockCommandRunner); !ok {
 			t.Fatalf("detect got unexpected runner type: %T", runner)
 		}
 
@@ -89,15 +93,19 @@ func TestRunWith_Success_WhenChangesDetected(t *testing.T) {
 	if !prepareCalled {
 		t.Fatal("expected prepare to be called")
 	}
+
 	if !detectCalled {
 		t.Fatal("expected detect to be called")
 	}
+
 	if !writeCalled {
 		t.Fatal("expected write to be called")
 	}
+
 	if gotKey != "has_changes" {
 		t.Fatalf("unexpected output key: %q", gotKey)
 	}
+
 	if gotValue != "true" {
 		t.Fatalf("unexpected output value: %q", gotValue)
 	}
@@ -106,19 +114,20 @@ func TestRunWith_Success_WhenChangesDetected(t *testing.T) {
 func TestRunWith_Success_WhenNoChangesDetected(t *testing.T) {
 	t.Parallel()
 
-	cfg := &Config{}
+	cfg := Config{BaseLang: "en"}
 
 	var gotKey string
 	var gotValue string
 
-	prepare := func() (*Config, error) {
+	prepare := func() (Config, error) {
 		return cfg, nil
 	}
 
-	detect := func(gotCfg *Config, runner CommandRunner) (bool, error) {
-		if gotCfg != cfg {
-			t.Fatalf("detect got unexpected config pointer")
+	detect := func(gotCfg Config, _ CommandRunner) (bool, error) {
+		if gotCfg.BaseLang != cfg.BaseLang {
+			t.Fatalf("detect got unexpected config: %+v", gotCfg)
 		}
+
 		return false, nil
 	}
 
@@ -138,6 +147,7 @@ func TestRunWith_Success_WhenNoChangesDetected(t *testing.T) {
 	if gotKey != "has_changes" {
 		t.Fatalf("unexpected output key: %q", gotKey)
 	}
+
 	if gotValue != "false" {
 		t.Fatalf("unexpected output value: %q", gotValue)
 	}
@@ -146,11 +156,13 @@ func TestRunWith_Success_WhenNoChangesDetected(t *testing.T) {
 func TestRunWith_ReturnsError_WhenPrepareFails(t *testing.T) {
 	t.Parallel()
 
-	prepare := func() (*Config, error) {
-		return nil, errors.New("bad config")
+	prepareErr := errors.New("bad config")
+
+	prepare := func() (Config, error) {
+		return Config{}, prepareErr
 	}
 
-	detect := func(_ *Config, _ CommandRunner) (bool, error) {
+	detect := func(_ Config, _ CommandRunner) (bool, error) {
 		t.Fatal("detect should not be called")
 		return false, nil
 	}
@@ -167,7 +179,11 @@ func TestRunWith_ReturnsError_WhenPrepareFails(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "error preparing configuration: bad config") {
+	if !errors.Is(err, prepareErr) {
+		t.Fatalf("expected error wrapping %v, got %v", prepareErr, err)
+	}
+
+	if !strings.Contains(err.Error(), "error preparing configuration") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -175,17 +191,19 @@ func TestRunWith_ReturnsError_WhenPrepareFails(t *testing.T) {
 func TestRunWith_ReturnsError_WhenDetectFails(t *testing.T) {
 	t.Parallel()
 
-	cfg := &Config{}
+	cfg := Config{BaseLang: "en"}
+	detectErr := errors.New("git failure")
 
-	prepare := func() (*Config, error) {
+	prepare := func() (Config, error) {
 		return cfg, nil
 	}
 
-	detect := func(gotCfg *Config, runner CommandRunner) (bool, error) {
-		if gotCfg != cfg {
-			t.Fatalf("detect got unexpected config pointer")
+	detect := func(gotCfg Config, _ CommandRunner) (bool, error) {
+		if gotCfg.BaseLang != cfg.BaseLang {
+			t.Fatalf("detect got unexpected config: %+v", gotCfg)
 		}
-		return false, errors.New("git failure")
+
+		return false, detectErr
 	}
 
 	write := func(_, _ string) bool {
@@ -200,7 +218,11 @@ func TestRunWith_ReturnsError_WhenDetectFails(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "error detecting changes: git failure") {
+	if !errors.Is(err, detectErr) {
+		t.Fatalf("expected error wrapping %v, got %v", detectErr, err)
+	}
+
+	if !strings.Contains(err.Error(), "error detecting changes") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -208,16 +230,13 @@ func TestRunWith_ReturnsError_WhenDetectFails(t *testing.T) {
 func TestRunWith_ReturnsError_WhenWriteFails(t *testing.T) {
 	t.Parallel()
 
-	cfg := &Config{}
+	cfg := Config{}
 
-	prepare := func() (*Config, error) {
+	prepare := func() (Config, error) {
 		return cfg, nil
 	}
 
-	detect := func(gotCfg *Config, runner CommandRunner) (bool, error) {
-		if gotCfg != cfg {
-			t.Fatalf("detect got unexpected config pointer")
-		}
+	detect := func(_ Config, _ CommandRunner) (bool, error) {
 		return true, nil
 	}
 
@@ -232,7 +251,7 @@ func TestRunWith_ReturnsError_WhenWriteFails(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "failed to write to GitHub output") {
+	if err.Error() != "failed to write to GitHub output" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -240,12 +259,12 @@ func TestRunWith_ReturnsError_WhenWriteFails(t *testing.T) {
 func TestDetectChanges_Success(t *testing.T) {
 	t.Parallel()
 
-	cfg := &Config{}
+	cfg := Config{BaseLang: "en"}
 	runner := newMockCommandRunner(nil, nil)
 
-	detect := func(gotCfg *Config, gotRunner CommandRunner) (bool, error) {
-		if gotCfg != cfg {
-			t.Fatalf("detect got unexpected config pointer")
+	detect := func(gotCfg Config, gotRunner CommandRunner) (bool, error) {
+		if gotCfg.BaseLang != cfg.BaseLang {
+			t.Fatalf("detect got unexpected config: %+v", gotCfg)
 		}
 
 		if _, ok := gotRunner.(MockCommandRunner); !ok {
@@ -259,6 +278,7 @@ func TestDetectChanges_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("detectChanges returned unexpected error: %v", err)
 	}
+
 	if !changed {
 		t.Fatal("expected changed=true")
 	}
@@ -267,21 +287,28 @@ func TestDetectChanges_Success(t *testing.T) {
 func TestDetectChanges_ReturnsWrappedError(t *testing.T) {
 	t.Parallel()
 
-	cfg := &Config{}
+	cfg := Config{}
 	runner := newMockCommandRunner(nil, nil)
+	detectErr := errors.New("diff failed")
 
-	detect := func(_ *Config, _ CommandRunner) (bool, error) {
-		return false, errors.New("diff failed")
+	detect := func(_ Config, _ CommandRunner) (bool, error) {
+		return false, detectErr
 	}
 
 	changed, err := detectChanges(cfg, detect, runner)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+
 	if changed {
 		t.Fatal("expected changed=false")
 	}
-	if !strings.Contains(err.Error(), "error detecting changes: diff failed") {
+
+	if !errors.Is(err, detectErr) {
+		t.Fatalf("expected error wrapping %v, got %v", detectErr, err)
+	}
+
+	if !strings.Contains(err.Error(), "error detecting changes") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -306,6 +333,7 @@ func TestWriteChangesOutput_WritesTrue(t *testing.T) {
 	if gotKey != "has_changes" {
 		t.Fatalf("unexpected output key: %q", gotKey)
 	}
+
 	if gotValue != "true" {
 		t.Fatalf("unexpected output value: %q", gotValue)
 	}
@@ -331,6 +359,7 @@ func TestWriteChangesOutput_WritesFalse(t *testing.T) {
 	if gotKey != "has_changes" {
 		t.Fatalf("unexpected output key: %q", gotKey)
 	}
+
 	if gotValue != "false" {
 		t.Fatalf("unexpected output value: %q", gotValue)
 	}
@@ -348,7 +377,7 @@ func TestWriteChangesOutput_ReturnsError_WhenWriteFails(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "failed to write to GitHub output") {
+	if err.Error() != "failed to write to GitHub output" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

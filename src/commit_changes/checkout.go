@@ -87,17 +87,24 @@ func fetchRemoteBranch(runner CommandRunner, ref string) error {
 	return nil
 }
 
-func checkoutRemoteTrackingBranch(branchName, remoteRef string, runner CommandRunner) error {
+func checkoutRemoteTrackingBranch(
+	branchName string,
+	remoteRef string,
+	runner CommandRunner,
+) error {
 	remote := "origin/" + remoteRef
 
-	if err := runner.Run("git", "checkout", "-B", branchName, remote); err == nil {
-		return nil
-	} else {
-		if err2 := checkoutRemoteWithLocalChanges(branchName, remoteRef, runner, err); err2 != nil {
-			return err2
-		}
+	err := runner.Run("git", "checkout", "-B", branchName, remote)
+	if err == nil {
 		return nil
 	}
+
+	return checkoutRemoteWithLocalChanges(
+		branchName,
+		remoteRef,
+		runner,
+		err,
+	)
 }
 
 func setBranchUpstream(runner CommandRunner, branchName, remoteRef string) {
@@ -139,7 +146,7 @@ func checkoutRemoteWithLocalChanges(branchName, remoteRef string, runner Command
 	same, err := worktreeEqualsRef(remote, runner)
 	if err == nil && same && !hasUntracked {
 		if err := runner.Run("git", "checkout", "-f", "-B", branchName, remote); err != nil {
-			return fmt.Errorf("failed to force-checkout %s: %v", remote, err)
+			return fmt.Errorf("failed to force-checkout %s: %w", remote, err)
 		}
 		return nil
 	}
@@ -151,7 +158,7 @@ func checkoutRemoteWithLocalChanges(branchName, remoteRef string, runner Command
 
 	if err := runner.Run("git", "checkout", "-B", branchName, remote); err != nil {
 		restoreStashBestEffort(runner, stashHash)
-		return fmt.Errorf("failed to checkout %s after stashing: %v", remote, err)
+		return fmt.Errorf("failed to checkout %s after stashing: %w", remote, err)
 	}
 
 	if !didStash {
@@ -163,7 +170,7 @@ func checkoutRemoteWithLocalChanges(branchName, remoteRef string, runner Command
 	}
 
 	if err := runner.Run("git", "reset"); err != nil {
-		return fmt.Errorf("checked out %s but failed to reset index: %v", remote, err)
+		return fmt.Errorf("checked out %s but failed to reset index: %w", remote, err)
 	}
 
 	if err := dropStashByHash(runner, stashHash); err != nil {
@@ -185,5 +192,10 @@ func hasRemote(runner CommandRunner, ref string) (bool, error) {
 		return false, nil
 	}
 
-	return false, fmt.Errorf("git ls-remote failed for ref %q: %v\nOutput: %s", ref, err, strings.TrimSpace(out))
+	return false, fmt.Errorf(
+		"git ls-remote failed for ref %q: %w\nOutput: %s",
+		ref,
+		err,
+		strings.TrimSpace(out),
+	)
 }

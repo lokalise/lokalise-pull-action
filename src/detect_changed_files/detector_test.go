@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,7 +26,7 @@ func TestDetectChangedFiles(t *testing.T) {
 		nil,
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          paths,
 		FileExts:       fileExts,
 		FlatNaming:     flat,
@@ -39,7 +39,7 @@ func TestDetectChangedFiles(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 	if !changed {
-		t.Fatalf("Expected changes, but got none")
+		t.Fatal("expected changes, got none")
 	}
 }
 
@@ -57,7 +57,7 @@ func TestDetectChangedFiles_NoChanges(t *testing.T) {
 		nil,
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          paths,
 		FileExts:       fileExts,
 		FlatNaming:     flat,
@@ -91,7 +91,7 @@ func TestDetectChangedFiles_AllChangesExcluded_Flat_PerExt(t *testing.T) {
 		nil,
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          paths,
 		FileExts:       fileExts,
 		FlatNaming:     flat,
@@ -128,7 +128,7 @@ func TestDetectChangedFiles_Nested_BaseDirExcluded(t *testing.T) {
 		nil,
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          paths,
 		FileExts:       fileExts,
 		FlatNaming:     flat,
@@ -156,11 +156,11 @@ func TestDetectChangedFiles_GitDiffError(t *testing.T) {
 			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): "git diff error output",
 		},
 		map[string]error{
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): fmt.Errorf("git diff error"),
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): errors.New("git diff error"),
 		},
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          paths,
 		FileExts:       fileExts,
 		FlatNaming:     flat,
@@ -186,11 +186,11 @@ func TestDetectChangedFiles_GitLsFilesError(t *testing.T) {
 			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): "git ls-files error output",
 		},
 		map[string]error{
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): fmt.Errorf("git ls-files error"),
+			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): errors.New("git ls-files error"),
 		},
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          paths,
 		FileExts:       fileExts,
 		FlatNaming:     flat,
@@ -216,7 +216,7 @@ func TestDetectChangedFiles_DeletedManagedFileStillCounts(t *testing.T) {
 		nil,
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          []string{"path/to/translations"},
 		FileExts:       []string{"json"},
 		FlatNaming:     false,
@@ -246,11 +246,11 @@ func TestDetectChangedFiles_NoHeadFallback(t *testing.T) {
 			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): "",
 		},
 		map[string]error{
-			makeKey([]string{"rev-parse", "--verify", "HEAD"}): fmt.Errorf("no HEAD"),
+			makeKey([]string{"rev-parse", "--verify", "HEAD"}): errors.New("no HEAD"),
 		},
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          []string{"path/to/translations"},
 		FileExts:       []string{"json"},
 		FlatNaming:     true,
@@ -279,7 +279,7 @@ func TestDetectChangedFiles_AlwaysPullBaseIncludesBaseFile_Flat(t *testing.T) {
 		nil,
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          []string{"locales"},
 		FileExts:       []string{"json"},
 		FlatNaming:     true,
@@ -311,7 +311,7 @@ func TestDetectChangedFiles_Nested_BaseOnlyChangesExcluded(t *testing.T) {
 		nil,
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          []string{"ios/App"},
 		FileExts:       []string{"strings", "stringsdict"},
 		FlatNaming:     false,
@@ -344,7 +344,7 @@ func TestDetectChangedFiles_OnlyNonManagedChanges(t *testing.T) {
 		nil,
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          []string{"path/to/translations"},
 		FileExts:       []string{"json"},
 		FlatNaming:     true,
@@ -373,7 +373,7 @@ func TestDetectChangedFiles_UntrackedManagedOnly(t *testing.T) {
 		nil,
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          []string{"path/to/translations"},
 		FileExts:       []string{"json"},
 		FlatNaming:     true,
@@ -397,12 +397,12 @@ func TestDetectChangedFiles_NoHeadCachedError(t *testing.T) {
 			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "--cached"}): "git diff --cached error output",
 		},
 		map[string]error{
-			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                 fmt.Errorf("no HEAD"),
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "--cached"}): fmt.Errorf("git diff --cached error"),
+			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                 errors.New("no HEAD"),
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "--cached"}): errors.New("git diff --cached error"),
 		},
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          []string{"path/to/translations"},
 		FileExts:       []string{"json"},
 		FlatNaming:     true,
@@ -428,7 +428,7 @@ func TestDetectChangedFiles_MultipleRoots_SecondRootMatches(t *testing.T) {
 		nil,
 	)
 
-	config := &Config{
+	config := Config{
 		Paths: []string{
 			"packages/pkg/locales",
 			"packages/app/locales",
@@ -456,12 +456,12 @@ func TestDetectChangedFiles_NoHeadWorktreeError(t *testing.T) {
 			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only"}):             "git diff worktree error output",
 		},
 		map[string]error{
-			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                     fmt.Errorf("no HEAD"),
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only"}): fmt.Errorf("git diff worktree error"),
+			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                     errors.New("no HEAD"),
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only"}): errors.New("git diff worktree error"),
 		},
 	)
 
-	config := &Config{
+	config := Config{
 		Paths:          []string{"path/to/translations"},
 		FileExts:       []string{"json"},
 		FlatNaming:     true,

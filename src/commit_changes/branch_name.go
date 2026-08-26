@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -37,7 +38,7 @@ func resolveOverrideBranchName(config *Config, runner CommandRunner) (string, bo
 
 	override := strings.TrimSpace(config.OverrideBranchName)
 	if override == "" {
-		return "", true, fmt.Errorf("override branch name is empty after trimming")
+		return "", true, errors.New("override branch name is empty after trimming")
 	}
 
 	if err := validateBranchName(override, runner); err != nil {
@@ -70,7 +71,7 @@ func buildGeneratedBranchName(config *Config) (string, error) {
 	branchName = sanitizeString(branchName, 255)
 
 	if branchName == "" {
-		return "", fmt.Errorf("generated branch name is empty after sanitization")
+		return "", errors.New("generated branch name is empty after sanitization")
 	}
 
 	return branchName, nil
@@ -80,7 +81,7 @@ func shortGitHubSHA(sha string) (string, error) {
 	sha = strings.TrimSpace(sha)
 
 	if len(sha) < 6 {
-		return "", fmt.Errorf("GITHUB_SHA is too short")
+		return "", errors.New("GITHUB_SHA is too short")
 	}
 
 	return sha[:6], nil

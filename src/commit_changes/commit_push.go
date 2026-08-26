@@ -81,7 +81,11 @@ func commitAndPush(branchName string, runner CommandRunner, config *Config) erro
 
 	output, err := runner.Capture("git", buildCommitArgs(config)...)
 	if err != nil {
-		return fmt.Errorf("failed to commit changes: %w\nOutput: %s", err, output)
+		return fmt.Errorf(
+			"failed to commit changes: %w\nOutput: %s",
+			err,
+			strings.TrimSpace(output),
+		)
 	}
 
 	return pushBranch(branchName, runner, config)
@@ -90,18 +94,24 @@ func commitAndPush(branchName string, runner CommandRunner, config *Config) erro
 func hasCachedDiff(runner CommandRunner) (bool, error) {
 	out, err := runner.Capture("git", "diff", "--name-only", "--cached")
 	if err != nil {
-		return false, fmt.Errorf("failed to inspect staged changes: %w\nOutput: %s", err, out)
+		return false, fmt.Errorf(
+			"failed to inspect staged changes: %w\nOutput: %s",
+			err,
+			strings.TrimSpace(out),
+		)
 	}
+
 	return strings.TrimSpace(out) != "", nil
 }
 
 func buildCommitArgs(config *Config) []string {
 	args := []string{"commit"}
+
 	if config.GitSignCommits {
 		args = append(args, "-S")
 	}
-	args = append(args, "-m", config.GitCommitMessage)
-	return args
+
+	return append(args, "-m", config.GitCommitMessage)
 }
 
 func pushBranch(branchName string, runner CommandRunner, config *Config) error {

@@ -58,7 +58,6 @@ func readRequiredEnvVars() (map[string]string, map[string]bool, error) {
 	requiredStrings, err := readRequiredStringEnv(
 		"GITHUB_ACTOR",
 		"GITHUB_SHA",
-		"TEMP_BRANCH_PREFIX",
 		"TRANSLATIONS_PATH",
 		"BASE_LANG",
 	)
@@ -111,7 +110,7 @@ func buildConfig(
 	return &Config{
 		GitHubActor:        requiredStrings["GITHUB_ACTOR"],
 		GitHubSHA:          requiredStrings["GITHUB_SHA"],
-		TempBranchPrefix:   requiredStrings["TEMP_BRANCH_PREFIX"],
+		TempBranchPrefix:   strings.TrimSpace(os.Getenv("TEMP_BRANCH_PREFIX")),
 		FileExts:           inputs.fileExts,
 		BaseLang:           inputs.baseLang,
 		FlatNaming:         requiredBools["FLAT_NAMING"],
@@ -120,7 +119,7 @@ func buildConfig(
 		GitUserEmail:       strings.TrimSpace(os.Getenv("GIT_USER_EMAIL")),
 		GitCommitMessage:   resolveCommitMessage(),
 		GitSignCommits:     parseOptionalBoolEnvFalse("GIT_SIGN_COMMITS"),
-		OverrideBranchName: strings.TrimSpace(os.Getenv("OVERRIDE_BRANCH_NAME")),
+		OverrideBranchName: os.Getenv("OVERRIDE_BRANCH_NAME"),
 		ForcePush:          requiredBools["FORCE_PUSH"],
 		BaseRef:            baseRef,
 		HeadRef:            headRef,
@@ -148,17 +147,25 @@ func readRequiredBoolEnv(keys ...string) (map[string]bool, error) {
 	for _, key := range keys {
 		value, err := parsers.ParseBoolEnv(key)
 		if err != nil {
-			return nil, fmt.Errorf("environment variable %s has incorrect value, expected true or false", key)
+			return nil, fmt.Errorf("invalid %s value: %w", key, err)
 		}
+
 		values[key] = value
 	}
 
 	return values, nil
 }
 
-func parseGitRefs() (baseRef, headRef string) {
-	baseRef = strings.TrimPrefix(strings.TrimSpace(os.Getenv("BASE_REF")), "refs/heads/")
-	headRef = strings.TrimPrefix(strings.TrimSpace(os.Getenv("HEAD_REF")), "refs/heads/")
+func parseGitRefs() (string, string) {
+	baseRef := strings.TrimPrefix(
+		strings.TrimSpace(os.Getenv("BASE_REF")),
+		"refs/heads/",
+	)
+	headRef := strings.TrimPrefix(
+		strings.TrimSpace(os.Getenv("HEAD_REF")),
+		"refs/heads/",
+	)
+
 	return baseRef, headRef
 }
 

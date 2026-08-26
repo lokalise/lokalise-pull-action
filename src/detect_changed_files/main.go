@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,33 +9,35 @@ import (
 	"github.com/bodrovis/lokalise-actions-common/v2/githuboutput"
 )
 
-// This program inspects git state to decide whether translation files changed.
-// It supports both "flat" layouts (e.g., locales/en.json) and nested layouts
-// (e.g., locales/en/app.json), and can optionally exclude base language files.
-// Result is written as a GitHub Actions output variable `has_changes`.
-
-// CommandRunner abstracts shell execution for testability (inject a fake runner).
+// CommandRunner abstracts command execution for testability.
 type CommandRunner interface {
 	Capture(name string, args ...string) (string, error)
 }
 
 type DefaultCommandRunner struct{}
 
-func (d DefaultCommandRunner) Capture(name string, args ...string) (string, error) {
-	var out bytes.Buffer
-	cmd := exec.Command(name, args...)
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	err := cmd.Run()
-	return out.String(), err
+func (DefaultCommandRunner) Capture(name string, args ...string) (string, error) {
+	out, err := exec.Command(name, args...).CombinedOutput()
+	return string(out), err
 }
 
-var exitFunc = os.Exit
+type (
+	prepareFunc func() (Config, error)
+	detectFunc  func(Config, CommandRunner) (bool, error)
+	writeFunc   func(string, string) bool
+)
 
 func main() {
+	os.Exit(runMain())
+}
+
+func runMain() int {
 	if err := run(); err != nil {
-		returnWithError(err.Error())
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		return 1
 	}
+
+	return 0
 }
 
 func run() error {
@@ -47,12 +49,10 @@ func run() error {
 	)
 }
 
-type detectFunc func(*Config, CommandRunner) (bool, error)
-
 func runWith(
-	prepare func() (*Config, error),
+	prepare prepareFunc,
 	detect detectFunc,
-	write func(string, string) bool,
+	write writeFunc,
 	runner CommandRunner,
 ) error {
 	cfg, err := prepare()
@@ -65,15 +65,11 @@ func runWith(
 		return err
 	}
 
-	if err := writeChangesOutput(changed, write); err != nil {
-		return err
-	}
-
-	return nil
+	return writeChangesOutput(changed, write)
 }
 
 func detectChanges(
-	cfg *Config,
+	cfg Config,
 	detect detectFunc,
 	runner CommandRunner,
 ) (bool, error) {
@@ -85,11 +81,9 @@ func detectChanges(
 	return changed, nil
 }
 
-func writeChangesOutput(
-	changed bool,
-	write func(string, string) bool,
-) error {
+func writeChangesOutput(changed bool, write writeFunc) error {
 	outputValue := "false"
+
 	if changed {
 		outputValue = "true"
 		fmt.Println("Detected changes in translation files.")
@@ -98,13 +92,8 @@ func writeChangesOutput(
 	}
 
 	if !write("has_changes", outputValue) {
-		return fmt.Errorf("failed to write to GitHub output")
+		return errors.New("failed to write to GitHub output")
 	}
 
 	return nil
-}
-
-func returnWithError(message string) {
-	fmt.Fprintf(os.Stderr, "Error: %s\n", message)
-	exitFunc(1)
 }

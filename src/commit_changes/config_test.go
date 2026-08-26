@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -484,6 +485,36 @@ func TestEnvVarsToConfig(t *testing.T) {
 			expectError:     true,
 			expectedErrText: "escapes repo root",
 		},
+		{
+			name: "Whitespace override branch name is preserved for later validation",
+			envVars: map[string]string{
+				"BASE_REF":             "main",
+				"GITHUB_ACTOR":         "test_actor",
+				"GITHUB_SHA":           "123456",
+				"TEMP_BRANCH_PREFIX":   "temp",
+				"TRANSLATIONS_PATH":    "translations",
+				"FILE_FORMAT":          "json",
+				"BASE_LANG":            "en",
+				"FLAT_NAMING":          "true",
+				"ALWAYS_PULL_BASE":     "false",
+				"FORCE_PUSH":           "false",
+				"OVERRIDE_BRANCH_NAME": "   \t   ",
+			},
+			expectedConfig: &Config{
+				GitHubActor:        "test_actor",
+				GitHubSHA:          "123456",
+				TempBranchPrefix:   "temp",
+				FileExts:           []string{"json"},
+				BaseLang:           "en",
+				FlatNaming:         true,
+				AlwaysPullBase:     false,
+				GitCommitMessage:   "Translations update",
+				OverrideBranchName: "   \t   ",
+				ForcePush:          false,
+				BaseRef:            "main",
+				TranslationPaths:   []string{"translations"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -522,7 +553,7 @@ func TestEnvVarsToConfig(t *testing.T) {
 				if err == nil {
 					t.Fatalf("Expected error but got nil")
 				}
-				if tt.expectedErrText != "" && !containsSubstring(err.Error(), tt.expectedErrText) {
+				if tt.expectedErrText != "" && !strings.Contains(err.Error(), tt.expectedErrText) {
 					t.Fatalf("Expected error containing '%s', but got '%v'", tt.expectedErrText, err)
 				}
 				return

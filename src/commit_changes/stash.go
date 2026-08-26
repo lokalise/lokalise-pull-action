@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,7 +10,11 @@ import (
 func stashIfDirty(runner CommandRunner, msg string) (string, bool, error) {
 	out, err := runner.Capture("git", "status", "--porcelain=v1")
 	if err != nil {
-		return "", false, fmt.Errorf("failed to check git status: %w\nOutput: %s", err, out)
+		return "", false, fmt.Errorf(
+			"failed to check git status: %w\nOutput: %s",
+			err,
+			strings.TrimSpace(out),
+		)
 	}
 	if strings.TrimSpace(out) == "" {
 		return "", false, nil
@@ -22,12 +27,16 @@ func stashIfDirty(runner CommandRunner, msg string) (string, bool, error) {
 
 	refOut, err := runner.Capture("git", "rev-parse", "--verify", "stash@{0}")
 	if err != nil {
-		return "", false, fmt.Errorf("failed to resolve created stash ref: %w\nOutput: %s", err, refOut)
+		return "", false, fmt.Errorf(
+			"failed to resolve created stash ref: %w\nOutput: %s",
+			err,
+			strings.TrimSpace(refOut),
+		)
 	}
 
 	stashRef := strings.TrimSpace(refOut)
 	if stashRef == "" {
-		return "", false, fmt.Errorf("created stash ref is empty")
+		return "", false, errors.New("created stash ref is empty")
 	}
 
 	return stashRef, true, nil
@@ -48,15 +57,31 @@ func restoreFilesFromStash(remote, stashRef string, runner CommandRunner) error 
 	return nil
 }
 
-func restoreFileFromStash(runner CommandRunner, stashRef, file string) error {
-	if err := runner.Run("git", "checkout", stashRef, "--", file); err == nil {
+func restoreFileFromStash(
+	runner CommandRunner,
+	stashRef,
+	file string,
+) error {
+	trackedErr := runner.Run("git", "checkout", stashRef, "--", file)
+	if trackedErr == nil {
 		return nil
-	} else {
-		trackedErr := err
+	}
 
-		if err := runner.Run("git", "checkout", stashRef+"^3", "--", file); err != nil {
-			return fmt.Errorf("failed to restore file %q from stash %q: tracked restore failed: %w; untracked restore failed: %v", file, stashRef, trackedErr, err)
-		}
+	untrackedErr := runner.Run(
+		"git",
+		"checkout",
+		stashRef+"^3",
+		"--",
+		file,
+	)
+	if untrackedErr != nil {
+		return fmt.Errorf(
+			"failed to restore file %q from stash %q: tracked restore failed: %w; untracked restore failed: %w",
+			file,
+			stashRef,
+			trackedErr,
+			untrackedErr,
+		)
 	}
 
 	return nil
@@ -65,7 +90,7 @@ func restoreFileFromStash(runner CommandRunner, stashRef, file string) error {
 func listStashedFiles(runner CommandRunner, stashRef string) ([]string, error) {
 	out, err := runner.Capture("git", "stash", "show", "--name-only", "--include-untracked", stashRef)
 	if err != nil {
-		return nil, fmt.Errorf("%w\nOutput: %s", err, out)
+		return nil, fmt.Errorf("%w\nOutput: %s", err, strings.TrimSpace(out))
 	}
 	return splitNonEmptyLines(out), nil
 }
@@ -90,15 +115,15 @@ func restoreStashBestEffort(runner CommandRunner, stashHash string) {
 func findStashSelectorByHash(runner CommandRunner, stashHash string) (string, error) {
 	stashHash = strings.TrimSpace(stashHash)
 	if stashHash == "" {
-		return "", fmt.Errorf("stash hash is empty")
+		return "", errors.New("stash hash is empty")
 	}
 
 	out, err := runner.Capture("git", "stash", "list", "--format=%H%x09%gd")
 	if err != nil {
-		return "", fmt.Errorf("failed to list stashes: %w\nOutput: %s", err, out)
+		return "", fmt.Errorf("failed to list stashes: %w\nOutput: %s", err, strings.TrimSpace(out))
 	}
 
-	for _, rawLine := range strings.Split(out, "\n") {
+	for rawLine := range strings.SplitSeq(out, "\n") {
 		line := strings.TrimSuffix(rawLine, "\r")
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -112,8 +137,12 @@ func findStashSelectorByHash(runner CommandRunner, stashHash string) (string, er
 		if strings.TrimSpace(hash) == stashHash {
 			selector = strings.TrimSpace(selector)
 			if selector == "" {
-				return "", fmt.Errorf("matched stash hash %s but selector is empty", stashHash)
+				return "", fmt.Errorf(
+					"matched stash hash %s but selector is empty",
+					stashHash,
+				)
 			}
+
 			return selector, nil
 		}
 	}

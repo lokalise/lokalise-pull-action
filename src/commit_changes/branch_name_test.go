@@ -7,13 +7,16 @@ import (
 )
 
 func TestGenerateBranchName(t *testing.T) {
+	validationErr := errors.New("exit status 1")
+
 	tests := []struct {
 		name            string
 		config          *Config
 		expectedError   bool
-		expectedStart   string // prefix for generated names; exact for overrides
-		expectValidator bool   // whether we expect git check-ref-format to be called
-		expectExact     bool   // whether to check exact match instead of prefix
+		expectedCause   error
+		expectedStart   string
+		expectValidator bool
+		expectExact     bool
 	}{
 		{
 			name: "Valid inputs",
@@ -22,10 +25,8 @@ func TestGenerateBranchName(t *testing.T) {
 				BaseRef:          "feature_branch",
 				TempBranchPrefix: "temp",
 			},
-			expectedError:   false,
 			expectedStart:   "temp_feature_branch_123456_",
 			expectValidator: true,
-			expectExact:     false,
 		},
 		{
 			name: "Override branch name is empty after trimming",
@@ -35,8 +36,7 @@ func TestGenerateBranchName(t *testing.T) {
 				TempBranchPrefix:   "temp",
 				OverrideBranchName: "   \t   ",
 			},
-			expectedError:   true,
-			expectValidator: false,
+			expectedError: true,
 		},
 		{
 			name: "Blank temp branch prefix falls back to lok",
@@ -45,10 +45,8 @@ func TestGenerateBranchName(t *testing.T) {
 				BaseRef:          "main",
 				TempBranchPrefix: "   ",
 			},
-			expectedError:   false,
 			expectedStart:   "lok_main_123456_",
 			expectValidator: true,
-			expectExact:     false,
 		},
 		{
 			name: "Sanitized empty base ref falls back to base",
@@ -57,10 +55,8 @@ func TestGenerateBranchName(t *testing.T) {
 				BaseRef:          "!@#",
 				TempBranchPrefix: "temp",
 			},
-			expectedError:   false,
 			expectedStart:   "temp_base_abcdef_",
 			expectValidator: true,
-			expectExact:     false,
 		},
 		{
 			name: "Valid inputs with branch override (simple)",
@@ -70,10 +66,9 @@ func TestGenerateBranchName(t *testing.T) {
 				TempBranchPrefix:   "temp",
 				OverrideBranchName: "custom_branch",
 			},
-			expectedError:   false,
 			expectedStart:   "custom_branch",
 			expectValidator: true,
-			expectExact:     true, // override should be returned as-is
+			expectExact:     true,
 		},
 		{
 			name: "Valid inputs with branch override (keeps + and other valid chars)",
@@ -83,7 +78,6 @@ func TestGenerateBranchName(t *testing.T) {
 				TempBranchPrefix:   "temp",
 				OverrideBranchName: "feature/foo+bar",
 			},
-			expectedError:   false,
 			expectedStart:   "feature/foo+bar",
 			expectValidator: true,
 			expectExact:     true,
@@ -97,6 +91,7 @@ func TestGenerateBranchName(t *testing.T) {
 				OverrideBranchName: "bad branch",
 			},
 			expectedError:   true,
+			expectedCause:   validationErr,
 			expectValidator: true,
 		},
 		{
@@ -106,8 +101,7 @@ func TestGenerateBranchName(t *testing.T) {
 				BaseRef:          "main",
 				TempBranchPrefix: "temp",
 			},
-			expectedError:   true,
-			expectValidator: false, // should error before validation call
+			expectedError: true,
 		},
 		{
 			name: "BASE_REF with invalid characters (sanitized in generated name)",
@@ -116,10 +110,8 @@ func TestGenerateBranchName(t *testing.T) {
 				BaseRef:          "feature/branch!@#",
 				TempBranchPrefix: "temp",
 			},
-			expectedError:   false,
 			expectedStart:   "temp_feature/branch_abcdef_",
 			expectValidator: true,
-			expectExact:     false,
 		},
 		{
 			name: "BASE_REF exceeding 50 characters",
@@ -128,10 +120,8 @@ func TestGenerateBranchName(t *testing.T) {
 				BaseRef:          strings.Repeat("a", 60),
 				TempBranchPrefix: "temp",
 			},
-			expectedError:   false,
 			expectedStart:   "temp_" + strings.Repeat("a", 50) + "_abcdef_",
 			expectValidator: true,
-			expectExact:     false,
 		},
 	}
 
@@ -139,22 +129,27 @@ func TestGenerateBranchName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var validated []string
 
-			// simple validator stub: fail only on the specific invalid override we test
 			runner := &MockCommandRunner{
 				CaptureFunc: func(name string, args ...string) (string, error) {
 					if name != "git" {
 						return "", errors.New("unexpected command: " + name)
 					}
-					if len(args) != 3 || args[0] != "check-ref-format" || args[1] != "--branch" {
-						return "", errors.New("unexpected args: " + strings.Join(args, " "))
+
+					if len(args) != 3 ||
+						args[0] != "check-ref-format" ||
+						args[1] != "--branch" {
+						return "", errors.New(
+							"unexpected args: " + strings.Join(args, " "),
+						)
 					}
+
 					branch := args[2]
 					validated = append(validated, branch)
 
-					// emulate git validation failure for a known-bad branch
 					if branch == "bad branch" {
-						return "fatal: invalid branch name", errors.New("exit status 1")
+						return "fatal: invalid branch name", validationErr
 					}
+
 					return "", nil
 				},
 			}
@@ -163,7 +158,18 @@ func TestGenerateBranchName(t *testing.T) {
 
 			if tt.expectedError {
 				if err == nil {
-					t.Fatalf("expected error but got nil (branchName=%q)", branchName)
+					t.Fatalf(
+						"expected error but got nil (branchName=%q)",
+						branchName,
+					)
+				}
+
+				if tt.expectedCause != nil && !errors.Is(err, tt.expectedCause) {
+					t.Fatalf(
+						"expected error wrapping %v, got %v",
+						tt.expectedCause,
+						err,
+					)
 				}
 			} else {
 				if err != nil {
@@ -172,31 +178,44 @@ func TestGenerateBranchName(t *testing.T) {
 
 				if tt.expectExact {
 					if branchName != tt.expectedStart {
-						t.Fatalf("expected branch name %q, got %q", tt.expectedStart, branchName)
+						t.Fatalf(
+							"expected branch name %q, got %q",
+							tt.expectedStart,
+							branchName,
+						)
 					}
-				} else {
-					if !strings.HasPrefix(branchName, tt.expectedStart) {
-						t.Fatalf("expected branch name to start with %q, got %q", tt.expectedStart, branchName)
-					}
+				} else if !strings.HasPrefix(branchName, tt.expectedStart) {
+					t.Fatalf(
+						"expected branch name to start with %q, got %q",
+						tt.expectedStart,
+						branchName,
+					)
 				}
 			}
 
-			// Assert validator call behavior
 			if tt.expectValidator {
 				if len(validated) == 0 {
-					t.Fatalf("expected git check-ref-format to be called, but it wasn't")
+					t.Fatal(
+						"expected git check-ref-format to be called, but it wasn't",
+					)
 				}
-				// For successful cases, the validated name should match returned branchName
+
 				if !tt.expectedError {
 					last := validated[len(validated)-1]
 					if last != branchName {
-						t.Fatalf("expected validated branch %q to equal returned branch %q", last, branchName)
+						t.Fatalf(
+							"expected validated branch %q to equal returned branch %q",
+							last,
+							branchName,
+						)
 					}
 				}
-			} else {
-				if len(validated) != 0 {
-					t.Fatalf("did not expect validation call, but got %d call(s): %v", len(validated), validated)
-				}
+			} else if len(validated) != 0 {
+				t.Fatalf(
+					"did not expect validation call, but got %d call(s): %v",
+					len(validated),
+					validated,
+				)
 			}
 		})
 	}

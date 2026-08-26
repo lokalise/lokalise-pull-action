@@ -1,66 +1,70 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"strings"
 )
 
 // resolveRealBase determines a usable base branch.
-// If cfg.BaseRef is empty/synthetic, we ask the remote what HEAD points to,
-// Uses locale-agnostic methods first and falls back to parsing `git remote show origin` best-effort.
 //
-// Order:
-//  1. git ls-remote --symref origin HEAD  -> "ref: refs/heads/<branch> HEAD"
-//  2. git symbolic-ref --short refs/remotes/origin/HEAD -> "origin/<branch>"
-//  3. git remote show origin  -> parse "HEAD branch: <branch>" (best-effort)
-//  4. fallback "main"
+// If cfg.BaseRef is empty or synthetic, resolution order is:
+//  1. git ls-remote --symref origin HEAD
+//  2. git symbolic-ref --short refs/remotes/origin/HEAD
+//  3. git remote show origin
+//  4. fallback to "main"
 func resolveRealBase(runner CommandRunner, cfg *Config) (string, error) {
 	base := strings.TrimSpace(cfg.BaseRef)
 	if !isSyntheticRef(base) {
 		return base, nil
 	}
 
-	if br, source, ok := resolveFallbackBase(runner); ok {
-		fmt.Printf("BASE_REF synthetic/empty, using %s: %s\n", source, br)
-		return br, nil
+	if branch, source, ok := resolveFallbackBase(runner); ok {
+		fmt.Printf(
+			"BASE_REF synthetic/empty, using %s: %s\n",
+			source,
+			branch,
+		)
+		return branch, nil
 	}
 
 	fmt.Println("Could not resolve default branch from origin; falling back to main")
-
 	return "main", nil
 }
 
-func resolveFallbackBase(runner CommandRunner) (branch, source string, ok bool) {
-	if br, ok := getDefaultBranchFromLsRemote(runner); ok {
-		return br, "remote HEAD via ls-remote", true
+func resolveFallbackBase(runner CommandRunner) (string, string, bool) {
+	if branch, ok := getDefaultBranchFromLsRemote(runner); ok {
+		return branch, "remote HEAD via ls-remote", true
 	}
 
-	if br, ok := getDefaultBranchFromSymbolicRef(runner); ok {
-		return br, "origin/HEAD via symbolic-ref", true
+	if branch, ok := getDefaultBranchFromSymbolicRef(runner); ok {
+		return branch, "origin/HEAD via symbolic-ref", true
 	}
 
-	if br, ok := getDefaultBranchFromRemoteShow(runner); ok {
-		return br, "remote show origin", true
+	if branch, ok := getDefaultBranchFromRemoteShow(runner); ok {
+		return branch, "remote show origin", true
 	}
 
 	return "", "", false
 }
 
 func getDefaultBranchFromLsRemote(runner CommandRunner) (string, bool) {
-	out, err := runner.Capture("git", "ls-remote", "--symref", "origin", "HEAD")
+	out, err := runner.Capture(
+		"git",
+		"ls-remote",
+		"--symref",
+		"origin",
+		"HEAD",
+	)
 	if err != nil || strings.TrimSpace(out) == "" {
 		return "", false
 	}
 
-	sc := bufio.NewScanner(strings.NewReader(out))
-	for sc.Scan() {
-		if br, ok := parseLsRemoteHeadLine(sc.Text()); ok {
-			return br, true
+	for line := range strings.SplitSeq(out, "\n") {
+		if branch, ok := parseLsRemoteHeadLine(line); ok {
+			return branch, true
 		}
 	}
 
-	// Ignore scanner errors: even if a long line is truncated, the target HEAD line is tiny.
 	return "", false
 }
 
@@ -73,23 +77,33 @@ func parseLsRemoteHeadLine(line string) (string, bool) {
 
 	line = strings.TrimSuffix(line, "\r")
 
-	if !strings.HasPrefix(line, linePrefix) || !strings.HasSuffix(line, lineSuffix) {
+	if !strings.HasPrefix(line, linePrefix) ||
+		!strings.HasSuffix(line, lineSuffix) {
 		return "", false
 	}
 
-	ref := strings.TrimSuffix(strings.TrimPrefix(line, linePrefix), lineSuffix)
+	ref := strings.TrimSuffix(
+		strings.TrimPrefix(line, linePrefix),
+		lineSuffix,
+	)
 	ref = strings.TrimSpace(ref)
 
-	br, ok := strings.CutPrefix(ref, refPrefix)
-	if !ok || br == "" {
+	branch, ok := strings.CutPrefix(ref, refPrefix)
+	if !ok || branch == "" {
 		return "", false
 	}
 
-	return br, true
+	return branch, true
 }
 
 func getDefaultBranchFromSymbolicRef(runner CommandRunner) (string, bool) {
-	out, err := runner.Capture("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	out, err := runner.Capture(
+		"git",
+		"symbolic-ref",
+		"--quiet",
+		"--short",
+		"refs/remotes/origin/HEAD",
+	)
 	if err != nil {
 		return "", false
 	}
@@ -98,16 +112,16 @@ func getDefaultBranchFromSymbolicRef(runner CommandRunner) (string, bool) {
 }
 
 func parseSymbolicRefBranch(out string) (string, bool) {
-	line := strings.TrimSpace(out)
-	if line == "" {
+	ref := strings.TrimSpace(out)
+	if ref == "" {
 		return "", false
 	}
 
-	if i := strings.Index(line, "/"); i >= 0 && i+1 < len(line) {
-		return line[i+1:], true
+	if branch, ok := strings.CutPrefix(ref, "origin/"); ok {
+		return branch, branch != ""
 	}
 
-	return line, true
+	return ref, true
 }
 
 func getDefaultBranchFromRemoteShow(runner CommandRunner) (string, bool) {
@@ -116,10 +130,9 @@ func getDefaultBranchFromRemoteShow(runner CommandRunner) (string, bool) {
 		return "", false
 	}
 
-	sc := bufio.NewScanner(strings.NewReader(out))
-	for sc.Scan() {
-		if br, ok := parseRemoteShowHeadBranchLine(sc.Text()); ok {
-			return br, true
+	for line := range strings.SplitSeq(out, "\n") {
+		if branch, ok := parseRemoteShowHeadBranchLine(line); ok {
+			return branch, true
 		}
 	}
 
@@ -129,32 +142,30 @@ func getDefaultBranchFromRemoteShow(runner CommandRunner) (string, bool) {
 func parseRemoteShowHeadBranchLine(line string) (string, bool) {
 	line = strings.TrimSpace(line)
 
-	def, ok := strings.CutPrefix(line, "HEAD branch: ")
+	branch, ok := strings.CutPrefix(line, "HEAD branch: ")
 	if !ok {
 		return "", false
 	}
 
-	def = strings.TrimSpace(def)
-	if def == "" || def == "(unknown)" {
+	branch = strings.TrimSpace(branch)
+	if branch == "" || branch == "(unknown)" {
 		return "", false
 	}
 
-	return def, true
+	return branch, true
 }
 
-// isSyntheticRef flags CI-provided pseudo-refs we should not base from directly.
+// isSyntheticRef reports whether ref is a CI-generated pseudo-ref that
+// should not be used directly as the base branch.
 func isSyntheticRef(ref string) bool {
-	ref = strings.TrimSpace(ref)
-	lower := strings.ToLower(ref)
+	ref = strings.ToLower(strings.TrimSpace(ref))
 
-	if lower == "" || lower == "merge" || lower == "head" {
+	if ref == "" || ref == "merge" || ref == "head" {
 		return true
 	}
-	if strings.HasPrefix(lower, "refs/pull/") || strings.HasPrefix(lower, "pull/") {
-		return true
-	}
-	if strings.HasSuffix(lower, "/merge") || strings.HasSuffix(lower, "/head") {
-		return true
-	}
-	return false
+
+	return strings.HasPrefix(ref, "refs/pull/") ||
+		strings.HasPrefix(ref, "pull/") ||
+		strings.HasSuffix(ref, "/merge") ||
+		strings.HasSuffix(ref, "/head")
 }

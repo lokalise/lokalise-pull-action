@@ -9,88 +9,67 @@ import (
 
 // Config aggregates inputs parsed from env.
 type Config struct {
-	FileExts       []string // normalized lowercased extensions without dots (e.g., "json", "strings")
-	FlatNaming     bool     // true: locales/en.json; false: locales/en/*.json, locales/fr/*.json
-	AlwaysPullBase bool     // if false, base language files/dirs are excluded from change detection
-	BaseLang       string   // e.g., "en", "fr_FR"
-	Paths          []string // repo-relative translation roots, e.g. ["locales", "packages/app/locales"]
-}
-
-type configInputs struct {
-	flatNaming     bool
-	alwaysPullBase bool
-	paths          []string
-	fileExt        []string
-	baseLang       string
+	FileExts       []string
+	FlatNaming     bool
+	AlwaysPullBase bool
+	BaseLang       string
+	Paths          []string
 }
 
 // prepareConfig reads action inputs from environment variables, applies
 // extension inference when needed, and validates the resulting scope.
-func prepareConfig() (*Config, error) {
-	inputs, err := readConfigInputs()
-	if err != nil {
-		return nil, err
-	}
-
-	return buildConfig(inputs), nil
-}
-
-func readConfigInputs() (*configInputs, error) {
+func prepareConfig() (Config, error) {
 	flatNaming, alwaysPullBase, err := parseBooleanFlags()
 	if err != nil {
-		return nil, err
+		return Config{}, err
 	}
 
 	paths, err := parsers.ParseRepoRelativePathsEnv("TRANSLATIONS_PATH")
 	if err != nil {
-		return nil, err
+		return Config{}, err
 	}
 
-	fileExt, err := resolveFileExts()
+	fileExts, err := resolveFileExts()
 	if err != nil {
-		return nil, err
+		return Config{}, err
 	}
 
 	baseLang, err := parsers.ParseLangEnv("BASE_LANG")
 	if err != nil {
-		return nil, err
+		return Config{}, err
 	}
 
-	return &configInputs{
-		flatNaming:     flatNaming,
-		alwaysPullBase: alwaysPullBase,
-		paths:          paths,
-		fileExt:        fileExt,
-		baseLang:       baseLang,
+	return Config{
+		FileExts:       fileExts,
+		FlatNaming:     flatNaming,
+		AlwaysPullBase: alwaysPullBase,
+		BaseLang:       baseLang,
+		Paths:          paths,
 	}, nil
 }
 
-func buildConfig(inputs *configInputs) *Config {
-	return &Config{
-		FileExts:       inputs.fileExt,
-		FlatNaming:     inputs.flatNaming,
-		AlwaysPullBase: inputs.alwaysPullBase,
-		BaseLang:       inputs.baseLang,
-		Paths:          inputs.paths,
-	}
-}
-
-func parseBooleanFlags() (flatNaming bool, alwaysPullBase bool, err error) {
-	flatNaming, err = parsers.ParseBoolEnv("FLAT_NAMING")
+func parseBooleanFlags() (bool, bool, error) {
+	flatNaming, err := parsers.ParseBoolEnv("FLAT_NAMING")
 	if err != nil {
-		return false, false, fmt.Errorf("invalid FLAT_NAMING value: %w", err)
+		return false, false, fmt.Errorf(
+			"invalid FLAT_NAMING value: %w",
+			err,
+		)
 	}
 
-	alwaysPullBase, err = parsers.ParseBoolEnv("ALWAYS_PULL_BASE")
+	alwaysPullBase, err := parsers.ParseBoolEnv("ALWAYS_PULL_BASE")
 	if err != nil {
-		return false, false, fmt.Errorf("invalid ALWAYS_PULL_BASE value: %w", err)
+		return false, false, fmt.Errorf(
+			"invalid ALWAYS_PULL_BASE value: %w",
+			err,
+		)
 	}
 
 	return flatNaming, alwaysPullBase, nil
 }
 
-// resolveFileExts returns normalized file extensions from FILE_EXT or, if it is
-// not provided, falls back to FILE_FORMAT.
+// resolveFileExts returns normalized file extensions from FILE_EXT or,
+// when FILE_EXT is not provided, falls back to FILE_FORMAT.
 func resolveFileExts() ([]string, error) {
 	return fileexts.ResolveFromEnv("FILE_EXT", "FILE_FORMAT")
 }
