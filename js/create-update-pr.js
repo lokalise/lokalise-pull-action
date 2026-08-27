@@ -54,19 +54,10 @@ async function resolveBaseRef({ github, repo, rawBaseRef }) {
   return baseRef;
 }
 
-function resolveHeadRefs({ context, repo, branchName }) {
-  const payload = context.payload || {};
-
-  const headRepoFullName =
-    payload.pull_request?.head?.repo?.full_name || `${repo.owner}/${repo.repo}`;
-
-  const headOwner = headRepoFullName.split("/")[0];
-  const sameRepo = headRepoFullName === `${repo.owner}/${repo.repo}`;
-
+function resolveHeadRefs({ repo, branchName }) {
   return {
-    headForList: `${headOwner}:${branchName}`,
-    headForCreate: sameRepo ? branchName : `${headOwner}:${branchName}`,
-    sameRepo,
+    headForList: `${repo.owner}:${branchName}`,
+    headForCreate: branchName,
   };
 }
 
@@ -95,19 +86,15 @@ async function updateExistingPullRequest({
   prTitle,
   prBody,
 }) {
-  try {
-    await github.rest.pulls.update({
-      owner: repo.owner,
-      repo: repo.repo,
-      pull_number: prNumber,
-      title: prTitle,
-      body: prBody,
-    });
+  await github.rest.pulls.update({
+    owner: repo.owner,
+    repo: repo.repo,
+    pull_number: prNumber,
+    title: prTitle,
+    body: prBody,
+  });
 
-    console.log("Updated existing PR title/body.");
-  } catch (err) {
-    console.warn(`Cannot update PR title/body: ${err.message}`);
-  }
+  console.log("Updated existing PR title/body.");
 }
 
 async function applyLabels({ github, repo, prNumber, labels }) {
