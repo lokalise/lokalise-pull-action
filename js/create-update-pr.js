@@ -3,7 +3,8 @@
 //   or update metadata (title / body / draft / labels / reviewers / assignees) if it does.
 //
 // Design notes:
-//   - Fork-aware when listing/creating PRs, assuming the commit step has already pushed the head branch.
+//   - PR head branches are expected to exist in the current repository.
+//     The commit step must push the branch before this script runs.
 //   - Synthetic BASE_REF (PR merge/head refs) are replaced with repo default branch.
 //   - Gracefully tolerates missing permissions for reviewers/assignees/labels (warns, doesn't fail).
 //   - Hard failures in PR lookup/creation are re-thrown so the GitHub Actions step fails clearly.
@@ -196,7 +197,6 @@ module.exports = async ({ github, context }) => {
     });
 
     const { headForList, headForCreate } = resolveHeadRefs({
-      context,
       repo,
       branchName,
     });

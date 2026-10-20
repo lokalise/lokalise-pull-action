@@ -42,39 +42,45 @@ func checkoutExistingRemoteBranch(branchName string, runner CommandRunner) error
 	return nil
 }
 
-func checkoutPRHeadBranch(branchName, headRef string, runner CommandRunner) error {
+func checkoutPRHeadBranch(
+	branchName, headRef string,
+	runner CommandRunner,
+) error {
 	if err := fetchRemoteBranch(runner, headRef); err != nil {
 		return err
 	}
 
-	if err := checkoutRemoteTrackingBranch(branchName, headRef, runner); err == nil {
-		setBranchUpstream(runner, branchName, headRef)
-		return nil
+	if err := checkoutRemoteTrackingBranch(branchName, headRef, runner); err != nil {
+		return fmt.Errorf(
+			"failed to checkout PR head %q: %w",
+			headRef,
+			err,
+		)
 	}
 
-	// Keep old fallbacks for compatibility.
-	if err := runner.Run("git", "checkout", "-B", branchName, headRef); err == nil {
-		return nil
-	}
-	return runner.Run("git", "checkout", branchName)
+	setBranchUpstream(runner, branchName, headRef)
+	return nil
 }
 
-func checkoutFromBaseBranch(branchName, baseRef string, runner CommandRunner) error {
+func checkoutFromBaseBranch(
+	branchName, baseRef string,
+	runner CommandRunner,
+) error {
 	if err := fetchRemoteBranch(runner, baseRef); err != nil {
 		return err
 	}
 
-	if err := checkoutRemoteTrackingBranch(branchName, baseRef, runner); err == nil {
-		unsetBranchUpstream(runner, branchName)
-		return nil
+	if err := checkoutRemoteTrackingBranch(branchName, baseRef, runner); err != nil {
+		return fmt.Errorf(
+			"failed to checkout branch %q from origin/%s: %w",
+			branchName,
+			baseRef,
+			err,
+		)
 	}
 
-	logMissingFetchedRemoteRef(runner, baseRef)
-
-	if err := runner.Run("git", "checkout", "-B", branchName, baseRef); err == nil {
-		return nil
-	}
-	return runner.Run("git", "checkout", branchName)
+	unsetBranchUpstream(runner, branchName)
+	return nil
 }
 
 func fetchRemoteBranch(runner CommandRunner, ref string) error {
@@ -181,13 +187,20 @@ func checkoutRemoteWithLocalChanges(branchName, remoteRef string, runner Command
 }
 
 func hasRemote(runner CommandRunner, ref string) (bool, error) {
-	out, err := runner.Capture("git", "ls-remote", "--exit-code", "--heads", "origin", ref)
+	fullRef := "refs/heads/" + ref
+
+	out, err := runner.Capture(
+		"git",
+		"ls-remote",
+		"--exit-code",
+		"--heads",
+		"origin",
+		fullRef,
+	)
 	if err == nil {
 		return true, nil
 	}
 
-	// `ls-remote --exit-code --heads origin <ref>` returns exit code 2 when no matches found.
-	// Other exit codes usually mean auth/network/remote problems.
 	if isExitCode(err, 2) {
 		return false, nil
 	}

@@ -58,8 +58,15 @@ func buildGeneratedBranchName(config *Config) (string, error) {
 
 	safeRefName := sanitizeString(config.BaseRef, 50)
 	if safeRefName == "" {
-		// If BaseRef is synthetic or empty, still generate a usable branch name.
 		safeRefName = "base"
+	}
+
+	// Preserve the unique suffix regardless of prefix length.
+	suffix := fmt.Sprintf("_%s_%s_%d", safeRefName, shortSHA, timestamp)
+
+	maxPrefixLength := 255 - len(suffix)
+	if maxPrefixLength < 1 {
+		return "", errors.New("generated branch suffix is too long")
 	}
 
 	tempBranchPrefix := strings.TrimSpace(config.TempBranchPrefix)
@@ -67,14 +74,12 @@ func buildGeneratedBranchName(config *Config) (string, error) {
 		tempBranchPrefix = "lok"
 	}
 
-	branchName := fmt.Sprintf("%s_%s_%s_%d", tempBranchPrefix, safeRefName, shortSHA, timestamp)
-	branchName = sanitizeString(branchName, 255)
-
-	if branchName == "" {
-		return "", errors.New("generated branch name is empty after sanitization")
+	safePrefix := sanitizeString(tempBranchPrefix, maxPrefixLength)
+	if safePrefix == "" {
+		safePrefix = "lok"
 	}
 
-	return branchName, nil
+	return safePrefix + suffix, nil
 }
 
 func shortGitHubSHA(sha string) (string, error) {

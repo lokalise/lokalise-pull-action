@@ -3,27 +3,10 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
 )
-
-func TestMain(m *testing.M) {
-	// Override exitFunc for testing
-	exitFunc = func(code int) {
-		panic(fmt.Sprintf("Exit called with code %d", code))
-	}
-
-	// Run tests
-	code := m.Run()
-
-	// Restore exitFunc after testing
-	exitFunc = os.Exit
-
-	os.Exit(code)
-}
 
 func TestRunWith_Success(t *testing.T) {
 	t.Parallel()

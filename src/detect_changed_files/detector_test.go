@@ -15,11 +15,11 @@ func TestDetectChangedFiles(t *testing.T) {
 	mockRunner := newMockCommandRunner(
 		map[string]string{
 			makeKey([]string{"rev-parse", "--verify", "HEAD"}): "ok",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): joinLines(
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD"}): joinLines(
 				filepath.ToSlash("path/to/translations/file1.json"),
 				filepath.ToSlash("path/to/translations/file2.json"),
 			),
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): joinLines(
+			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z"}): joinLines(
 				filepath.ToSlash("path/to/translations/file3.json"),
 			),
 		},
@@ -50,9 +50,9 @@ func TestDetectChangedFiles_NoChanges(t *testing.T) {
 
 	mockRunner := newMockCommandRunner(
 		map[string]string{
-			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                            "ok",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}):                "",
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): "",
+			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                                  "ok",
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD"}):                "",
+			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z"}): "",
 		},
 		nil,
 	)
@@ -70,7 +70,7 @@ func TestDetectChangedFiles_NoChanges(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 	if changed {
-		t.Fatalf("Expected no changes, but got changes")
+		t.Fatal("Expected no changes, but got changes")
 	}
 }
 
@@ -82,11 +82,11 @@ func TestDetectChangedFiles_AllChangesExcluded_Flat_PerExt(t *testing.T) {
 	mockRunner := newMockCommandRunner(
 		map[string]string{
 			makeKey([]string{"rev-parse", "--verify", "HEAD"}): "ok",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): joinLines(
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD"}): joinLines(
 				filepath.ToSlash("ios/Loc/en.strings"),
 				filepath.ToSlash("ios/Loc/en.stringsdict"),
 			),
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): "",
+			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z"}): "",
 		},
 		nil,
 	)
@@ -116,12 +116,20 @@ func TestDetectChangedFiles_Nested_BaseDirExcluded(t *testing.T) {
 	mockRunner := newMockCommandRunner(
 		map[string]string{
 			makeKey([]string{"rev-parse", "--verify", "HEAD"}): "ok",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): joinLines(
+
+			makeKey([]string{
+				"-c", "core.quotepath=false",
+				"diff", "--name-only", "-z", "HEAD",
+			}): joinNUL(
 				filepath.ToSlash("ios/App/en/Localizable.strings"),
 				filepath.ToSlash("ios/App/en/Plurals.stringsdict"),
 				filepath.ToSlash("ios/App/de/Localizable.strings"),
 			),
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): joinLines(
+
+			makeKey([]string{
+				"-c", "core.quotepath=false",
+				"ls-files", "--others", "--exclude-standard", "-z",
+			}): joinNUL(
 				filepath.ToSlash("ios/App/en/Untracked.strings"),
 			),
 		},
@@ -152,11 +160,11 @@ func TestDetectChangedFiles_GitDiffError(t *testing.T) {
 
 	mockRunner := newMockCommandRunner(
 		map[string]string{
-			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                             "ok",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): "git diff error output",
+			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                   "ok",
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD"}): "git diff error output",
 		},
 		map[string]error{
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): errors.New("git diff error"),
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD"}): errors.New("git diff error"),
 		},
 	)
 
@@ -181,12 +189,12 @@ func TestDetectChangedFiles_GitLsFilesError(t *testing.T) {
 
 	mockRunner := newMockCommandRunner(
 		map[string]string{
-			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                            "ok",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}):                "",
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): "git ls-files error output",
+			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                                  "ok",
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD"}):                "",
+			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z"}): "git ls-files error output",
 		},
 		map[string]error{
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): errors.New("git ls-files error"),
+			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z"}): errors.New("git ls-files error"),
 		},
 	)
 
@@ -208,10 +216,10 @@ func TestDetectChangedFiles_DeletedManagedFileStillCounts(t *testing.T) {
 	mockRunner := newMockCommandRunner(
 		map[string]string{
 			makeKey([]string{"rev-parse", "--verify", "HEAD"}): "ok",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): joinLines(
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD"}): joinLines(
 				filepath.ToSlash("path/to/translations/fr/file.json"),
 			),
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): "",
+			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z"}): "",
 		},
 		nil,
 	)
@@ -237,13 +245,13 @@ func TestDetectChangedFiles_NoHeadFallback(t *testing.T) {
 	mockRunner := newMockCommandRunner(
 		map[string]string{
 			makeKey([]string{"rev-parse", "--verify", "HEAD"}): "",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "--cached"}): joinLines(
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "--cached"}): joinLines(
 				filepath.ToSlash("path/to/translations/fr.json"),
 			),
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only"}): joinLines(
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z"}): joinLines(
 				filepath.ToSlash("other/ignore.json"),
 			),
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): "",
+			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z"}): "",
 		},
 		map[string]error{
 			makeKey([]string{"rev-parse", "--verify", "HEAD"}): errors.New("no HEAD"),
@@ -271,10 +279,10 @@ func TestDetectChangedFiles_AlwaysPullBaseIncludesBaseFile_Flat(t *testing.T) {
 	mockRunner := newMockCommandRunner(
 		map[string]string{
 			makeKey([]string{"rev-parse", "--verify", "HEAD"}): "ok",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): joinLines(
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD"}): joinLines(
 				filepath.ToSlash("locales/en.json"),
 			),
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): "",
+			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z"}): "",
 		},
 		nil,
 	)
@@ -300,11 +308,11 @@ func TestDetectChangedFiles_Nested_BaseOnlyChangesExcluded(t *testing.T) {
 	mockRunner := newMockCommandRunner(
 		map[string]string{
 			makeKey([]string{"rev-parse", "--verify", "HEAD"}): "ok",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): joinLines(
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD"}): joinLines(
 				filepath.ToSlash("ios/App/en/Localizable.strings"),
 				filepath.ToSlash("ios/App/en/Plurals.stringsdict"),
 			),
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): joinLines(
+			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z"}): joinLines(
 				filepath.ToSlash("ios/App/en/Untracked.strings"),
 			),
 		},
@@ -332,12 +340,12 @@ func TestDetectChangedFiles_OnlyNonManagedChanges(t *testing.T) {
 	mockRunner := newMockCommandRunner(
 		map[string]string{
 			makeKey([]string{"rev-parse", "--verify", "HEAD"}): "ok",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): joinLines(
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD"}): joinLines(
 				filepath.ToSlash("README.md"),
 				filepath.ToSlash("scripts/sync.sh"),
 				filepath.ToSlash("other/path/file.json"),
 			),
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): joinLines(
+			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z"}): joinLines(
 				filepath.ToSlash("tmp/generated.txt"),
 			),
 		},
@@ -364,9 +372,9 @@ func TestDetectChangedFiles_OnlyNonManagedChanges(t *testing.T) {
 func TestDetectChangedFiles_UntrackedManagedOnly(t *testing.T) {
 	mockRunner := newMockCommandRunner(
 		map[string]string{
-			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                             "ok",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): "",
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): joinLines(
+			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                   "ok",
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD"}): "",
+			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z"}): joinLines(
 				filepath.ToSlash("path/to/translations/fr.json"),
 			),
 		},
@@ -393,12 +401,12 @@ func TestDetectChangedFiles_UntrackedManagedOnly(t *testing.T) {
 func TestDetectChangedFiles_NoHeadCachedError(t *testing.T) {
 	mockRunner := newMockCommandRunner(
 		map[string]string{
-			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                 "",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "--cached"}): "git diff --cached error output",
+			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                       "",
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "--cached"}): "git diff --cached error output",
 		},
 		map[string]error{
-			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                 errors.New("no HEAD"),
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "--cached"}): errors.New("git diff --cached error"),
+			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                       errors.New("no HEAD"),
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "--cached"}): errors.New("git diff --cached error"),
 		},
 	)
 
@@ -420,10 +428,10 @@ func TestDetectChangedFiles_MultipleRoots_SecondRootMatches(t *testing.T) {
 	mockRunner := newMockCommandRunner(
 		map[string]string{
 			makeKey([]string{"rev-parse", "--verify", "HEAD"}): "ok",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "HEAD"}): joinLines(
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "HEAD"}): joinLines(
 				filepath.ToSlash("packages/app/locales/fr.json"),
 			),
-			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"}): "",
+			makeKey([]string{"-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z"}): "",
 		},
 		nil,
 	)
@@ -451,13 +459,13 @@ func TestDetectChangedFiles_MultipleRoots_SecondRootMatches(t *testing.T) {
 func TestDetectChangedFiles_NoHeadWorktreeError(t *testing.T) {
 	mockRunner := newMockCommandRunner(
 		map[string]string{
-			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                 "",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "--cached"}): "",
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only"}):             "git diff worktree error output",
+			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                                       "",
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z", "--cached"}): "",
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z"}):             "git diff worktree error output",
 		},
 		map[string]error{
-			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                     errors.New("no HEAD"),
-			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only"}): errors.New("git diff worktree error"),
+			makeKey([]string{"rev-parse", "--verify", "HEAD"}):                           errors.New("no HEAD"),
+			makeKey([]string{"-c", "core.quotepath=false", "diff", "--name-only", "-z"}): errors.New("git diff worktree error"),
 		},
 	)
 
@@ -473,4 +481,12 @@ func TestDetectChangedFiles_NoHeadWorktreeError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "git diff (worktree)") {
 		t.Fatalf("Expected no-HEAD worktree diff error, but got %v", err)
 	}
+}
+
+func joinNUL(paths ...string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+
+	return strings.Join(paths, "\x00") + "\x00"
 }

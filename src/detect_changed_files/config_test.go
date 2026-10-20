@@ -81,7 +81,7 @@ func TestPrepareConfig(t *testing.T) {
 				"ALWAYS_PULL_BASE":  "false",
 			},
 			expectedConfig: Config{
-				FileExts:       []string{"json"},
+				FileExts:       []string{"JSON", "json", "JsOn"},
 				FlatNaming:     true,
 				AlwaysPullBase: false,
 				BaseLang:       "en",
@@ -99,7 +99,7 @@ func TestPrepareConfig(t *testing.T) {
 				"ALWAYS_PULL_BASE":  "false",
 			},
 			expectedConfig: Config{
-				FileExts:       []string{"json"},
+				FileExts:       []string{"json", "JSON"},
 				FlatNaming:     true,
 				AlwaysPullBase: false,
 				BaseLang:       "en",

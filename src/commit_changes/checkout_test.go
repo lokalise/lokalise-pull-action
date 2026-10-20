@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -51,60 +52,61 @@ func TestCheckoutBranch(t *testing.T) {
 		}
 	})
 
-	t.Run("falls back to local base", func(t *testing.T) {
+	t.Run("returns error when checkout from remote base fails", func(t *testing.T) {
 		runner := &MockCommandRunner{
 			CaptureFunc: captureNoRemote,
 			RunFunc: func(name string, args ...string) error {
 				if name != "git" {
 					return fmt.Errorf("unexpected binary: %s", name)
 				}
-				if len(args) >= 1 && args[0] == "branch" {
+
+				if slices.Equal(args, []string{
+					"checkout", "-B", "branch_from_local", "origin/dev",
+				}) {
+					return errors.New("remote base missing")
+				}
+
+				if slices.Equal(args, []string{
+					"status", "--porcelain=v1",
+				}) {
 					return nil
 				}
-				switch {
-				case len(args) == 4 &&
-					args[0] == "checkout" && args[1] == "-B" &&
-					args[2] == "branch_from_local" && args[3] == "origin/dev":
-					return fmt.Errorf("remote base missing")
-				case len(args) == 4 &&
-					args[0] == "checkout" && args[1] == "-B" &&
-					args[2] == "branch_from_local" && args[3] == "dev":
-					return nil
-				default:
-					return fmt.Errorf("unexpected command: git %v", args)
-				}
+
+				return fmt.Errorf("unexpected command: git %v", args)
 			},
 		}
 
-		if err := checkoutBranch("branch_from_local", "dev", "", runner); err != nil {
+		err := checkoutBranch("branch_from_local", "dev", "", runner)
+		if err == nil {
+			t.Fatal("expected checkout error")
+		}
+
+		if !strings.Contains(err.Error(), "remote base missing") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
-	t.Run("switches to existing branch", func(t *testing.T) {
+	t.Run("checks out new branch from remote base", func(t *testing.T) {
 		runner := &MockCommandRunner{
 			CaptureFunc: captureNoRemote,
 			RunFunc: func(name string, args ...string) error {
 				if name != "git" {
 					return fmt.Errorf("unexpected binary: %s", name)
 				}
-				if len(args) >= 1 && args[0] == "branch" {
+
+				if slices.Equal(args, []string{
+					"checkout", "-B", "existing_branch", "origin/main",
+				}) {
 					return nil
 				}
-				switch {
-				case len(args) == 4 &&
-					args[0] == "checkout" && args[1] == "-B" &&
-					args[2] == "existing_branch" && args[3] == "origin/main":
-					return fmt.Errorf("already exists")
-				case len(args) == 4 &&
-					args[0] == "checkout" && args[1] == "-B" &&
-					args[2] == "existing_branch" && args[3] == "main":
-					return fmt.Errorf("already exists")
-				case len(args) == 2 && args[0] == "checkout" && args[1] == "existing_branch":
+
+				if slices.Equal(args, []string{
+					"branch", "--unset-upstream", "existing_branch",
+				}) {
 					return nil
-				default:
-					return fmt.Errorf("unexpected command: git %v", args)
 				}
+
+				return fmt.Errorf("unexpected command: git %v", args)
 			},
 		}
 
@@ -199,13 +201,15 @@ func TestCheckoutBranch(t *testing.T) {
 				}
 
 				// list files in the created stash
-				if len(args) == 5 &&
-					args[0] == "stash" &&
-					args[1] == "show" &&
-					args[2] == "--name-only" &&
-					args[3] == "--include-untracked" &&
-					args[4] == stashRef {
-					return "locales/fr.json\n", nil
+				if slices.Equal(args, []string{
+					"stash",
+					"show",
+					"--name-only",
+					"-z",
+					"--include-untracked",
+					stashRef,
+				}) {
+					return "locales/fr.json\x00", nil
 				}
 
 				if len(args) == 3 &&
@@ -437,13 +441,14 @@ func TestCheckoutBranch_RemoteBranch_StashRestore_MultipleFiles(t *testing.T) {
 			}
 
 			// stash show lists multiple files
-			if len(args) == 5 &&
+			if len(args) == 6 &&
 				args[0] == "stash" &&
 				args[1] == "show" &&
 				args[2] == "--name-only" &&
-				args[3] == "--include-untracked" &&
-				args[4] == stashRef {
-				return "locales/fr.json\ni18n/fr.json\n", nil
+				args[3] == "-z" &&
+				args[4] == "--include-untracked" &&
+				args[5] == stashRef {
+				return "locales/fr.json\x00i18n/fr.json\x00", nil
 			}
 
 			if len(args) == 3 &&
@@ -576,13 +581,14 @@ func TestCheckoutRemoteWithLocalChanges_UntrackedRestoredFromThirdParent(t *test
 			}
 
 			// stash show includes untracked too
-			if len(args) == 5 &&
+			if len(args) == 6 &&
 				args[0] == "stash" &&
 				args[1] == "show" &&
 				args[2] == "--name-only" &&
-				args[3] == "--include-untracked" &&
-				args[4] == stashRef {
-				return "newfile.json\n", nil
+				args[3] == "-z" &&
+				args[4] == "--include-untracked" &&
+				args[5] == stashRef {
+				return "newfile.json\x00", nil
 			}
 
 			if len(args) == 3 &&
@@ -685,239 +691,207 @@ func TestCheckoutBranch_RemoteBranch_StashShowFails_NoDrop(t *testing.T) {
 	const base = "master"
 	const stashRef = "abc123stash"
 
-	exitErr1 := func() error {
-		var cmd *exec.Cmd
-		if runtime.GOOS == "windows" {
-			cmd = exec.Command("cmd", "/C", "exit", "1")
-		} else {
-			cmd = exec.Command("sh", "-c", "exit 1")
-		}
-		return cmd.Run()
-	}()
-
-	var checkoutAttempts int
+	checkoutAttempts := 0
 	dropped := false
+	restoreAttempted := false
 
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
 			if name != "git" {
-				return "", fmt.Errorf("unexpected binary: %s", name)
+				t.Fatalf("unexpected binary: %s", name)
 			}
-			if len(args) == 5 && args[0] == "ls-remote" {
+
+			switch {
+			case slices.Equal(args, []string{
+				"ls-remote", "--exit-code", "--heads",
+				"origin", "refs/heads/" + branch,
+			}):
 				return "deadbeef\trefs/heads/" + branch + "\n", nil
-			}
-			if len(args) == 5 && args[0] == "fetch" {
+
+			case slices.Equal(args, []string{
+				"fetch", "--no-tags", "--prune", "origin",
+				"+refs/heads/" + branch + ":refs/remotes/origin/" + branch,
+			}):
 				return "", nil
-			}
-			if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain=v1" {
+
+			case slices.Equal(args, []string{
+				"status", "--porcelain=v1",
+			}):
 				return " M locales/fr.json\n", nil
-			}
-			if len(args) >= 3 && args[0] == "diff" && args[1] == "--quiet" && args[2] == "origin/"+branch {
-				return "", exitErr1
-			}
-			if len(args) >= 4 && args[0] == "diff" && args[1] == "--quiet" && args[2] == "--cached" && args[3] == "origin/"+branch {
-				return "", exitErr1
-			}
 
-			// stashIfDirty(): resolve the created stash ref
-			if len(args) == 3 &&
-				args[0] == "rev-parse" &&
-				args[1] == "--verify" &&
-				args[2] == "stash@{0}" {
+			case slices.Equal(args, []string{
+				"diff", "--quiet", "origin/" + branch,
+			}):
+				return "", &mockExitError{code: 1}
+
+			case slices.Equal(args, []string{
+				"rev-parse", "--verify", "stash@{0}",
+			}):
 				return stashRef + "\n", nil
-			}
 
-			// stash show fails
-			if len(args) == 5 &&
-				args[0] == "stash" && args[1] == "show" &&
-				args[2] == "--name-only" &&
-				args[3] == "--include-untracked" &&
-				args[4] == stashRef {
+			case slices.Equal(args, []string{
+				"stash", "show", "--name-only", "-z",
+				"--include-untracked", stashRef,
+			}):
 				return "nope", fmt.Errorf("stash show failed")
 			}
-			return "", nil
+
+			return "", fmt.Errorf("unexpected capture: git %v", args)
 		},
+
 		RunFunc: func(name string, args ...string) error {
 			if name != "git" {
-				return fmt.Errorf("unexpected binary: %s", name)
+				t.Fatalf("unexpected binary: %s", name)
 			}
 
-			if len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[2] == branch && args[3] == "origin/"+branch {
+			switch {
+			case slices.Equal(args, []string{
+				"checkout", "-B", branch, "origin/" + branch,
+			}):
 				checkoutAttempts++
 				if checkoutAttempts == 1 {
 					return fmt.Errorf("blocked")
 				}
 				return nil
-			}
 
-			if len(args) == 5 && args[0] == "stash" && args[1] == "push" {
+			case slices.Equal(args, []string{
+				"stash", "push", "-u", "-m", "lokalise-temp",
+			}):
 				return nil
-			}
 
-			if len(args) == 3 && args[0] == "stash" && args[1] == "drop" {
+			case len(args) >= 2 &&
+				args[0] == "stash" &&
+				args[1] == "drop":
 				dropped = true
 				return nil
+
+			case len(args) >= 1 && args[0] == "checkout":
+				restoreAttempted = true
+				return fmt.Errorf("unexpected restore: git %v", args)
 			}
 
-			// upstream set might still be attempted by outer function only on success, so ignore branch calls
-			if len(args) >= 1 && args[0] == "branch" {
-				return nil
-			}
-
-			// any restore/drop should NOT happen after stash show failure (restore won't happen anyway)
-			return nil
+			return fmt.Errorf("unexpected run: git %v", args)
 		},
 	}
 
 	err := checkoutBranch(branch, base, "", runner)
 	if err == nil {
-		t.Fatalf("expected error, got nil")
+		t.Fatal("expected stash show error, got nil")
 	}
+
 	if !strings.Contains(err.Error(), "failed to list stashed files") {
 		t.Fatalf("expected stash show error, got %v", err)
 	}
+
+	if !strings.Contains(err.Error(), "stash show failed") {
+		t.Fatalf("expected original error, got %v", err)
+	}
+
+	if checkoutAttempts != 2 {
+		t.Fatalf("expected 2 checkout attempts, got %d", checkoutAttempts)
+	}
+
+	if restoreAttempted {
+		t.Fatal("files must not be restored after stash show failure")
+	}
+
 	if dropped {
-		t.Fatalf("stash must not be dropped on stash show failure")
+		t.Fatal("stash must not be dropped on stash show failure")
 	}
 }
-
 func TestCheckoutBranch_RemoteBranch_RestoreFails_NoDrop_StopsEarly(t *testing.T) {
 	const branch = "lokalise-sync"
 	const base = "master"
 	const stashRef = "abc123stash"
 
-	exitErr1 := func() error {
-		var cmd *exec.Cmd
-		if runtime.GOOS == "windows" {
-			cmd = exec.Command("cmd", "/C", "exit", "1")
-		} else {
-			cmd = exec.Command("sh", "-c", "exit 1")
-		}
-		return cmd.Run()
-	}()
-
-	var checkoutAttempts int
+	checkoutAttempts := 0
 	dropped := false
 	secondRestoreAttempted := false
 
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
 			if name != "git" {
-				return "", fmt.Errorf("unexpected binary: %s", name)
+				t.Fatalf("unexpected binary: %s", name)
 			}
 
-			if len(args) >= 1 && args[0] == "ls-remote" {
+			switch {
+			case slices.Equal(args, []string{
+				"ls-remote", "--exit-code", "--heads",
+				"origin", "refs/heads/" + branch,
+			}):
 				return "deadbeef\trefs/heads/" + branch + "\n", nil
-			}
 
-			if len(args) >= 1 && args[0] == "fetch" {
+			case len(args) == 5 && args[0] == "fetch":
 				return "", nil
-			}
 
-			if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain=v1" {
+			case slices.Equal(args, []string{
+				"status", "--porcelain=v1",
+			}):
 				return " M locales/fr.json\n M i18n/fr.json\n", nil
-			}
 
-			if len(args) >= 3 &&
-				args[0] == "diff" &&
-				args[1] == "--quiet" &&
-				args[2] == "origin/"+branch {
-				return "", exitErr1
-			}
+			case slices.Equal(args, []string{
+				"diff", "--quiet", "origin/" + branch,
+			}):
+				return "", &mockExitError{code: 1}
 
-			if len(args) >= 4 &&
-				args[0] == "diff" &&
-				args[1] == "--quiet" &&
-				args[2] == "--cached" &&
-				args[3] == "origin/"+branch {
-				return "", exitErr1
-			}
-
-			// stashIfDirty(): resolve the created stash ref
-			if len(args) == 3 &&
-				args[0] == "rev-parse" &&
-				args[1] == "--verify" &&
-				args[2] == "stash@{0}" {
+			case slices.Equal(args, []string{
+				"rev-parse", "--verify", "stash@{0}",
+			}):
 				return stashRef + "\n", nil
-			}
 
-			if len(args) == 5 &&
-				args[0] == "stash" &&
-				args[1] == "show" &&
-				args[2] == "--name-only" &&
-				args[3] == "--include-untracked" &&
-				args[4] == stashRef {
-				return "locales/fr.json\ni18n/fr.json\n", nil
+			case slices.Equal(args, []string{
+				"stash", "show", "--name-only", "-z",
+				"--include-untracked", stashRef,
+			}):
+				return "locales/fr.json\x00i18n/fr.json\x00", nil
 			}
 
 			return "", fmt.Errorf("unexpected capture: git %v", args)
 		},
+
 		RunFunc: func(name string, args ...string) error {
 			if name != "git" {
-				return fmt.Errorf("unexpected binary: %s", name)
+				t.Fatalf("unexpected binary: %s", name)
 			}
 
-			if len(args) == 4 &&
-				args[0] == "checkout" &&
-				args[1] == "-B" &&
-				args[2] == branch &&
-				args[3] == "origin/"+branch {
+			switch {
+			case slices.Equal(args, []string{
+				"checkout", "-B", branch, "origin/" + branch,
+			}):
 				checkoutAttempts++
 				if checkoutAttempts == 1 {
 					return fmt.Errorf("blocked")
 				}
 				return nil
-			}
 
-			if len(args) == 5 && args[0] == "stash" && args[1] == "push" {
+			case slices.Equal(args, []string{
+				"stash", "push", "-u", "-m", "lokalise-temp",
+			}):
 				return nil
-			}
 
-			// first restore fails
-			if len(args) == 4 &&
-				args[0] == "checkout" &&
-				args[1] == stashRef &&
-				args[2] == "--" &&
-				args[3] == "locales/fr.json" {
-				return fmt.Errorf("restore failed")
-			}
+			case slices.Equal(args, []string{
+				"checkout", stashRef, "--", "locales/fr.json",
+			}):
+				return fmt.Errorf("tracked restore failed")
 
-			// second restore must NOT happen
-			if len(args) == 4 &&
-				args[0] == "checkout" &&
-				args[1] == stashRef &&
-				args[2] == "--" &&
-				args[3] == "i18n/fr.json" {
+			case slices.Equal(args, []string{
+				"checkout", stashRef + "^3", "--", "locales/fr.json",
+			}):
+				return fmt.Errorf("untracked restore failed")
+
+			case slices.Equal(args, []string{
+				"checkout", stashRef, "--", "i18n/fr.json",
+			}),
+				slices.Equal(args, []string{
+					"checkout", stashRef + "^3", "--", "i18n/fr.json",
+				}):
 				secondRestoreAttempted = true
 				return nil
-			}
 
-			// first restore ^3 fallback also fails
-			if len(args) == 4 &&
-				args[0] == "checkout" &&
-				args[1] == stashRef+"^3" &&
-				args[2] == "--" &&
-				args[3] == "locales/fr.json" {
-				return fmt.Errorf("restore failed")
-			}
-
-			// second restore ^3 must NOT happen
-			if len(args) == 4 &&
-				args[0] == "checkout" &&
-				args[1] == stashRef+"^3" &&
-				args[2] == "--" &&
-				args[3] == "i18n/fr.json" {
-				secondRestoreAttempted = true
-				return nil
-			}
-
-			// drop must NOT happen
-			if len(args) == 3 && args[0] == "stash" && args[1] == "drop" {
+			case len(args) >= 2 &&
+				args[0] == "stash" &&
+				args[1] == "drop":
 				dropped = true
-				return nil
-			}
-
-			if len(args) >= 1 && args[0] == "branch" {
 				return nil
 			}
 
@@ -927,19 +901,23 @@ func TestCheckoutBranch_RemoteBranch_RestoreFails_NoDrop_StopsEarly(t *testing.T
 
 	err := checkoutBranch(branch, base, "", runner)
 	if err == nil {
-		t.Fatalf("expected error, got nil")
+		t.Fatal("expected restore error, got nil")
 	}
 
 	if !strings.Contains(err.Error(), "failed to restore locales/fr.json") {
 		t.Fatalf("expected restore error, got %v", err)
 	}
 
-	if dropped {
-		t.Fatalf("stash must not be dropped on restore failure")
+	if checkoutAttempts != 2 {
+		t.Fatalf("expected 2 checkout attempts, got %d", checkoutAttempts)
 	}
 
 	if secondRestoreAttempted {
-		t.Fatalf("expected restore loop to stop on first failure")
+		t.Fatal("restore loop must stop after the first failed file")
+	}
+
+	if dropped {
+		t.Fatal("stash must not be dropped on restore failure")
 	}
 }
 
@@ -1002,13 +980,14 @@ func TestCheckoutBranch_RemoteBranch_DropFails_ReturnsError(t *testing.T) {
 				return stashRef + "\n", nil
 			}
 
-			if len(args) == 5 &&
+			if len(args) == 6 &&
 				args[0] == "stash" &&
 				args[1] == "show" &&
 				args[2] == "--name-only" &&
-				args[3] == "--include-untracked" &&
-				args[4] == stashRef {
-				return "locales/fr.json\n", nil
+				args[3] == "-z" &&
+				args[4] == "--include-untracked" &&
+				args[5] == stashRef {
+				return "locales/fr.json\x00", nil
 			}
 
 			if len(args) == 3 &&
@@ -1259,13 +1238,14 @@ func TestCheckoutBranch_OverrideBranchExistsOnRemote(t *testing.T) {
 				t.Fatalf("unexpected binary: %s", name)
 			}
 
-			// hasRemote(...) -> ls-remote --exit-code --heads origin <branch>
-			if len(args) == 5 &&
-				args[0] == "ls-remote" &&
-				args[1] == "--exit-code" &&
-				args[2] == "--heads" &&
-				args[3] == "origin" &&
-				args[4] == branch {
+			// hasRemote(...) -> ls-remote --exit-code --heads origin refs/heads/<branch>
+			if slices.Equal(args, []string{
+				"ls-remote",
+				"--exit-code",
+				"--heads",
+				"origin",
+				"refs/heads/" + branch,
+			}) {
 				return "deadbeef\trefs/heads/" + branch + "\n", nil
 			}
 
@@ -1508,14 +1488,15 @@ func TestHasRemote(t *testing.T) {
 					t.Fatalf("unexpected binary: %s", name)
 				}
 
-				wantArgs := []string{"ls-remote", "--exit-code", "--heads", "origin", wantRef}
-				if len(args) != len(wantArgs) {
-					t.Fatalf("unexpected args count: got %v want %v", args, wantArgs)
+				wantArgs := []string{
+					"ls-remote",
+					"--exit-code",
+					"--heads",
+					"origin",
+					"refs/heads/" + wantRef,
 				}
-				for i := range wantArgs {
-					if args[i] != wantArgs[i] {
-						t.Fatalf("unexpected args: got %v want %v", args, wantArgs)
-					}
+				if !slices.Equal(args, wantArgs) {
+					t.Fatalf("unexpected args: got %v want %v", args, wantArgs)
 				}
 
 				return "deadbeef\trefs/heads/feature/x\n", nil
@@ -1540,14 +1521,15 @@ func TestHasRemote(t *testing.T) {
 					t.Fatalf("unexpected binary: %s", name)
 				}
 
-				wantArgs := []string{"ls-remote", "--exit-code", "--heads", "origin", wantRef}
-				if len(args) != len(wantArgs) {
-					t.Fatalf("unexpected args count: got %v want %v", args, wantArgs)
+				wantArgs := []string{
+					"ls-remote",
+					"--exit-code",
+					"--heads",
+					"origin",
+					"refs/heads/" + wantRef,
 				}
-				for i := range wantArgs {
-					if args[i] != wantArgs[i] {
-						t.Fatalf("unexpected args: got %v want %v", args, wantArgs)
-					}
+				if !slices.Equal(args, wantArgs) {
+					t.Fatalf("unexpected args: got %v want %v", args, wantArgs)
 				}
 
 				return "", &mockExitError{code: 2}
@@ -1572,14 +1554,15 @@ func TestHasRemote(t *testing.T) {
 					t.Fatalf("unexpected binary: %s", name)
 				}
 
-				wantArgs := []string{"ls-remote", "--exit-code", "--heads", "origin", wantRef}
-				if len(args) != len(wantArgs) {
-					t.Fatalf("unexpected args count: got %v want %v", args, wantArgs)
+				wantArgs := []string{
+					"ls-remote",
+					"--exit-code",
+					"--heads",
+					"origin",
+					"refs/heads/" + wantRef,
 				}
-				for i := range wantArgs {
-					if args[i] != wantArgs[i] {
-						t.Fatalf("unexpected args: got %v want %v", args, wantArgs)
-					}
+				if !slices.Equal(args, wantArgs) {
+					t.Fatalf("unexpected args: got %v want %v", args, wantArgs)
 				}
 
 				return "fatal: auth failed", fmt.Errorf("network boom")

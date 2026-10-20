@@ -8,7 +8,7 @@ import (
 func TestSetGitUser(t *testing.T) {
 	runner := &MockCommandRunner{
 		RunFunc: func(name string, args ...string) error {
-			if name == "git" && args[0] == "config" && args[1] == "--global" {
+			if name == "git" && args[0] == "config" && args[1] == "--local" {
 				if args[2] == "user.name" && args[3] == "test_actor" {
 					return nil
 				}
@@ -33,7 +33,7 @@ func TestSetGitUser(t *testing.T) {
 func TestSetGitUser_WithCustomValues(t *testing.T) {
 	runner := &MockCommandRunner{
 		RunFunc: func(name string, args ...string) error {
-			if name == "git" && args[0] == "config" && args[1] == "--global" {
+			if name == "git" && args[0] == "config" && args[1] == "--local" {
 				if args[2] == "user.name" && args[3] == "custom_user" {
 					return nil
 				}

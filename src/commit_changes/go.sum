@@ -1,4 +1,6 @@
-github.com/bodrovis/lokalise-actions-common/v2 v2.15.0 h1:OKjgnKhUBUDGmZRWfYWVPhUZDOO41WD8Ih4ce/YM648=
-github.com/bodrovis/lokalise-actions-common/v2 v2.15.0/go.mod h1:xWqh886dq9hAOJAdB8F2dkkibLHtXRYMvlyJSgaU8Kw=
+github.com/bmatcuk/doublestar/v4 v4.10.3 h1:1UIv1+fqH3++ViVkpnaPTB+Pi1UHycnPFAq14zgK+gI=
+github.com/bmatcuk/doublestar/v4 v4.10.3/go.mod h1:xBQ8jztBU6kakFMg+8WGxn0c6z1fTSPVIjEY1Wr7jzc=
+github.com/bodrovis/lokalise-actions-common/v2 v2.18.0 h1:k/tJ70LrGGpCmI01akQ3MdfTwXX4vwN1elqynreRTFA=
+github.com/bodrovis/lokalise-actions-common/v2 v2.18.0/go.mod h1:FI1a8MjB2Q+UF1VNHpy9YYSjOXrs6g3LbG+zZRYtwU0=
 go.yaml.in/yaml/v4 v4.0.0-rc.6 h1:1h7H1ohdUh93/FyE4YaDa1Zh64K6VVbjF4K6WUxMtH4=
 go.yaml.in/yaml/v4 v4.0.0-rc.6/go.mod h1:aZqd9kCMsGL7AuUv/m/PvWLdg5sjJsZ4oHDEnfPPfY0=

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -611,4 +612,20 @@ func TestDropStashByHash(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
+}
+
+func TestSplitNullSeparatedPaths(t *testing.T) {
+	input := "locales/en.json\x00locales/ fr.json \x00locales/file\nname.json\x00"
+
+	expected := []string{
+		"locales/en.json",
+		"locales/ fr.json ",
+		"locales/file\nname.json",
+	}
+
+	actual := splitNullSeparatedPaths(input)
+
+	if !slices.Equal(actual, expected) {
+		t.Fatalf("expected %#v, got %#v", expected, actual)
+	}
 }

@@ -6,20 +6,22 @@ import (
 	"os"
 )
 
-// exitFunc is a function variable that defaults to os.Exit.
-// Overridable in tests to assert exit behavior without actually terminating the process.
-// Rationale: makes CLI testable without forking a process.
-var exitFunc = os.Exit
-
 type (
 	validateFunc func(DownloadConfig) error
 	downloadFunc func(context.Context, DownloadConfig, ClientFactory) error
 )
 
 func main() {
+	os.Exit(runMain())
+}
+
+func runMain() int {
 	if err := run(); err != nil {
-		returnWithError(err.Error())
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		return 1
 	}
+
+	return 0
 }
 
 func run() error {
@@ -52,10 +54,4 @@ func runWith(
 	}
 
 	return nil
-}
-
-// Kept as a function to allow test substitution via exitFunc.
-func returnWithError(message string) {
-	fmt.Fprintf(os.Stderr, "Error: %s\n", message)
-	exitFunc(1)
 }

@@ -69,6 +69,7 @@ func readRequiredEnvVars() (map[string]string, map[string]bool, error) {
 		"FLAT_NAMING",
 		"ALWAYS_PULL_BASE",
 		"FORCE_PUSH",
+		"GIT_SIGN_COMMITS",
 	)
 	if err != nil {
 		return nil, nil, err
@@ -118,7 +119,7 @@ func buildConfig(
 		GitUserName:        strings.TrimSpace(os.Getenv("GIT_USER_NAME")),
 		GitUserEmail:       strings.TrimSpace(os.Getenv("GIT_USER_EMAIL")),
 		GitCommitMessage:   resolveCommitMessage(),
-		GitSignCommits:     parseOptionalBoolEnvFalse("GIT_SIGN_COMMITS"),
+		GitSignCommits:     requiredBools["GIT_SIGN_COMMITS"],
 		OverrideBranchName: os.Getenv("OVERRIDE_BRANCH_NAME"),
 		ForcePush:          requiredBools["FORCE_PUSH"],
 		BaseRef:            baseRef,
@@ -177,7 +178,7 @@ func resolveFileExts() ([]string, error) {
 
 func resolveCommitMessage() string {
 	commitMsg := os.Getenv("GIT_COMMIT_MESSAGE")
-	if commitMsg == "" {
+	if strings.TrimSpace(commitMsg) == "" {
 		return "Translations update"
 	}
 	return commitMsg

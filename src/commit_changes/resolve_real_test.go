@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -110,20 +111,26 @@ func TestResolveRealBase_RemoteShowAsLastNetworkFallback(t *testing.T) {
 	}
 }
 
-func TestResolveRealBase_FallbackToMainWhenEverythingFails(t *testing.T) {
+func TestResolveRealBase_ErrorWhenAllFallbacksFail(t *testing.T) {
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
 			return "", fmt.Errorf("nope")
 		},
 	}
-	cfg := &Config{BaseRef: ""} // empty → synthetic
+
+	cfg := &Config{BaseRef: ""}
 
 	got, err := resolveRealBase(runner, cfg)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
+	if err == nil {
+		t.Fatal("expected error when default branch cannot be resolved")
 	}
-	if got != "main" {
-		t.Fatalf("want main, got %s", got)
+
+	if got != "" {
+		t.Fatalf("expected empty branch, got %q", got)
+	}
+
+	if !strings.Contains(err.Error(), "cannot determine the default branch") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -45,13 +46,23 @@ func TestCommitAndPushChanges_ForcePush_UsesForceWithLease(t *testing.T) {
 			}
 
 			// managedpaths: changed tracked files
+			if slices.Equal(args, []string{
+				"-c",
+				"core.quotepath=false",
+				"diff",
+				"--name-only",
+				"-z",
+				"HEAD",
+			}) {
+				return "locales/en.json\x00", nil
+			}
+
 			if len(args) == 5 &&
-				args[0] == "-c" &&
-				args[1] == "core.quotepath=false" &&
-				args[2] == "diff" &&
-				args[3] == "--name-only" &&
-				args[4] == "HEAD" {
-				return "locales/en.json\n", nil
+				args[0] == "fetch" &&
+				args[1] == "--no-tags" &&
+				args[2] == "--prune" &&
+				args[3] == "origin" {
+				return "", nil
 			}
 
 			// managedpaths: no untracked files
@@ -81,7 +92,7 @@ func TestCommitAndPushChanges_ForcePush_UsesForceWithLease(t *testing.T) {
 				t.Fatalf("unexpected binary: %s", name)
 			}
 
-			if len(args) == 4 && args[0] == "config" && args[1] == "--global" {
+			if len(args) == 4 && args[0] == "config" && args[1] == "--local" {
 				return nil
 			}
 
@@ -134,12 +145,15 @@ func TestCommitAndPushChanges_HappyPath_NoForce_NoOverride(t *testing.T) {
 	t.Setenv("FLAT_NAMING", "true")
 	t.Setenv("ALWAYS_PULL_BASE", "true")
 	t.Setenv("FORCE_PUSH", "false")
+	t.Setenv("GIT_SIGN_COMMITS", "false")
 	t.Setenv("FILE_EXT", "json")
 	t.Setenv("BASE_REF", "main")
 	t.Setenv("GIT_COMMIT_MESSAGE", "Translations update")
+	t.Setenv("OVERRIDE_BRANCH_NAME", "")
 
 	var branchName string
 	var pushed []string
+
 	commitCalled := false
 	diffCachedCalled := false
 	addCalled := false
@@ -150,111 +164,127 @@ func TestCommitAndPushChanges_HappyPath_NoForce_NoOverride(t *testing.T) {
 				t.Fatalf("unexpected binary: %s", name)
 			}
 
-			// branch name validation
-			if len(args) == 3 && args[0] == "check-ref-format" && args[1] == "--branch" {
-				return "", nil
-			}
+			switch {
+			// Validate generated branch name.
+			case len(args) == 3 &&
+				args[0] == "check-ref-format" &&
+				args[1] == "--branch":
 
-			// hasRemote(branchName) -> false
-			if len(args) == 5 && args[0] == "ls-remote" && args[1] == "--exit-code" && args[2] == "--heads" && args[3] == "origin" {
+				branchName = args[2]
+
+				if !strings.HasPrefix(branchName, "lok_main_123456_") {
+					t.Fatalf("unexpected branch name: %q", branchName)
+				}
+
+				return "", nil
+
+			// Generated branch does not exist remotely.
+			case slices.Equal(args, []string{
+				"ls-remote",
+				"--exit-code",
+				"--heads",
+				"origin",
+				"refs/heads/" + branchName,
+			}):
 				return "", &mockExitError{code: 2}
-			}
 
-			// managedpaths: HEAD exists
-			if len(args) == 3 && args[0] == "rev-parse" && args[1] == "--verify" && args[2] == "HEAD" {
-				return "ok", nil
-			}
-
-			// managedpaths: changed tracked files
-			if len(args) == 5 &&
-				args[0] == "-c" &&
-				args[1] == "core.quotepath=false" &&
-				args[2] == "diff" &&
-				args[3] == "--name-only" &&
-				args[4] == "HEAD" {
-				return "locales/fr.json\n", nil
-			}
-
-			// managedpaths: no untracked files
-			if len(args) == 5 &&
-				args[0] == "-c" &&
-				args[1] == "core.quotepath=false" &&
-				args[2] == "ls-files" &&
-				args[3] == "--others" &&
-				args[4] == "--exclude-standard" {
+			// Fetch base branch.
+			case slices.Equal(args, []string{
+				"fetch",
+				"--no-tags",
+				"--prune",
+				"origin",
+				"+refs/heads/main:refs/remotes/origin/main",
+			}):
 				return "", nil
-			}
 
-			// commitAndPush: inspect staged diff
-			if len(args) == 3 && args[0] == "diff" && args[1] == "--name-only" && args[2] == "--cached" {
+			// HEAD exists.
+			case slices.Equal(args, []string{
+				"rev-parse", "--verify", "HEAD",
+			}):
+				return "ok", nil
+
+			// Changed tracked translation file.
+			case slices.Equal(args, []string{
+				"-c",
+				"core.quotepath=false",
+				"diff",
+				"--name-only",
+				"-z",
+				"HEAD",
+			}):
+				return "locales/fr.json\x00", nil
+
+			// No untracked files.
+			case slices.Equal(args, []string{
+				"-c",
+				"core.quotepath=false",
+				"ls-files",
+				"--others",
+				"--exclude-standard",
+				"-z",
+			}):
+				return "", nil
+
+			// Staged changes exist.
+			case slices.Equal(args, []string{
+				"diff", "--name-only", "--cached",
+			}):
 				diffCachedCalled = true
 				return "locales/fr.json\n", nil
-			}
 
-			// commit
-			if len(args) >= 1 && args[0] == "commit" {
+			// Commit succeeds.
+			case slices.Equal(args, []string{
+				"commit", "-m", "Translations update",
+			}):
 				commitCalled = true
-
-				found := false
-				for i := 0; i+1 < len(args); i++ {
-					if args[i] == "-m" && args[i+1] == "Translations update" {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Fatalf("expected commit message, got args: %v", args)
-				}
-
 				return "ok", nil
 			}
 
-			return "", nil
+			return "", fmt.Errorf("unexpected capture: git %v", args)
 		},
+
 		RunFunc: func(name string, args ...string) error {
 			if name != "git" {
 				t.Fatalf("unexpected binary: %s", name)
 			}
 
-			// git config --global user.*
-			if len(args) == 4 && args[0] == "config" && args[1] == "--global" {
+			switch {
+			case slices.Equal(args, []string{
+				"config", "--local", "user.name", "test_actor",
+			}):
 				return nil
-			}
 
-			// fetch main
-			if len(args) == 5 && args[0] == "fetch" && args[1] == "--no-tags" && args[2] == "--prune" && args[3] == "origin" {
+			case slices.Equal(args, []string{
+				"config", "--local", "user.email",
+				"test_actor@users.noreply.github.com",
+			}):
 				return nil
-			}
 
-			// checkout -B <branch> origin/main
-			if len(args) == 4 && args[0] == "checkout" && args[1] == "-B" && args[3] == "origin/main" {
-				branchName = args[2]
-				if !strings.HasPrefix(branchName, "lok_main_123456_") {
-					t.Fatalf("unexpected branch name: %q", branchName)
-				}
+			// Checkout generated branch from origin/main.
+			case slices.Equal(args, []string{
+				"checkout", "-B", branchName, "origin/main",
+			}):
 				return nil
-			}
 
-			// unset upstream
-			if len(args) == 3 && args[0] == "branch" && args[1] == "--unset-upstream" {
+			// Remove upstream for newly generated branch.
+			case slices.Equal(args, []string{
+				"branch", "--unset-upstream", branchName,
+			}):
 				return nil
-			}
 
-			// git add -A -- ...
-			if len(args) >= 4 && args[0] == "add" && args[1] == "-A" && args[2] == "--" {
+			// Stage changed translation file.
+			case slices.Equal(args, []string{
+				"add", "-A", "--", "locales/fr.json",
+			}):
 				addCalled = true
-				if args[3] != "locales/fr.json" {
-					t.Fatalf("expected locales/fr.json to be staged, got args: %v", args)
-				}
 				return nil
-			}
 
-			// push origin <branch>
-			if len(args) == 3 && args[0] == "push" && args[1] == "origin" {
-				pushed = args
-				if args[2] != branchName {
-					t.Fatalf("push branch mismatch: want %q got %q", branchName, args[2])
-				}
+			// Push without force.
+			case slices.Equal(args, []string{
+				"push", "origin", branchName,
+			}):
+				pushed = slices.Clone(args)
 				return nil
 			}
 
@@ -264,16 +294,25 @@ func TestCommitAndPushChanges_HappyPath_NoForce_NoOverride(t *testing.T) {
 
 	gotBranch, err := commitAndPushChanges(runner)
 	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if gotBranch != branchName {
 		t.Fatalf("branch mismatch: got %q want %q", gotBranch, branchName)
 	}
+
 	if !diffCachedCalled || !commitCalled || !addCalled {
-		t.Fatalf("expected staged diff + commit + add; got diffCached=%v commit=%v add=%v", diffCachedCalled, commitCalled, addCalled)
+		t.Fatalf(
+			"expected staged diff, commit and add; got diffCached=%t commit=%t add=%t",
+			diffCachedCalled,
+			commitCalled,
+			addCalled,
+		)
 	}
-	if len(pushed) == 0 {
-		t.Fatalf("expected push")
+
+	wantPush := []string{"push", "origin", branchName}
+	if !slices.Equal(pushed, wantPush) {
+		t.Fatalf("push args mismatch: got %v want %v", pushed, wantPush)
 	}
 }
 
@@ -326,12 +365,13 @@ func TestCommitAndPushChanges_NoChanges_ReturnsErrNoChanges_NoPush(t *testing.T)
 	t.Setenv("FLAT_NAMING", "true")
 	t.Setenv("ALWAYS_PULL_BASE", "true")
 	t.Setenv("FORCE_PUSH", "false")
+	t.Setenv("GIT_SIGN_COMMITS", "false")
 	t.Setenv("FILE_EXT", "json")
 	t.Setenv("BASE_REF", "main")
 
 	addCalled := false
-	pushCalled := false
 	commitCalled := false
+	pushCalled := false
 
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
@@ -339,120 +379,112 @@ func TestCommitAndPushChanges_NoChanges_ReturnsErrNoChanges_NoPush(t *testing.T)
 				t.Fatalf("unexpected binary: %s", name)
 			}
 
-			// generated branch validation
-			if len(args) == 3 && args[0] == "check-ref-format" && args[1] == "--branch" {
+			switch {
+			case len(args) == 3 &&
+				args[0] == "check-ref-format" &&
+				args[1] == "--branch":
 				return "", nil
-			}
 
-			// hasRemote(branchName): not found
-			if len(args) == 5 &&
+			case len(args) == 5 &&
 				args[0] == "ls-remote" &&
 				args[1] == "--exit-code" &&
 				args[2] == "--heads" &&
-				args[3] == "origin" {
+				args[3] == "origin" &&
+				strings.HasPrefix(args[4], "refs/heads/"):
 				return "", &mockExitError{code: 2}
-			}
 
-			// managedpaths: HEAD exists
-			if len(args) == 3 &&
-				args[0] == "rev-parse" &&
-				args[1] == "--verify" &&
-				args[2] == "HEAD" {
+			case slices.Equal(args, []string{
+				"fetch",
+				"--no-tags",
+				"--prune",
+				"origin",
+				"+refs/heads/main:refs/remotes/origin/main",
+			}):
+				return "", nil
+
+			case slices.Equal(args, []string{
+				"rev-parse", "--verify", "HEAD",
+			}):
 				return "ok", nil
-			}
 
-			// managedpaths: no tracked changes
-			if len(args) == 5 &&
-				args[0] == "-c" &&
-				args[1] == "core.quotepath=false" &&
-				args[2] == "diff" &&
-				args[3] == "--name-only" &&
-				args[4] == "HEAD" {
+			case slices.Equal(args, []string{
+				"-c",
+				"core.quotepath=false",
+				"diff",
+				"--name-only",
+				"-z",
+				"HEAD",
+			}):
 				return "", nil
-			}
 
-			// managedpaths: no untracked files
-			if len(args) == 5 &&
-				args[0] == "-c" &&
-				args[1] == "core.quotepath=false" &&
-				args[2] == "ls-files" &&
-				args[3] == "--others" &&
-				args[4] == "--exclude-standard" {
+			case slices.Equal(args, []string{
+				"-c",
+				"core.quotepath=false",
+				"ls-files",
+				"--others",
+				"--exclude-standard",
+				"-z",
+			}):
 				return "", nil
-			}
 
-			if len(args) == 5 &&
-				args[0] == "fetch" &&
-				args[1] == "--no-tags" &&
-				args[2] == "--prune" &&
-				args[3] == "origin" {
-				return "", nil
-			}
+			case len(args) >= 1 && args[0] == "diff":
+				t.Fatal("staged diff must not be checked when no managed files changed")
 
-			// must not reach commitAndPush() stage
-			if len(args) == 3 && args[0] == "diff" && args[1] == "--name-only" && args[2] == "--cached" {
-				t.Fatalf("diff --cached must not be called when there are no managed files")
-			}
-			if len(args) >= 1 && args[0] == "commit" {
+			case len(args) >= 1 && args[0] == "commit":
 				commitCalled = true
-				t.Fatalf("commit must not be called when there are no managed files")
+				t.Fatal("commit must not be called")
 			}
 
-			t.Fatalf("unexpected capture: git %v", args)
-			return "", nil
+			return "", fmt.Errorf("unexpected capture: git %v", args)
 		},
+
 		RunFunc: func(name string, args ...string) error {
 			if name != "git" {
 				t.Fatalf("unexpected binary: %s", name)
 			}
 
-			if len(args) == 4 && args[0] == "config" && args[1] == "--global" {
+			switch {
+			case len(args) == 4 &&
+				args[0] == "config" &&
+				args[1] == "--local":
 				return nil
-			}
 
-			if len(args) == 4 &&
+			case len(args) == 4 &&
 				args[0] == "checkout" &&
 				args[1] == "-B" &&
-				args[3] == "origin/main" {
+				args[3] == "origin/main":
 				return nil
-			}
 
-			if len(args) == 3 &&
+			case len(args) == 3 &&
 				args[0] == "branch" &&
-				args[1] == "--unset-upstream" {
+				args[1] == "--unset-upstream":
 				return nil
-			}
 
-			if len(args) >= 4 &&
-				args[0] == "add" &&
-				args[1] == "-A" &&
-				args[2] == "--" {
+			case len(args) >= 1 && args[0] == "add":
 				addCalled = true
-				t.Fatalf("git add must not be called when there are no managed files")
-			}
+				t.Fatal("git add must not be called")
 
-			if len(args) >= 1 && args[0] == "push" {
+			case len(args) >= 1 && args[0] == "push":
 				pushCalled = true
-				t.Fatalf("push must not be called when there are no managed files")
+				t.Fatal("git push must not be called")
 			}
 
-			t.Fatalf("unexpected run: git %v", args)
-			return nil
+			return fmt.Errorf("unexpected run: git %v", args)
 		},
 	}
 
 	_, err := commitAndPushChanges(runner)
-	if err != ErrNoChanges {
+	if !errors.Is(err, ErrNoChanges) {
 		t.Fatalf("want ErrNoChanges, got %v", err)
 	}
-	if addCalled {
-		t.Fatalf("git add must not be called")
-	}
-	if commitCalled {
-		t.Fatalf("commit must not be called")
-	}
-	if pushCalled {
-		t.Fatalf("push must not be called")
+
+	if addCalled || commitCalled || pushCalled {
+		t.Fatalf(
+			"unexpected git operations: add=%t commit=%t push=%t",
+			addCalled,
+			commitCalled,
+			pushCalled,
+		)
 	}
 }
 
@@ -490,10 +522,14 @@ func TestCommitAndPushChanges_SyntheticBase_UsesRemoteHEAD(t *testing.T) {
 	t.Setenv("FLAT_NAMING", "true")
 	t.Setenv("ALWAYS_PULL_BASE", "true")
 	t.Setenv("FORCE_PUSH", "false")
+	t.Setenv("GIT_SIGN_COMMITS", "false")
 	t.Setenv("FILE_EXT", "json")
-	t.Setenv("BASE_REF", "123/merge") // synthetic
+	t.Setenv("BASE_REF", "123/merge")
+	t.Setenv("GIT_COMMIT_MESSAGE", "Translations update")
 
+	var branchName string
 	var fetched []string
+	var pushed bool
 
 	runner := &MockCommandRunner{
 		CaptureFunc: func(name string, args ...string) (string, error) {
@@ -501,140 +537,155 @@ func TestCommitAndPushChanges_SyntheticBase_UsesRemoteHEAD(t *testing.T) {
 				t.Fatalf("unexpected binary: %s", name)
 			}
 
-			// resolveRealBase: git ls-remote --symref origin HEAD
-			if len(args) == 4 &&
-				args[0] == "ls-remote" &&
-				args[1] == "--symref" &&
-				args[2] == "origin" &&
-				args[3] == "HEAD" {
+			switch {
+			// Resolve synthetic base using remote HEAD.
+			case slices.Equal(args, []string{
+				"ls-remote", "--symref", "origin", "HEAD",
+			}):
 				return "ref: refs/heads/master\tHEAD\n012345\tHEAD\n", nil
-			}
 
-			// hasRemote(branchName): not found
-			if len(args) == 5 &&
-				args[0] == "ls-remote" &&
-				args[1] == "--exit-code" &&
-				args[2] == "--heads" &&
-				args[3] == "origin" {
+			// Validate generated branch name.
+			case len(args) == 3 &&
+				args[0] == "check-ref-format" &&
+				args[1] == "--branch":
+
+				branchName = args[2]
+
+				if !strings.HasPrefix(branchName, "lok_master_123456_") {
+					t.Fatalf("unexpected branch name: %q", branchName)
+				}
+
+				return "", nil
+
+			// Generated branch does not exist remotely.
+			case slices.Equal(args, []string{
+				"ls-remote",
+				"--exit-code",
+				"--heads",
+				"origin",
+				"refs/heads/" + branchName,
+			}):
 				return "", &mockExitError{code: 2}
-			}
 
-			// fetch master
-			if len(args) == 5 &&
-				args[0] == "fetch" &&
-				args[1] == "--no-tags" &&
-				args[2] == "--prune" &&
-				args[3] == "origin" {
+			// Fetch the resolved base branch.
+			case slices.Equal(args, []string{
+				"fetch",
+				"--no-tags",
+				"--prune",
+				"origin",
+				"+refs/heads/master:refs/remotes/origin/master",
+			}):
 				fetched = append(fetched, args[4])
 				return "", nil
-			}
 
-			// managedpaths: HEAD exists
-			if len(args) == 3 &&
-				args[0] == "rev-parse" &&
-				args[1] == "--verify" &&
-				args[2] == "HEAD" {
+			// HEAD exists.
+			case slices.Equal(args, []string{
+				"rev-parse", "--verify", "HEAD",
+			}):
+				return "ok", nil
+
+			// Tracked translation file changed.
+			case slices.Equal(args, []string{
+				"-c",
+				"core.quotepath=false",
+				"diff",
+				"--name-only",
+				"-z",
+				"HEAD",
+			}):
+				return "locales/fr.json\x00", nil
+
+			// No untracked files.
+			case slices.Equal(args, []string{
+				"-c",
+				"core.quotepath=false",
+				"ls-files",
+				"--others",
+				"--exclude-standard",
+				"-z",
+			}):
+				return "", nil
+
+			// Staged changes exist.
+			case slices.Equal(args, []string{
+				"diff", "--name-only", "--cached",
+			}):
+				return "locales/fr.json\n", nil
+
+			// Commit succeeds.
+			case slices.Equal(args, []string{
+				"commit", "-m", "Translations update",
+			}):
 				return "ok", nil
 			}
 
-			// managedpaths: tracked changed files
-			if len(args) == 5 &&
-				args[0] == "-c" &&
-				args[1] == "core.quotepath=false" &&
-				args[2] == "diff" &&
-				args[3] == "--name-only" &&
-				args[4] == "HEAD" {
-				return "locales/fr.json\n", nil
-			}
-
-			// managedpaths: no untracked files
-			if len(args) == 5 &&
-				args[0] == "-c" &&
-				args[1] == "core.quotepath=false" &&
-				args[2] == "ls-files" &&
-				args[3] == "--others" &&
-				args[4] == "--exclude-standard" {
-				return "", nil
-			}
-
-			// commitAndPush: staged diff -> has changes
-			if len(args) == 3 &&
-				args[0] == "diff" &&
-				args[1] == "--name-only" &&
-				args[2] == "--cached" {
-				return "locales/fr.json\n", nil
-			}
-
-			// commit ok
-			if len(args) >= 1 && args[0] == "commit" {
-				return "ok", nil
-			}
-
-			// validate generated branch name
-			if len(args) == 3 &&
-				args[0] == "check-ref-format" &&
-				args[1] == "--branch" {
-				if !strings.HasPrefix(args[2], "lok_master_123456_") {
-					t.Fatalf("unexpected branch name for validation: %q", args[2])
-				}
-				return "", nil
-			}
-
-			t.Fatalf("unexpected capture: git %v", args)
-			return "", nil
+			return "", fmt.Errorf("unexpected capture: git %v", args)
 		},
+
 		RunFunc: func(name string, args ...string) error {
 			if name != "git" {
 				t.Fatalf("unexpected binary: %s", name)
 			}
 
-			if len(args) == 4 && args[0] == "config" && args[1] == "--global" {
+			switch {
+			case slices.Equal(args, []string{
+				"config", "--local", "user.name", "test_actor",
+			}):
+				return nil
+
+			case slices.Equal(args, []string{
+				"config", "--local", "user.email",
+				"test_actor@users.noreply.github.com",
+			}):
+				return nil
+
+			// Checkout must use origin/master.
+			case slices.Equal(args, []string{
+				"checkout", "-B", branchName, "origin/master",
+			}):
+				return nil
+
+			case slices.Equal(args, []string{
+				"branch", "--unset-upstream", branchName,
+			}):
+				return nil
+
+			// Stage the changed translation file.
+			case slices.Equal(args, []string{
+				"add", "-A", "--", "locales/fr.json",
+			}):
+				return nil
+
+			// Push the generated branch.
+			case slices.Equal(args, []string{
+				"push", "origin", branchName,
+			}):
+				pushed = true
 				return nil
 			}
 
-			// checkout must be from origin/master
-			if len(args) == 4 && args[0] == "checkout" && args[1] == "-B" {
-				if args[3] != "origin/master" {
-					t.Fatalf("expected checkout from origin/master, got %q", args[3])
-				}
-				return nil
-			}
-
-			if len(args) == 3 && args[0] == "branch" && args[1] == "--unset-upstream" {
-				return nil
-			}
-
-			// git add -A -- locales/fr.json
-			if len(args) >= 4 && args[0] == "add" && args[1] == "-A" && args[2] == "--" {
-				if args[3] != "locales/fr.json" {
-					t.Fatalf("expected locales/fr.json to be staged, got args: %v", args)
-				}
-				return nil
-			}
-
-			if len(args) >= 1 && args[0] == "push" {
-				return nil
-			}
-
-			t.Fatalf("unexpected run: git %v", args)
-			return nil
+			return fmt.Errorf("unexpected run: git %v", args)
 		},
 	}
 
-	_, err := commitAndPushChanges(runner)
+	gotBranch, err := commitAndPushChanges(runner)
 	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
-	foundMaster := false
-	for _, refspec := range fetched {
-		if strings.Contains(refspec, "+refs/heads/master:refs/remotes/origin/master") {
-			foundMaster = true
-			break
-		}
+	if gotBranch != branchName {
+		t.Fatalf("expected branch %q, got %q", branchName, gotBranch)
 	}
-	if !foundMaster {
-		t.Fatalf("expected fetch refspec for master, got %v", fetched)
+
+	if !slices.Contains(
+		fetched,
+		"+refs/heads/master:refs/remotes/origin/master",
+	) {
+		t.Fatalf("expected fetch of master, got %v", fetched)
+	}
+
+	if !pushed {
+		t.Fatal("expected generated branch to be pushed")
 	}
 }
 
@@ -755,21 +806,24 @@ func TestCommitAndPushChanges_StagedDiffEmptyAfterAdd_ReturnsErrNoChanges(t *tes
 				return "ok", nil
 			}
 
-			if len(args) == 5 &&
+			if len(args) == 6 &&
 				args[0] == "-c" &&
 				args[1] == "core.quotepath=false" &&
 				args[2] == "diff" &&
 				args[3] == "--name-only" &&
-				args[4] == "HEAD" {
-				return "locales/fr.json\n", nil
+				args[4] == "-z" &&
+				args[5] == "HEAD" {
+				return "locales/fr.json\x00", nil
 			}
 
-			if len(args) == 5 &&
-				args[0] == "-c" &&
-				args[1] == "core.quotepath=false" &&
-				args[2] == "ls-files" &&
-				args[3] == "--others" &&
-				args[4] == "--exclude-standard" {
+			if slices.Equal(args, []string{
+				"-c",
+				"core.quotepath=false",
+				"ls-files",
+				"--others",
+				"--exclude-standard",
+				"-z",
+			}) {
 				return "", nil
 			}
 
@@ -785,7 +839,7 @@ func TestCommitAndPushChanges_StagedDiffEmptyAfterAdd_ReturnsErrNoChanges(t *tes
 				t.Fatalf("unexpected binary: %s", name)
 			}
 
-			if len(args) == 4 && args[0] == "config" && args[1] == "--global" {
+			if len(args) == 4 && args[0] == "config" && args[1] == "--local" {
 				return nil
 			}
 
@@ -854,25 +908,28 @@ func TestCommitAndPushChanges_AddFails(t *testing.T) {
 				return "ok", nil
 			}
 
-			if len(args) == 5 &&
+			if len(args) == 6 &&
 				args[0] == "-c" &&
 				args[1] == "core.quotepath=false" &&
 				args[2] == "diff" &&
 				args[3] == "--name-only" &&
-				args[4] == "HEAD" {
-				return "locales/fr.json\n", nil
+				args[4] == "-z" &&
+				args[5] == "HEAD" {
+				return "locales/fr.json\x00", nil
 			}
 
 			if len(args) == 5 && args[0] == "fetch" && args[1] == "--no-tags" && args[2] == "--prune" && args[3] == "origin" {
 				return "", nil
 			}
 
-			if len(args) == 5 &&
-				args[0] == "-c" &&
-				args[1] == "core.quotepath=false" &&
-				args[2] == "ls-files" &&
-				args[3] == "--others" &&
-				args[4] == "--exclude-standard" {
+			if slices.Equal(args, []string{
+				"-c",
+				"core.quotepath=false",
+				"ls-files",
+				"--others",
+				"--exclude-standard",
+				"-z",
+			}) {
 				return "", nil
 			}
 
@@ -884,7 +941,7 @@ func TestCommitAndPushChanges_AddFails(t *testing.T) {
 				t.Fatalf("unexpected binary: %s", name)
 			}
 
-			if len(args) == 4 && args[0] == "config" && args[1] == "--global" {
+			if len(args) == 4 && args[0] == "config" && args[1] == "--local" {
 				return nil
 			}
 

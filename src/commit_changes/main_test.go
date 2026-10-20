@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -446,60 +445,6 @@ func TestSanitizeString(t *testing.T) {
 					"sanitizeString(%q, %d) = %q; want %q",
 					tt.input,
 					tt.maxLength,
-					got,
-					tt.expected,
-				)
-			}
-		})
-	}
-}
-
-func TestSplitNonEmptyLines(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected []string
-	}{
-		{
-			name:     "empty input",
-			input:    "",
-			expected: nil,
-		},
-		{
-			name:     "single line",
-			input:    "one",
-			expected: []string{"one"},
-		},
-		{
-			name:     "multiple lines",
-			input:    "one\ntwo\nthree",
-			expected: []string{"one", "two", "three"},
-		},
-		{
-			name:     "skips empty lines",
-			input:    "\none\n\n\ntwo\n",
-			expected: []string{"one", "two"},
-		},
-		{
-			name:     "trims whitespace around lines",
-			input:    "  one  \n\t two\t\n   \n three ",
-			expected: []string{"one", "two", "three"},
-		},
-		{
-			name:     "trailing newline does not create empty item",
-			input:    "one\ntwo\n",
-			expected: []string{"one", "two"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := splitNonEmptyLines(tt.input)
-
-			if !slices.Equal(got, tt.expected) {
-				t.Fatalf(
-					"splitNonEmptyLines(%q) = %v, want %v",
-					tt.input,
 					got,
 					tt.expected,
 				)

@@ -280,18 +280,7 @@ runs:
           exit 1
         }
 
-        echo "Download complete! Detecting changed files..."
-
-        CMD_PATH="${{ github.action_path }}/bin/detect_changed_files_${PLATFORM}"
-        if [ ! -f "$CMD_PATH" ]; then
-          echo "Error: Binary for platform '${PLATFORM}' not found!"
-          exit 1
-        fi
-        chmod +x "$CMD_PATH"
-        "$CMD_PATH" || {
-          echo "Error: detect_changed_files script failed with exit code $?"
-          exit 1
-        }
+        echo "Download complete!"
 
     - name: Run post-processing command
       if: inputs.post_process_command != ''
@@ -328,9 +317,37 @@ runs:
           echo "Post-processing finished successfully."
         fi
 
+    - name: Detect changed translation files
+      id: detect-changes
+      shell: bash
+      env:
+        FILE_FORMAT: "${{ inputs.file_format }}"
+        FILE_EXT: "${{ inputs.file_ext }}"
+        TRANSLATIONS_PATH: "${{ inputs.translations_path }}"
+        BASE_LANG: "${{ inputs.base_lang }}"
+        ALWAYS_PULL_BASE: "${{ inputs.always_pull_base }}"
+        FLAT_NAMING: "${{ inputs.flat_naming }}"
+        PLATFORM: "${{ steps.detect-platform.outputs.platform }}"
+      run: |
+        set -euo pipefail
+
+        echo "Detecting changed translation files..."
+
+        CMD_PATH="${{ github.action_path }}/bin/detect_changed_files_${PLATFORM}"
+        if [ ! -f "$CMD_PATH" ]; then
+          echo "Error: Binary for platform '${PLATFORM}' not found!"
+          exit 1
+        fi
+
+        chmod +x "$CMD_PATH"
+        "$CMD_PATH" || {
+          echo "Error: detect_changed_files script failed with exit code $?"
+          exit 1
+        }
+
     - name: Commit changes
       id: create-commit
-      if: steps.pull-files.outputs.has_changes == 'true'
+      if: steps.detect-changes.outputs.has_changes == 'true'
       env:
         BASE_REF: "${{ inputs.override_base_branch || github.event.pull_request.base.ref || github.ref_name }}"
         HEAD_REF: "${{ github.event.pull_request.head.ref || '' }}"
@@ -369,7 +386,7 @@ runs:
         echo "Commit changes script has been executed."
 
     - name: Create or Update Pull Request
-      if: steps.pull-files.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'
+      if: steps.detect-changes.outputs.has_changes == 'true' && steps.create-commit.outputs.commit_created == 'true'
       env:
         BRANCH_NAME: "${{ steps.create-commit.outputs.branch_name }}"
         BASE_REF: "${{ inputs.override_base_branch || github.event.pull_request.base.ref || github.ref_name }}"
@@ -411,7 +428,7 @@ runs:
       run: |
         set -e
 
-        if [ "${{ steps.pull-files.outputs.has_changes }}" != "true" ]; then
+        if [ "${{ steps.detect-changes.outputs.has_changes }}" != "true" ]; then
           echo "No changes detected, nothing to commit."
           exit 0
         fi

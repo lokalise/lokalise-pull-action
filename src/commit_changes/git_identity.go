@@ -7,11 +7,11 @@ import "fmt"
 func setGitUser(config *Config, runner CommandRunner) error {
 	username, email := resolveGitIdentity(config)
 
-	if err := runner.Run("git", "config", "--global", "user.name", username); err != nil {
+	if err := runner.Run("git", "config", "--local", "user.name", username); err != nil {
 		return fmt.Errorf("failed to set git user.name: %w", err)
 	}
 
-	if err := runner.Run("git", "config", "--global", "user.email", email); err != nil {
+	if err := runner.Run("git", "config", "--local", "user.email", email); err != nil {
 		return fmt.Errorf("failed to set git user.email: %w", err)
 	}
 

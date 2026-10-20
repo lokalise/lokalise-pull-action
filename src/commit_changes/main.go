@@ -106,19 +106,6 @@ func writeOutputs(branchName string, write writeFunc) error {
 	return nil
 }
 
-func splitNonEmptyLines(s string) []string {
-	var result []string
-
-	for line := range strings.SplitSeq(s, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			result = append(result, line)
-		}
-	}
-
-	return result
-}
-
 // isExitCode checks whether err has the given exit code.
 func isExitCode(err error, code int) bool {
 	type exitCoder interface {

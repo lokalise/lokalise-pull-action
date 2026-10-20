@@ -88,11 +88,20 @@ func restoreFileFromStash(
 }
 
 func listStashedFiles(runner CommandRunner, stashRef string) ([]string, error) {
-	out, err := runner.Capture("git", "stash", "show", "--name-only", "--include-untracked", stashRef)
+	out, err := runner.Capture(
+		"git",
+		"stash",
+		"show",
+		"--name-only",
+		"-z",
+		"--include-untracked",
+		stashRef,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("%w\nOutput: %s", err, strings.TrimSpace(out))
 	}
-	return splitNonEmptyLines(out), nil
+
+	return splitNullSeparatedPaths(out), nil
 }
 
 func restoreStashBestEffort(runner CommandRunner, stashHash string) {
@@ -161,4 +170,16 @@ func dropStashByHash(runner CommandRunner, stashHash string) error {
 	}
 
 	return nil
+}
+
+func splitNullSeparatedPaths(s string) []string {
+	var result []string
+
+	for path := range strings.SplitSeq(s, "\x00") {
+		if path != "" {
+			result = append(result, path)
+		}
+	}
+
+	return result
 }

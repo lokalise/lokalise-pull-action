@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -11,7 +12,6 @@ import (
 //  1. git ls-remote --symref origin HEAD
 //  2. git symbolic-ref --short refs/remotes/origin/HEAD
 //  3. git remote show origin
-//  4. fallback to "main"
 func resolveRealBase(runner CommandRunner, cfg *Config) (string, error) {
 	base := strings.TrimSpace(cfg.BaseRef)
 	if !isSyntheticRef(base) {
@@ -27,8 +27,10 @@ func resolveRealBase(runner CommandRunner, cfg *Config) (string, error) {
 		return branch, nil
 	}
 
-	fmt.Println("Could not resolve default branch from origin; falling back to main")
-	return "main", nil
+	return "", fmt.Errorf(
+		"cannot determine the default branch from origin; " +
+			"set override_base_branch explicitly",
+	)
 }
 
 func resolveFallbackBase(runner CommandRunner) (string, string, bool) {
@@ -157,15 +159,15 @@ func parseRemoteShowHeadBranchLine(line string) (string, bool) {
 
 // isSyntheticRef reports whether ref is a CI-generated pseudo-ref that
 // should not be used directly as the base branch.
+var syntheticPRRef = regexp.MustCompile(
+	`^(?:refs/)?pull/[0-9]+/(?:merge|head)$|^[0-9]+/(?:merge|head)$`,
+)
+
 func isSyntheticRef(ref string) bool {
 	ref = strings.ToLower(strings.TrimSpace(ref))
 
-	if ref == "" || ref == "merge" || ref == "head" {
-		return true
-	}
-
-	return strings.HasPrefix(ref, "refs/pull/") ||
-		strings.HasPrefix(ref, "pull/") ||
-		strings.HasSuffix(ref, "/merge") ||
-		strings.HasSuffix(ref, "/head")
+	return ref == "" ||
+		ref == "merge" ||
+		ref == "head" ||
+		syntheticPRRef.MatchString(ref)
 }
