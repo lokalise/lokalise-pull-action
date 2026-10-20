@@ -47,7 +47,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.2"
           check-latest: false
           cache: true
           cache-dependency-path: src/${{ matrix.module }}/go.sum
@@ -135,9 +135,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          UPX_VERSION="5.2.0"
+          UPX_VERSION="5.2.1"
           UPX_ARCHIVE="upx-${UPX_VERSION}-amd64_linux.tar.xz"
-          UPX_SHA256="3db5d3294707439db97866feab8d75d800f028f48481a40547411824da4288a1"
+          UPX_SHA256="402162AAD30AF47E60DBD767FB2E64CA394ACE9727BA1F40283641F1D1B91657"
 
           curl \
             --fail \

@@ -26,11 +26,9 @@ function isSyntheticRef(ref) {
     !value ||
     value === "merge" ||
     value === "head" ||
-    /^(\d+)\/(merge|head)$/.test(value) ||
-    value.startsWith("refs/pull/") ||
-    value.startsWith("pull/") ||
-    value.endsWith("/merge") ||
-    value.endsWith("/head")
+    /^\d+\/(merge|head)$/.test(value) ||
+    /^refs\/pull\/\d+\/(merge|head)$/.test(value) ||
+    /^pull\/\d+\/(merge|head)$/.test(value)
   );
 }
 

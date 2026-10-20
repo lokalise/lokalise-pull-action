@@ -363,7 +363,6 @@ runs:
         chmod +x "$CMD_PATH"
         "$CMD_PATH" || {
           echo "Error: commit_changes script failed with exit code $?"
-          echo "has_changes=false" >> $GITHUB_OUTPUT
           exit 1
         }
 
@@ -382,7 +381,6 @@ runs:
         PR_DRAFT: "${{ inputs.pr_draft }}"
         PR_ASSIGNEES: "${{ inputs.pr_assignees }}"
       id: create-update-pr
-      # actions/github-script@v9.0.0
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
       with:
         github-token: ${{ inputs.custom_github_token || github.token }}
